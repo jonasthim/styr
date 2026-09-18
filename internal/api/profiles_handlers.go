@@ -21,7 +21,7 @@ func registerProfilesRoutes(r chi.Router, d *Deps) {
 
 // allowedModes are the permission modes Styr accepts, mirroring
 // internal/harness's validModes: the CLI's "skip all permission checks"
-// mode (bypassPermissions) is deliberately never accepted.
+// mode (the skip-all-checks mode) is deliberately never accepted.
 var allowedModes = map[string]bool{
 	"default":     true,
 	"acceptEdits": true,
