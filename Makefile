@@ -2,7 +2,8 @@ VERSION := $(shell cat VERSION)
 COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
 LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
 
-.PHONY: build build-go web test check lint fmt vet dev-backend dev-web e2e clean
+.PHONY: build build-go web test check lint fmt vet dev-backend dev-web e2e clean \
+	deploy-sync deploy-sync-check docker
 
 build: web build-go
 
@@ -35,6 +36,19 @@ dev-web:
 
 e2e:
 	cd web && npx playwright test
+
+deploy-sync:
+	./deploy/build-installer.sh
+
+# CI check: fails if deploy/install.sh was not regenerated after an edit to
+# deploy/install.sh.in or one of the files it embeds.
+deploy-sync-check: deploy-sync
+	git diff --exit-code -- deploy/install.sh || (echo "deploy/install.sh is out of date; run 'make deploy-sync' and commit it" && exit 1)
+
+docker:
+	docker build -f deploy/Dockerfile \
+		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
+		-t styr:$(VERSION) -t styr:latest .
 
 clean:
 	rm -rf bin web/dist/*

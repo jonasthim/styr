@@ -1,0 +1,26 @@
+# Runs the published image. Copy deploy/config.example.yaml to
+# ./config.yaml and a .env next to this file (STYR_SECRET_KEY,
+# STYR_OIDC_CLIENT_SECRET, ...), then:
+#
+#   docker compose -f deploy/compose.yaml up -d
+#
+# To build the image locally instead of pulling ghcr.io/jonasthim/styr,
+# run `docker compose -f deploy/compose.yaml up -d --build`.
+services:
+  styr:
+    image: ghcr.io/jonasthim/styr:latest
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - styr-data:/var/lib/styr
+      - ./workspaces:/var/lib/styr/workspaces
+    ports:
+      - 127.0.0.1:8080:8080
+    restart: unless-stopped
+
+volumes:
+  styr-data:
