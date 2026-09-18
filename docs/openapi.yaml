@@ -1612,6 +1612,42 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/templates/{id}/run:
+    post:
+      summary: Run a template by hand
+      description: >
+        Starts a run of the template as the UI's "run this template now"
+        does: origin ui. A template whose loop_until is set loops from
+        here exactly as it would from a webhook or a schedule. vars is
+        optional; an empty or missing body means no vars.
+      operationId: runTemplate
+      tags: [templates]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                vars:
+                  type: object
+      responses:
+        "202":
+          description: Accepted; the run has been started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunID"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
   /api/v1/triggers:
     get:
       summary: List triggers
@@ -1889,6 +1925,11 @@ paths:
           description: Filter to runs started by this trigger id.
           schema:
             type: string
+        - name: loop_id
+          in: query
+          description: Filter to runs that are an iteration of this loop.
+          schema:
+            type: string
         - name: limit
           in: query
           schema:
@@ -1906,7 +1947,10 @@ paths:
   /api/v1/runs/{id}:
     get:
       summary: Get a run
-      description: Includes the session, delivery and template it was started from, each null when unavailable.
+      description: >
+        Includes the session, delivery, template and loop it was started
+        from, each null when unavailable (or when the run belongs to no
+        loop).
       operationId: getRun
       tags: [runs]
       parameters:
@@ -1924,6 +1968,334 @@ paths:
                 $ref: "#/components/schemas/RunView"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /api/v1/schedules:
+    get:
+      summary: List schedules
+      description: Every schedule visible to the current user (owned, shared, or — for an admin — all).
+      operationId: listSchedules
+      tags: [schedules]
+      responses:
+        "200":
+          description: Every visible schedule
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Schedule"
+    post:
+      summary: Create a schedule
+      description: >
+        shared marks the schedule as owned by nobody rather than the
+        caller; only an admin may set it. next_run_at is computed from
+        cron at creation time.
+      operationId: createSchedule
+      tags: [schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/schedules/preview:
+    post:
+      summary: Preview a cron expression
+      description: >
+        Validates cron and returns its next 5 fire times plus a
+        human-readable description, without creating a schedule. This
+        literal path is matched before /schedules/{id}, so "preview" is
+        never mistaken for a schedule id.
+      operationId: previewSchedule
+      tags: [schedules]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cron:
+                  type: string
+              required: [cron]
+      responses:
+        "200":
+          description: The next 5 fire times and a description
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchedulePreview"
+        "422":
+          description: The cron expression failed to parse
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/schedules/{id}:
+    get:
+      summary: Get a schedule
+      operationId: getSchedule
+      tags: [schedules]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update a schedule
+      description: >
+        A full replace of the schedule's mutable configuration, same rule
+        as PATCH /triggers/{id}. Changing cron recomputes next_run_at from
+        now; leaving it unchanged leaves next_run_at (and therefore the
+        schedule's cadence) alone.
+      operationId: patchSchedule
+      tags: [schedules]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ScheduleInput"
+      responses:
+        "200":
+          description: The updated schedule
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Schedule"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a schedule
+      description: Its firing history is deleted too (cascade).
+      operationId: deleteSchedule
+      tags: [schedules]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/schedules/{id}/run:
+    post:
+      summary: Run a schedule now
+      description: Fires the schedule immediately, ignoring its cron and next_run_at (no overlap check, unlike a tick).
+      operationId: runScheduleNow
+      tags: [schedules]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted; the run has been started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunID"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/schedules/{id}/firings:
+    get:
+      summary: List a schedule's firing history
+      operationId: listScheduleFirings
+      tags: [schedules]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The schedule's firings, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScheduleFiring"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/loops:
+    get:
+      summary: List loops
+      operationId: listLoops
+      tags: [loops]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [running, done, exhausted, failed, stopped]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching loops, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Loop"
+
+  /api/v1/loops/{id}:
+    get:
+      summary: Get a loop
+      description: Includes every iteration's run, in order, and the template they all render.
+      operationId: getLoop
+      tags: [loops]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The loop
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoopView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/loops/{id}/stop:
+    post:
+      summary: Stop a loop
+      description: Ends a running loop and closes its session, so the iteration in flight stops costing anything.
+      operationId: stopLoop
+      tags: [loops]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted; the loop has been stopped
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The loop is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/stats/gantt:
+    get:
+      summary: Fleet Gantt of session activity
+      description: >
+        One lane per session active in [from, to], with segments derived
+        from that session's events (running, waiting or idle), capped at
+        200 lanes.
+      operationId: statsGantt
+      tags: [stats]
+      parameters:
+        - name: from
+          in: query
+          description: RFC3339 timestamp; defaults to 6 hours before now.
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          description: RFC3339 timestamp; defaults to now.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The Gantt lanes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lanes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/GanttLane"
+                required: [lanes]
+        "422":
+          description: from is not strictly before to, or the window exceeds 7 days
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/stats/costs:
+    get:
+      summary: Cost dashboard
+      description: >
+        Totals per day, per owning user, per origin and the top templates
+        by spend, over a trailing window of days.
+      operationId: statsCosts
+      tags: [stats]
+      parameters:
+        - name: days
+          in: query
+          description: Trailing window size; defaults to 30, capped at 365.
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: The cost dashboard
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Costs"
 
   /api/v1/notifications:
     get:
@@ -2756,6 +3128,12 @@ components:
         report_schema:
           type: string
           description: JSON schema text; empty means no structured report is expected.
+        loop_until:
+          type: string
+          description: The report field that ends a loop started from this template; empty means it does not loop.
+        loop_max:
+          type: integer
+          description: Iteration budget for a loop started from this template.
         shared:
           type: boolean
           description: Owned by nobody rather than the caller. Admin only.
@@ -2782,6 +3160,10 @@ components:
           type: string
         report_schema:
           type: string
+        loop_until:
+          type: string
+        loop_max:
+          type: integer
         created_at:
           type: string
           format: date-time
@@ -2798,6 +3180,8 @@ components:
         - prompt_template
         - system_prompt
         - report_schema
+        - loop_until
+        - loop_max
         - created_at
         - updated_at
 
@@ -2937,6 +3321,12 @@ components:
           type: [string, "null"]
         origin:
           type: string
+        loop_id:
+          type: string
+          description: The loop this run is an iteration of; empty for an ordinary one-shot run.
+        iteration:
+          type: integer
+          description: 1-based iteration number within its loop; 0 when the run belongs to no loop.
         started_at:
           type: string
           format: date-time
@@ -2962,6 +3352,8 @@ components:
         - trigger_id
         - delivery_id
         - origin
+        - loop_id
+        - iteration
         - started_at
         - finished_at
         - outcome
@@ -2969,8 +3361,19 @@ components:
         - summary
         - cost_usd
 
+    RunID:
+      description: The {run_id} shape every "start a run" endpoint answers with.
+      type: object
+      properties:
+        run_id:
+          type: string
+      required: [run_id]
+
     RunView:
-      description: A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted).
+      description: >
+        A Run plus the records it was started from, each null when
+        unavailable (e.g. the template was since deleted, or the run
+        belongs to no loop).
       type: object
       properties:
         run:
@@ -2987,7 +3390,11 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Template"
             - type: "null"
-      required: [run, session, delivery, template]
+        loop:
+          oneOf:
+            - $ref: "#/components/schemas/Loop"
+            - type: "null"
+      required: [run, session, delivery, template, loop]
 
     NotificationChannel:
       description: Never includes the token — see token_present.
@@ -3014,3 +3421,252 @@ components:
           type: string
           format: date-time
       required: [id, kind, name, url, token_present, events, enabled, created_at]
+
+    ScheduleInput:
+      description: The create/update request body for POST/PATCH /schedules(/{id}).
+      type: object
+      properties:
+        name:
+          type: string
+        template_id:
+          type: string
+        cron:
+          type: string
+          description: A standard 5-field cron expression, or a descriptor (@hourly, @daily, @every 1h30m, ...).
+        vars:
+          type: object
+          description: Fixed variables merged into every run this schedule starts, alongside the schedule key (name, fired_at).
+        enabled:
+          type: boolean
+          description: Update only; omit to leave enabled state unchanged. Create treats omission as true.
+        shared:
+          type: boolean
+          description: Owned by nobody rather than the caller. Admin only.
+      required: [name, template_id, cron]
+
+    Schedule:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: [string, "null"]
+        name:
+          type: string
+        template_id:
+          type: string
+        cron:
+          type: string
+        enabled:
+          type: boolean
+        vars:
+          type: object
+        last_run_at:
+          type: [string, "null"]
+          format: date-time
+        last_outcome:
+          type: string
+        next_run_at:
+          type: [string, "null"]
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - owner_id
+        - name
+        - template_id
+        - cron
+        - enabled
+        - vars
+        - last_run_at
+        - last_outcome
+        - next_run_at
+        - created_at
+        - updated_at
+
+    ScheduleFiring:
+      description: One row in a schedule's firing history.
+      type: object
+      properties:
+        id:
+          type: string
+        schedule_id:
+          type: string
+        fired_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [started, skipped_overlap, failed]
+        reason:
+          type: string
+        run_id:
+          type: [string, "null"]
+      required: [id, schedule_id, fired_at, status, reason, run_id]
+
+    SchedulePreview:
+      type: object
+      properties:
+        next:
+          type: array
+          items:
+            type: string
+            format: date-time
+          minItems: 5
+          maxItems: 5
+        description:
+          type: string
+      required: [next, description]
+
+    Loop:
+      description: >
+        One until-done repetition of a template: every iteration is a run,
+        and all of them share the loop's session.
+      type: object
+      properties:
+        id:
+          type: string
+        template_id:
+          type: string
+        session_id:
+          type: [string, "null"]
+          description: Nullable because a session can be deleted while its loop record stays as history.
+        origin:
+          type: string
+          description: What started the loop (webhook, schedule or ui), carried onto every run the loop creates.
+        origin_ref:
+          type: string
+        until_field:
+          type: string
+          description: The report field whose truthiness ends the loop.
+        max_iterations:
+          type: integer
+        iteration:
+          type: integer
+          description: The number of the run currently (or last) started, counting from 1.
+        state:
+          type: string
+          enum: [running, done, exhausted, failed, stopped]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - template_id
+        - session_id
+        - origin
+        - origin_ref
+        - until_field
+        - max_iterations
+        - iteration
+        - state
+        - created_at
+        - updated_at
+
+    LoopView:
+      description: A Loop together with every iteration's run, in order, and the template they all render.
+      type: object
+      properties:
+        loop:
+          $ref: "#/components/schemas/Loop"
+        runs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Run"
+        template:
+          oneOf:
+            - $ref: "#/components/schemas/Template"
+            - type: "null"
+      required: [loop, runs, template]
+
+    Segment:
+      description: One span of a session's timeline in the fleet Gantt.
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [running, waiting, idle]
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+      required: [kind, start, end]
+
+    GanttLane:
+      description: One session's row in the fleet Gantt.
+      type: object
+      properties:
+        session_id:
+          type: string
+        title:
+          type: string
+        owner:
+          type: string
+        state:
+          type: string
+        segments:
+          type: array
+          items:
+            $ref: "#/components/schemas/Segment"
+      required: [session_id, title, owner, state, segments]
+
+    DayCost:
+      type: object
+      properties:
+        day:
+          type: string
+          description: ISO date (YYYY-MM-DD).
+        usd:
+          type: number
+        sessions:
+          type: integer
+      required: [day, usd, sessions]
+
+    NamedCost:
+      description: One row of a cost breakdown (by owning user, by origin, or the top templates by spend).
+      type: object
+      properties:
+        name:
+          type: string
+        usd:
+          type: number
+        count:
+          type: integer
+      required: [name, usd, count]
+
+    Costs:
+      description: The cost dashboard's payload for GET /stats/costs.
+      type: object
+      properties:
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/DayCost"
+        by_user:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCost"
+        by_origin:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCost"
+        top_templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/NamedCost"
+        total_usd:
+          type: number
+        window:
+          type: integer
+          description: The trailing window size, in days, this dashboard was computed over.
+      required: [days, by_user, by_origin, top_templates, total_usd, window]

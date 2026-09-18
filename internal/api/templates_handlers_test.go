@@ -8,6 +8,7 @@ import (
 
 	"github.com/jonasthim/styr/internal/api"
 	"github.com/jonasthim/styr/internal/domain"
+	"github.com/jonasthim/styr/internal/templates"
 )
 
 type templateOut struct {
@@ -20,6 +21,8 @@ type templateOut struct {
 	PromptTemplate string  `json:"prompt_template"`
 	SystemPrompt   string  `json:"system_prompt"`
 	ReportSchema   string  `json:"report_schema"`
+	LoopUntil      string  `json:"loop_until"`
+	LoopMax        int     `json:"loop_max"`
 }
 
 func sampleTemplate() domain.Template {
@@ -237,5 +240,104 @@ func TestTemplatesRender_ErrorsSurfaceIn422(t *testing.T) {
 		map[string]any{"payload": map[string]any{}}, &body)
 	if status != http.StatusUnprocessableEntity {
 		t.Fatalf("POST render with a bad template = %d, want 422", status)
+	}
+}
+
+// TestTemplatesCreateAndPatch_LoopFieldsRoundTrip checks that loop_until
+// and loop_max survive both create and patch, in both directions (request
+// body -> domain.TemplateInput -> response JSON).
+func TestTemplatesCreateAndPatch_LoopFieldsRoundTrip(t *testing.T) {
+	e := newEnv(t)
+	var gotCreateIn domain.TemplateInput
+	e.triggers.CreateTemplateFn = func(_ context.Context, _ api.Actor, in domain.TemplateInput) (domain.Template, error) {
+		gotCreateIn = in
+		tmpl := sampleTemplate()
+		tmpl.LoopUntil = in.LoopUntil
+		tmpl.LoopMax = in.LoopMax
+		return tmpl, nil
+	}
+
+	var out templateOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/templates", map[string]any{
+		"name": "grafana", "workspace_id": "ws1", "profile_id": "investigate",
+		"prompt_template": "hi", "loop_until": "done", "loop_max": 5,
+	}, &out)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /templates = %d, want 201", status)
+	}
+	if gotCreateIn.LoopUntil != "done" || gotCreateIn.LoopMax != 5 {
+		t.Fatalf("CreateTemplate input = %+v, want loop_until=done loop_max=5", gotCreateIn)
+	}
+	if out.LoopUntil != "done" || out.LoopMax != 5 {
+		t.Fatalf("out = %+v, want loop_until=done loop_max=5", out)
+	}
+
+	var gotPatchIn domain.TemplateInput
+	e.triggers.UpdateTemplateFn = func(_ context.Context, _ api.Actor, id string, in domain.TemplateInput) (domain.Template, error) {
+		gotPatchIn = in
+		tmpl := sampleTemplate()
+		tmpl.ID = id
+		tmpl.LoopUntil = in.LoopUntil
+		tmpl.LoopMax = in.LoopMax
+		return tmpl, nil
+	}
+	var patchOut templateOut
+	status = e.doJSON(e.adminClient, http.MethodPatch, "/api/v1/templates/tmpl-1", map[string]any{
+		"name": "grafana", "workspace_id": "ws1", "profile_id": "investigate",
+		"prompt_template": "hi", "loop_until": "resolved", "loop_max": 3,
+	}, &patchOut)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH /templates/tmpl-1 = %d, want 200", status)
+	}
+	if gotPatchIn.LoopUntil != "resolved" || gotPatchIn.LoopMax != 3 {
+		t.Fatalf("UpdateTemplate input = %+v, want loop_until=resolved loop_max=3", gotPatchIn)
+	}
+	if patchOut.LoopUntil != "resolved" || patchOut.LoopMax != 3 {
+		t.Fatalf("patchOut = %+v, want loop_until=resolved loop_max=3", patchOut)
+	}
+}
+
+func TestTemplatesRun_Returns202WithRunID(t *testing.T) {
+	e := newEnv(t)
+	var gotID string
+	var gotVars templates.Vars
+	e.runs.StartManualFn = func(_ context.Context, _ api.Actor, templateID string, vars templates.Vars) (domain.Run, error) {
+		gotID, gotVars = templateID, vars
+		return domain.Run{ID: "run-1"}, nil
+	}
+
+	var out runIDOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/templates/tmpl-1/run",
+		map[string]any{"vars": map[string]any{"a": 1}}, &out)
+	if status != http.StatusAccepted {
+		t.Fatalf("POST /templates/tmpl-1/run = %d, want 202", status)
+	}
+	if out.RunID != "run-1" {
+		t.Fatalf("run_id = %q, want run-1", out.RunID)
+	}
+	if gotID != "tmpl-1" {
+		t.Fatalf("template id passed to StartManual = %q, want tmpl-1", gotID)
+	}
+	if gotVars["a"] != float64(1) {
+		t.Fatalf("vars passed to StartManual = %+v", gotVars)
+	}
+}
+
+// TestTemplatesRun_NoBodyMeansNoVars checks that an entirely empty request
+// body (vars is documented as optional) is accepted, not a 422.
+func TestTemplatesRun_NoBodyMeansNoVars(t *testing.T) {
+	e := newEnv(t)
+	var gotVars templates.Vars
+	e.runs.StartManualFn = func(_ context.Context, _ api.Actor, _ string, vars templates.Vars) (domain.Run, error) {
+		gotVars = vars
+		return domain.Run{ID: "run-1"}, nil
+	}
+
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/templates/tmpl-1/run", nil, nil)
+	if status != http.StatusAccepted {
+		t.Fatalf("POST /templates/tmpl-1/run (no body) = %d, want 202", status)
+	}
+	if len(gotVars) != 0 {
+		t.Fatalf("vars = %+v, want empty", gotVars)
 	}
 }

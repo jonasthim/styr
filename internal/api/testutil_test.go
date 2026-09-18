@@ -29,7 +29,11 @@ import (
 	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/harness/fake"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/runs"
+	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/stats"
+	"github.com/jonasthim/styr/internal/templates"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
 
@@ -154,9 +158,11 @@ type testEnv struct {
 	usersDir       string
 	notifications  *db.NotificationChannels
 
-	triggers *fakeTriggersService
-	runs     *fakeRunsEngine
-	notifier *fakeNotifier
+	triggers  *fakeTriggersService
+	runs      *fakeRunsEngine
+	notifier  *fakeNotifier
+	schedules *fakeSchedulesService
+	stats     *fakeStatsService
 
 	adminClient *http.Client
 	adminID     string
@@ -208,6 +214,8 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		triggers:      newFakeTriggersService(),
 		runs:          newFakeRunsEngine(),
 		notifier:      newFakeNotifier(),
+		schedules:     newFakeSchedulesService(),
+		stats:         newFakeStatsService(),
 	}
 	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
 
@@ -260,6 +268,8 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		Runs:           e.runs,
 		Notifications:  e.notifications,
 		Notifier:       e.notifier,
+		Schedules:      e.schedules,
+		Stats:          e.stats,
 		Status: func() api.StatusInfo {
 			return api.StatusInfo{Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0}
 		},
@@ -613,8 +623,12 @@ type fakeRunsEngine struct {
 	mu    sync.Mutex
 	calls []fakeCall
 
-	GetFn  func(ctx context.Context, id string) (domain.RunView, error)
-	ListFn func(ctx context.Context, f domain.RunFilter) ([]domain.RunView, error)
+	GetFn         func(ctx context.Context, id string) (domain.RunView, error)
+	ListFn        func(ctx context.Context, f domain.RunFilter) ([]domain.RunView, error)
+	StartManualFn func(ctx context.Context, actor api.Actor, templateID string, vars templates.Vars) (domain.Run, error)
+	GetLoopFn     func(ctx context.Context, id string) (runs.LoopView, error)
+	ListLoopsFn   func(ctx context.Context, state string, limit int) ([]domain.Loop, error)
+	StopFn        func(ctx context.Context, actor api.Actor, id string) error
 }
 
 func newFakeRunsEngine() *fakeRunsEngine { return &fakeRunsEngine{} }
@@ -648,6 +662,178 @@ func (f *fakeRunsEngine) List(ctx context.Context, filter domain.RunFilter) ([]d
 		return f.ListFn(ctx, filter)
 	}
 	return nil, nil
+}
+
+func (f *fakeRunsEngine) StartManual(ctx context.Context, actor api.Actor, templateID string, vars templates.Vars) (domain.Run, error) {
+	f.record("StartManual", actor, templateID, vars)
+	if f.StartManualFn != nil {
+		return f.StartManualFn(ctx, actor, templateID, vars)
+	}
+	return domain.Run{}, errFakeNotConfigured
+}
+
+func (f *fakeRunsEngine) GetLoop(ctx context.Context, id string) (runs.LoopView, error) {
+	f.record("GetLoop", id)
+	if f.GetLoopFn != nil {
+		return f.GetLoopFn(ctx, id)
+	}
+	return runs.LoopView{}, fmt.Errorf("get loop: %w", domain.ErrNotFound)
+}
+
+func (f *fakeRunsEngine) ListLoops(ctx context.Context, state string, limit int) ([]domain.Loop, error) {
+	f.record("ListLoops", state, limit)
+	if f.ListLoopsFn != nil {
+		return f.ListLoopsFn(ctx, state, limit)
+	}
+	return nil, nil
+}
+
+func (f *fakeRunsEngine) Stop(ctx context.Context, actor api.Actor, id string) error {
+	f.record("Stop", actor, id)
+	if f.StopFn != nil {
+		return f.StopFn(ctx, actor, id)
+	}
+	return errFakeNotConfigured
+}
+
+// fakeSchedulesService is an in-memory api.SchedulesService, recording
+// calls the same way fakeTriggersService does.
+type fakeSchedulesService struct {
+	mu    sync.Mutex
+	calls []fakeCall
+
+	CreateFn  func(ctx context.Context, actor api.Actor, in domain.ScheduleInput) (domain.Schedule, error)
+	ListFn    func(ctx context.Context, actor api.Actor) ([]domain.Schedule, error)
+	GetFn     func(ctx context.Context, actor api.Actor, id string) (domain.Schedule, error)
+	UpdateFn  func(ctx context.Context, actor api.Actor, id string, in domain.ScheduleInput) (domain.Schedule, error)
+	DeleteFn  func(ctx context.Context, actor api.Actor, id string) error
+	RunNowFn  func(ctx context.Context, actor api.Actor, id string) (domain.Run, error)
+	FiringsFn func(ctx context.Context, actor api.Actor, id string, limit int) ([]domain.ScheduleFiring, error)
+	PreviewFn func(cronExpr string) (schedules.Preview, error)
+}
+
+func newFakeSchedulesService() *fakeSchedulesService { return &fakeSchedulesService{} }
+
+func (f *fakeSchedulesService) record(method string, actor api.Actor, args ...any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{method: method, actor: actor, args: args})
+	f.mu.Unlock()
+}
+
+func (f *fakeSchedulesService) lastCall() (fakeCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
+}
+
+func (f *fakeSchedulesService) Create(ctx context.Context, actor api.Actor, in domain.ScheduleInput) (domain.Schedule, error) {
+	f.record("Create", actor, in)
+	if f.CreateFn != nil {
+		return f.CreateFn(ctx, actor, in)
+	}
+	return domain.Schedule{}, errFakeNotConfigured
+}
+
+func (f *fakeSchedulesService) List(ctx context.Context, actor api.Actor) ([]domain.Schedule, error) {
+	f.record("List", actor)
+	if f.ListFn != nil {
+		return f.ListFn(ctx, actor)
+	}
+	return nil, nil
+}
+
+func (f *fakeSchedulesService) Get(ctx context.Context, actor api.Actor, id string) (domain.Schedule, error) {
+	f.record("Get", actor, id)
+	if f.GetFn != nil {
+		return f.GetFn(ctx, actor, id)
+	}
+	return domain.Schedule{}, fmt.Errorf("get schedule: %w", domain.ErrNotFound)
+}
+
+func (f *fakeSchedulesService) Update(ctx context.Context, actor api.Actor, id string, in domain.ScheduleInput) (domain.Schedule, error) {
+	f.record("Update", actor, id, in)
+	if f.UpdateFn != nil {
+		return f.UpdateFn(ctx, actor, id, in)
+	}
+	return domain.Schedule{}, errFakeNotConfigured
+}
+
+func (f *fakeSchedulesService) Delete(ctx context.Context, actor api.Actor, id string) error {
+	f.record("Delete", actor, id)
+	if f.DeleteFn != nil {
+		return f.DeleteFn(ctx, actor, id)
+	}
+	return nil
+}
+
+func (f *fakeSchedulesService) RunNow(ctx context.Context, actor api.Actor, id string) (domain.Run, error) {
+	f.record("RunNow", actor, id)
+	if f.RunNowFn != nil {
+		return f.RunNowFn(ctx, actor, id)
+	}
+	return domain.Run{}, errFakeNotConfigured
+}
+
+func (f *fakeSchedulesService) Firings(ctx context.Context, actor api.Actor, id string, limit int) ([]domain.ScheduleFiring, error) {
+	f.record("Firings", actor, id, limit)
+	if f.FiringsFn != nil {
+		return f.FiringsFn(ctx, actor, id, limit)
+	}
+	return nil, nil
+}
+
+func (f *fakeSchedulesService) Preview(cronExpr string) (schedules.Preview, error) {
+	f.record("Preview", api.Actor{}, cronExpr)
+	if f.PreviewFn != nil {
+		return f.PreviewFn(cronExpr)
+	}
+	return schedules.Preview{}, errFakeNotConfigured
+}
+
+// fakeStatsService is an in-memory api.StatsService, recording calls the
+// same way fakeTriggersService does.
+type fakeStatsService struct {
+	mu    sync.Mutex
+	calls []fakeCall
+
+	GanttFn func(ctx context.Context, from, to time.Time, actor api.Actor) ([]stats.Lane, error)
+	CostsFn func(ctx context.Context, days int, actor api.Actor) (stats.Costs, error)
+}
+
+func newFakeStatsService() *fakeStatsService { return &fakeStatsService{} }
+
+func (f *fakeStatsService) record(method string, actor api.Actor, args ...any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{method: method, actor: actor, args: args})
+	f.mu.Unlock()
+}
+
+func (f *fakeStatsService) lastCall() (fakeCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
+}
+
+func (f *fakeStatsService) Gantt(ctx context.Context, from, to time.Time, actor api.Actor) ([]stats.Lane, error) {
+	f.record("Gantt", actor, from, to)
+	if f.GanttFn != nil {
+		return f.GanttFn(ctx, from, to, actor)
+	}
+	return nil, nil
+}
+
+func (f *fakeStatsService) Costs(ctx context.Context, days int, actor api.Actor) (stats.Costs, error) {
+	f.record("Costs", actor, days)
+	if f.CostsFn != nil {
+		return f.CostsFn(ctx, days, actor)
+	}
+	return stats.Costs{}, nil
 }
 
 // fakeNotifierCall records one Send call: the channel (including whatever

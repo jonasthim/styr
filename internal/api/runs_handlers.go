@@ -26,6 +26,8 @@ type runDTO struct {
 	TriggerID  *string         `json:"trigger_id"`
 	DeliveryID *string         `json:"delivery_id"`
 	Origin     string          `json:"origin"`
+	LoopID     string          `json:"loop_id"`
+	Iteration  int             `json:"iteration"`
 	StartedAt  time.Time       `json:"started_at"`
 	FinishedAt *time.Time      `json:"finished_at"`
 	Outcome    string          `json:"outcome"`
@@ -37,19 +39,22 @@ type runDTO struct {
 func runDTOFrom(run domain.Run) runDTO {
 	return runDTO{
 		ID: run.ID, SessionID: run.SessionID, TemplateID: run.TemplateID, TriggerID: run.TriggerID,
-		DeliveryID: run.DeliveryID, Origin: run.Origin, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
+		DeliveryID: run.DeliveryID, Origin: run.Origin, LoopID: run.LoopID, Iteration: run.Iteration,
+		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
 		Outcome: string(run.Outcome), Report: run.Report, Summary: run.Summary, CostUSD: run.CostUSD,
 	}
 }
 
 // runViewDTO is domain.RunView shaped for JSON: the run itself plus the
-// session, delivery and template it was started from, each nil when that
-// record is unavailable (e.g. the template was since deleted).
+// session, delivery, template and loop it was started from, each nil when
+// that record is unavailable (e.g. the template was since deleted, or the
+// run belongs to no loop).
 type runViewDTO struct {
 	Run      runDTO       `json:"run"`
 	Session  *sessionDTO  `json:"session"`
 	Delivery *deliveryDTO `json:"delivery"`
 	Template *templateDTO `json:"template"`
+	Loop     *loopDTO     `json:"loop"`
 }
 
 func runViewDTOFrom(v domain.RunView) runViewDTO {
@@ -66,14 +71,18 @@ func runViewDTOFrom(v domain.RunView) runViewDTO {
 		t := templateDTOFrom(*v.Template)
 		out.Template = &t
 	}
+	if v.Loop != nil {
+		l := loopDTOFrom(*v.Loop)
+		out.Loop = &l
+	}
 	return out
 }
 
-// handleRunsList is GET /api/v1/runs?outcome=&trigger=&limit=.
+// handleRunsList is GET /api/v1/runs?outcome=&trigger=&loop_id=&limit=.
 func handleRunsList(d *Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
-		filter := domain.RunFilter{Outcome: q.Get("outcome"), TriggerID: q.Get("trigger")}
+		filter := domain.RunFilter{Outcome: q.Get("outcome"), TriggerID: q.Get("trigger"), LoopID: q.Get("loop_id")}
 		if s := q.Get("limit"); s != "" {
 			if n, err := strconv.Atoi(s); err == nil {
 				filter.Limit = n

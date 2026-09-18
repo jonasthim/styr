@@ -12,6 +12,9 @@ import (
 type runOut struct {
 	ID        string  `json:"id"`
 	SessionID string  `json:"session_id"`
+	Origin    string  `json:"origin"`
+	LoopID    string  `json:"loop_id"`
+	Iteration int     `json:"iteration"`
 	Outcome   string  `json:"outcome"`
 	Summary   string  `json:"summary"`
 	CostUSD   float64 `json:"cost_usd"`
@@ -22,6 +25,7 @@ type runViewOut struct {
 	Session  *sessionOut  `json:"session"`
 	Delivery *deliveryOut `json:"delivery"`
 	Template *templateOut `json:"template"`
+	Loop     *loopOut     `json:"loop"`
 }
 
 // sessionOut mirrors the fields runs_handlers_test.go asserts on; the full
@@ -121,7 +125,46 @@ func TestRunsGet_NilSessionOmittedGracefully(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("GET /runs/run-2 = %d, want 200", status)
 	}
-	if out.Session != nil || out.Delivery != nil || out.Template != nil {
-		t.Fatalf("out = %+v, want nil session/delivery/template", out)
+	if out.Session != nil || out.Delivery != nil || out.Template != nil || out.Loop != nil {
+		t.Fatalf("out = %+v, want nil session/delivery/template/loop", out)
+	}
+}
+
+func TestRunsList_PassesLoopIDFilterThrough(t *testing.T) {
+	e := newEnv(t)
+	e.runs.ListFn = func(context.Context, domain.RunFilter) ([]domain.RunView, error) { return nil, nil }
+
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs?loop_id=loop-1", nil, nil); status != http.StatusOK {
+		t.Fatalf("GET /runs?loop_id=loop-1 = %d, want 200", status)
+	}
+	call, ok := e.runs.lastCall()
+	if !ok || call.method != "List" {
+		t.Fatalf("last call = %+v, ok=%v", call, ok)
+	}
+	filter := call.args[0].(domain.RunFilter)
+	if filter.LoopID != "loop-1" {
+		t.Fatalf("filter.LoopID = %q, want loop-1", filter.LoopID)
+	}
+}
+
+func TestRunsGet_IncludesLoop(t *testing.T) {
+	e := newEnv(t)
+	sess := "sess-1"
+	e.runs.GetFn = func(context.Context, string) (domain.RunView, error) {
+		return domain.RunView{
+			Run:  domain.Run{ID: "run-3", SessionID: "sess-1", LoopID: "loop-1", Iteration: 2, Outcome: domain.RunRunning},
+			Loop: &domain.Loop{ID: "loop-1", TemplateID: "tmpl-1", SessionID: &sess, State: domain.LoopRunning, Iteration: 2, MaxIterations: 5},
+		}, nil
+	}
+	var out runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-3", nil, &out)
+	if status != http.StatusOK {
+		t.Fatalf("GET /runs/run-3 = %d, want 200", status)
+	}
+	if out.Run.LoopID != "loop-1" || out.Run.Iteration != 2 {
+		t.Fatalf("run = %+v, want loop_id=loop-1 iteration=2", out.Run)
+	}
+	if out.Loop == nil || out.Loop.ID != "loop-1" || out.Loop.State != "running" {
+		t.Fatalf("loop = %+v", out.Loop)
 	}
 }
