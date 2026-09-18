@@ -46,8 +46,13 @@ test('group headers only render for groups that have sessions', async ({ page })
   await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Running' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Closed' })).toBeVisible()
-  // No seeded session is in the `open` state, so this group is absent.
-  await expect(page.getByRole('heading', { name: 'Idle' })).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: 'Idle' })).toBeVisible()
+  // Every rendered group header must have at least one row under it.
+  for (const key of ['waiting', 'running', 'open', 'closed']) {
+    const group = page.getByTestId(`session-group-${key}`)
+    if ((await group.count()) === 0) continue
+    await expect(group.getByRole('link').first()).toBeVisible()
+  }
 })
 
 test('at 390 px the sessions list has no horizontal scroll', async ({ page }, testInfo) => {

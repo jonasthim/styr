@@ -20,6 +20,9 @@ import type {
   Workspace,
 } from '../api/types'
 import { MOCK_EVENT_SESSION_ID } from './fakeEventSource'
+import { decodeFixtureEvents } from './decodeFixture'
+import fixture02Raw from './fixtures/02_tool_read.jsonl?raw'
+import type { HarnessEventPayload } from '../lib/blocks'
 
 function iso(minutesAgo: number): string {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString()
@@ -42,6 +45,43 @@ function verifyToken(token: string): ClaudeTokenInfo | null {
 }
 
 const DEV_USER_ID = '00000000-0000-4000-8000-000000000001'
+
+// Fixed id for the Task 20 seeded session (fixture 02: a Read tool call then
+// "hello"). Hardcoded rather than exported: e2e specs run outside Vite, so
+// they can't import a module that pulls in a `?raw` fixture import.
+export const TOOL_FIXTURE_SESSION_ID = '00000000-0000-4000-8000-000000000005'
+
+// Per-session transcript event log. Seeded once at module load for the
+// fixture session; POST /messages appends to whichever session it targets.
+const eventsBySession = new Map<string, SessionEvent[]>()
+
+function seedEvents(sessionId: string, payloads: HarnessEventPayload[]) {
+  const events: SessionEvent[] = payloads.map((payload, i) => ({
+    id: i + 1,
+    session_id: sessionId,
+    seq: i + 1,
+    at: payload.At ?? iso(0),
+    type: payload.Type,
+    payload,
+  }))
+  eventsBySession.set(sessionId, events)
+}
+
+seedEvents(TOOL_FIXTURE_SESSION_ID, decodeFixtureEvents(fixture02Raw, new Date(Date.now() - 10 * 60_000)))
+
+function appendEvent(sessionId: string, payload: HarnessEventPayload): SessionEvent {
+  const list = eventsBySession.get(sessionId) ?? []
+  const event: SessionEvent = {
+    id: list.length + 1,
+    session_id: sessionId,
+    seq: list.length + 1,
+    at: payload.At ?? iso(0),
+    type: payload.Type,
+    payload,
+  }
+  eventsBySession.set(sessionId, [...list, event])
+  return event
+}
 
 const workspaces: Workspace[] = [
   {
@@ -176,7 +216,7 @@ const sessions: Session[] = [
     model: 'claude-fable-5-1',
   },
   {
-    id: '00000000-0000-4000-8000-000000000005',
+    id: '00000000-0000-4000-8000-000000000006',
     owner_id: DEV_USER_ID,
     title: 'Add health check endpoint',
     workspace_id: 'w1',
@@ -192,6 +232,31 @@ const sessions: Session[] = [
     cost_usd: 0.18,
     tokens_in: 5200,
     tokens_out: 640,
+    now_line: '',
+    model: 'claude-fable-5-1',
+  },
+  {
+    // Fixed id (also hardcoded in e2e/session.spec.ts) so the Task 20 session
+    // view spec can open it directly. Its transcript is fixture 02
+    // (internal/harness/claude/testdata/02_tool_read.jsonl, copied to
+    // ./fixtures/02_tool_read.jsonl and decoded below into harness.Event JSON):
+    // a Read tool call followed by the text reply "hello".
+    id: TOOL_FIXTURE_SESSION_ID,
+    owner_id: DEV_USER_ID,
+    title: 'Read note.txt',
+    workspace_id: 'w1',
+    profile_id: 'interactive',
+    harness: 'claude',
+    state: 'open',
+    origin: 'ui',
+    origin_ref: '',
+    worktree: '',
+    created_at: iso(15),
+    last_active_at: iso(10),
+    num_turns: 2,
+    cost_usd: 0.4624,
+    tokens_in: 34,
+    tokens_out: 111,
     now_line: '',
     model: 'claude-fable-5-1',
   },
@@ -475,12 +540,34 @@ export const handlers = [
     return HttpResponse.json(session)
   }),
 
-  http.post('/api/v1/sessions/:id/messages', () => new HttpResponse(null, { status: 202 })),
+  // Real Send() only decodes harness.Event output from the CLI: the operator's
+  // own turn is never persisted as a transcript event (PROTOCOL.md — the CLI's
+  // echo of it is deliberately dropped by the codec). The mock still needs the
+  // transcript to show what was sent, so it synthesises a `user`-typed event —
+  // a mock-only convention lib/blocks.ts's foldEvents understands (see its
+  // module comment) — and the session view refetches events after sending.
+  http.post('/api/v1/sessions/:id/messages', async ({ request, params }) => {
+    const body = (await request.json()) as { text: string }
+    const id = params.id as string
+    const session = sessions.find((s) => s.id === id)
+    if (!session) return HttpResponse.json(errorBody('not_found', 'session not found'), { status: 404 })
+    appendEvent(id, { Type: 'user', At: iso(0), Text: body.text })
+    session.state = 'open'
+    session.last_active_at = iso(0)
+    return new HttpResponse(null, { status: 202 })
+  }),
   http.post('/api/v1/sessions/:id/interrupt', () => new HttpResponse(null, { status: 202 })),
-  http.post('/api/v1/sessions/:id/close', () => new HttpResponse(null, { status: 204 })),
+  http.post('/api/v1/sessions/:id/close', ({ params }) => {
+    const session = sessions.find((s) => s.id === params.id)
+    if (session) session.state = 'closed'
+    return new HttpResponse(null, { status: 204 })
+  }),
 
-  http.get('/api/v1/sessions/:id/events', () => {
-    const events: SessionEvent[] = []
+  http.get('/api/v1/sessions/:id/events', ({ request, params }) => {
+    const url = new URL(request.url)
+    const after = Number(url.searchParams.get('after') ?? '0')
+    const limit = Number(url.searchParams.get('limit') ?? '500')
+    const events = (eventsBySession.get(params.id as string) ?? []).filter((e) => e.seq > after).slice(0, limit)
     return HttpResponse.json(events)
   }),
 
