@@ -186,6 +186,54 @@ async function main() {
         await page.close()
         console.log('captured review.png (1280x800)')
       }
+
+      // 7. Schedules list, desktop viewport: seeded schedules
+      // (web/src/mocks/schedulesHandlers.ts), one enabled with recent
+      // firings, one disabled.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/schedules`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid^="schedule-row-"]', { timeout: 15_000 })
+
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'schedules.png') })
+        await page.close()
+        console.log('captured schedules.png (1280x800)')
+      }
+
+      // 8. Fleet Gantt, desktop viewport: the Sessions page's Gantt view.
+      // window=24h (rather than the default 1h) so the mock's older seeded
+      // sessions (web/src/mocks/sessionsState.ts) still fall inside the
+      // requested window and render a lane.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/sessions?view=gantt&window=24h`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid="fleet-gantt"]', { timeout: 15_000 })
+        await page.waitForSelector('[data-testid="gantt-lane"]', { timeout: 15_000 })
+
+        // See the sessions.png comment above: settle the hover-expanding
+        // rail before capturing.
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'gantt.png') })
+        await page.close()
+        console.log('captured gantt.png (1280x800)')
+      }
+
+      // 9. Cost dashboard, desktop viewport: the Runs > Costs tab, seeded
+      // with 30 days of cost data (schedulesHandlers.ts).
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/runs/costs`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid="cost-tile"]', { timeout: 15_000 })
+
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'costs.png') })
+        await page.close()
+        console.log('captured costs.png (1280x800)')
+      }
     } finally {
       await browser.close()
     }
