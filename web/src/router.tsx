@@ -8,6 +8,7 @@ import { SessionDetail } from './pages/SessionDetail'
 import { Workspaces } from './pages/Workspaces'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
+import { Onboarding } from './components/onboarding/Onboarding'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
@@ -70,6 +71,10 @@ const workspacesRoute = createRoute({
 })
 const settingsRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/settings', component: Settings })
 const profileRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/profile', component: Profile })
+// Task 22 onboarding: shown after first login when `me.claude_token.present`
+// is false. The redirect itself lives on the Inbox route (outside this
+// card's files); this route just renders the three-step card when reached.
+const welcomeRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/welcome', component: Onboarding })
 
 const routeTree = rootRoute.addChildren([
   loginRoute,
@@ -81,6 +86,7 @@ const routeTree = rootRoute.addChildren([
     workspacesRoute,
     settingsRoute,
     profileRoute,
+    welcomeRoute,
   ]),
 ])
 
