@@ -162,6 +162,26 @@ const sessions: Session[] = [
     now_line: '',
     model: 'claude-fable-5-1',
   },
+  {
+    id: '00000000-0000-4000-8000-000000000005',
+    owner_id: DEV_USER_ID,
+    title: 'Add health check endpoint',
+    workspace_id: 'w1',
+    profile_id: 'interactive',
+    harness: 'claude',
+    state: 'failed',
+    origin: 'ui',
+    origin_ref: '',
+    worktree: '',
+    created_at: iso(400),
+    last_active_at: iso(390),
+    num_turns: 4,
+    cost_usd: 0.18,
+    tokens_in: 5200,
+    tokens_out: 640,
+    now_line: '',
+    model: 'claude-fable-5-1',
+  },
 ]
 
 const approvals: Approval[] = [
