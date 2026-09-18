@@ -41,8 +41,8 @@ func TestOpen_CreatesFileAndMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("version = %d, want 6", version)
 	}
 }
 
@@ -67,8 +67,8 @@ func TestOpen_IdempotentReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
-	if version != 5 {
-		t.Fatalf("version = %d, want 5", version)
+	if version != 6 {
+		t.Fatalf("version = %d, want 6", version)
 	}
 }
 
