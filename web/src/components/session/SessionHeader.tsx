@@ -2,7 +2,8 @@
 // stats, and the Interrupt/Close/copy-id actions.
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Copy, Check, Square, XCircle } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import { Copy, Check, Square, XCircle, Zap } from 'lucide-react'
 import { api } from '../../api/client'
 import type { Session, SessionState } from '../../api/types'
 import { Badge, Button, Tooltip } from '../ui'
@@ -66,6 +67,14 @@ export function SessionHeader({
           <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${STATE_DOT[session.state]}`} />
           {STATE_LABEL[session.state]}
         </span>
+        {session.origin === 'webhook' && session.origin_ref && (
+          <Link to="/runs/$id" params={{ id: session.origin_ref }} className="no-underline">
+            <Badge tone="accent" variant="outline" className="gap-1">
+              <Zap size={11} aria-hidden />
+              Unattended run
+            </Badge>
+          </Link>
+        )}
 
         <div className="ml-auto! flex items-center gap-2">
           {session.state === 'running' && (

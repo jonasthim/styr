@@ -22,6 +22,8 @@ const STATE_GLYPH: Record<Session['state'], string> = {
 const GO_TO_ITEMS = [
   { to: '/inbox', label: 'Inbox' },
   { to: '/sessions', label: 'Sessions' },
+  { to: '/runs', label: 'Runs' },
+  { to: '/triggers', label: 'Triggers' },
   { to: '/workspaces', label: 'Workspaces' },
   { to: '/profile', label: 'Profile' },
 ] as const

@@ -7,6 +7,7 @@ import { q } from '../api/queries'
 import { useMe } from '../hooks/useMe'
 import type { ClaudeTokenInfo, Role, User } from '../api/types'
 import { ClaudeTokenCard } from '../components/profile/ClaudeTokenCard'
+import { NotificationsSection } from '../components/settings/NotificationsSection'
 import { ProfilesTable, type ProfilePatch } from '../components/settings/ProfilesTable'
 import { UsersTable } from '../components/settings/UsersTable'
 import { Card, PageHeader } from '../components/ui'
@@ -111,6 +112,10 @@ export function Settings() {
 
       <Section title="Users" note="The first person to sign in became an admin.">
         {users.data && me && <UsersTable users={users.data} currentUserId={me.id} onUpdateRole={handleUpdateRole} />}
+      </Section>
+
+      <Section title="Notifications" note="Pushed when an unattended run finishes, needs a decision, or fails.">
+        <NotificationsSection />
       </Section>
 
       <Section title="Sign-in providers" note="Configured in the server's config file.">
