@@ -198,6 +198,58 @@ knows nothing about sessions or HTTP, and `internal/sessions` is its only caller
    Full behaviour (branch naming, checkpoint/rewind semantics, commit/PR requirements, plan
    approval) is `docs/REVIEW.md`.
 
+## Schedules, loop advancement and stats (v0.4)
+
+v0.4 adds two more ways to start a run without a human clicking anything, and a pair of
+read-only views over what the fleet is doing. Full behaviour (cron syntax, the tick, loop
+semantics, Gantt derivation, cost windows) is `docs/SCHEDULES.md`; this section is only the
+architectural shape.
+
+- **The scheduler loop.** `internal/schedules.Service.Run` is a third long-lived goroutine
+  started in `cmd/styr/serve.go` alongside `bg.Runs.Run` (the run-timeout sweep) — `go
+  bg.Schedules.Run(maintCtx)`, sharing that same maintenance context so both stop together at
+  shutdown. It ticks a plain `time.Ticker` every 30s and, per tick, loads every enabled schedule
+  due by `next_run_at`, fires each through the same `runs.Engine.Start` a webhook trigger calls
+  (`RunStarter`/`RunLookup` are narrow interfaces `*runs.Engine` satisfies, so
+  `internal/schedules` depends on the run engine's shape, not its concrete type), and records a
+  `schedule_firings` row plus the schedule's next `next_run_at` regardless of outcome. It never
+  touches HTTP or the harness directly — starting a run, following it to completion, and timing
+  it out all still go through `internal/runs` exactly as they do for a webhook-started run.
+- **Loop advancement in the run engine.** A loop is not a separate execution path either: it is
+  `internal/runs/loops.go`, a file inside the run engine package that hooks the same place every
+  run already closes out. Whenever a run finishes with a `LoopID` set, `Engine.advance` runs: it
+  loads the loop, decides done/exhausted/failed/keep-going from the report and the iteration
+  count, and — to keep going — renders the template again and calls `sessions.Send` on the loop's
+  existing session id rather than `sessions.Create`, so an iteration is a resumed turn on a live
+  session, not a new session. The variables a loop's first iteration started with live only in an
+  in-process map (`varsCache`) keyed by loop id — there is no table column for them — which is
+  what makes a loop's variables a memory-only, restart-losing concern (`docs/SCHEDULES.md`, "Loop
+  variables are held in memory only").
+- **`internal/stats` is read-only.** Both its exports, `Service.Gantt` and `Service.Costs`,
+  compute their answer fresh from existing tables (`sessions`, `events`, `runs`) on every
+  request — there is no stats table, no background aggregation job, no cache invalidated by
+  writes elsewhere. That is a deliberate simplicity choice at "a handful of users, one process":
+  the package's own doc comment states it never writes to the database, and every query in it is
+  a plain `SELECT`. It depends on `internal/db` (the shared `*db.DB` for ad-hoc SQL plus the
+  `Sessions`/`Users` repos for visibility-aware listing and owner names) and
+  `internal/sessions.Actor` for the visibility rule, but nothing downstream depends on it — the
+  API layer is `stats`'s only caller.
+- **The shutdown sequence cancels the request base context before HTTP shutdown.** `runServe`
+  builds `reqCtx` (`context.WithCancel(context.Background())`) and wires it as the HTTP server's
+  `BaseContext`, so every request's `context.Context` — including a long-lived `GET
+  /api/v1/events` SSE stream — derives from it rather than from the per-request context
+  `net/http` would otherwise hand out on its own. On SIGINT/SIGTERM, `reqCancel()` is called
+  **first**, before `srv.Shutdown(shutCtx)`: cancelling `reqCtx` ends every open SSE stream (and
+  any handler blocked on it) immediately, so `http.Server.Shutdown` — which only waits for
+  in-flight handlers to return, closing idle connections itself — has handlers that actually
+  finish inside its own `shutdownTimeout` (15s) instead of blocking on a stream that would
+  otherwise run until the timeout forcibly killed the connection. `sessionsSvc.Shutdown` (closing
+  every open harness process cleanly) runs afterwards, under its own 15s timeout. Ordering
+  matters here specifically because of the scheduler and run-engine goroutines added in v0.4: both
+  already stop via `maintCtx` (cancelled by its own `defer maintCancel()`), independently of the
+  HTTP shutdown sequence, but a schedule's in-flight "Run now" HTTP request or an SSE tab watching
+  a loop's session both rely on `reqCancel()` running before `srv.Shutdown` to unblock promptly.
+
 ## What lives where
 
 ```
@@ -207,7 +259,8 @@ internal/harness/    Harness adapter interface + the Claude Code implementation 
                      scripted fake (fake/) used by tests and dev
 internal/events/     in-process pub/sub bus behind the SSE endpoint
 internal/domain/     core types: Session, Event, Approval, Workspace, Profile, User, Template,
-                     Trigger, Delivery, Run, NotificationChannel, APIToken, errors
+                     Trigger, Delivery, Run, Schedule, ScheduleFiring, Loop, NotificationChannel,
+                     APIToken, errors
 internal/db/         SQLite open + goose migrations + one repo file per table
 internal/crypto/     AES-GCM seal/open for tokens at rest
 internal/risk/       tool+input → risk tier classification
@@ -223,7 +276,12 @@ internal/templates/  Go text/template rendering of prompts/titles/dedupe keys fr
 internal/triggers/   templates and triggers CRUD, the `/hooks/{slug}` pipeline: auth, normalise,
                      dedupe/cooldown/storm-cap, delivery log, replay, test
 internal/runs/       the unattended run engine: starts a session from a rendered template, follows
-                     it to an outcome over the event bus, times out a stale run
+                     it to an outcome over the event bus, times out a stale run, advances loops
+                     (loops.go) on report arrival
+internal/schedules/  cron table, next-run computation (robfig/cron), the 30s scheduler tick that
+                     fires due schedules through internal/runs, firings log, cron preview/describe
+internal/stats/      read-only fleet views: the Gantt's running/waiting/idle segments derived
+                     from events, and cost aggregation by day/owner/origin/template
 internal/notify/     outbound ntfy and generic-webhook senders for run events
 internal/auth/       OIDC provider setup, PKCE login/callback, session cookies, personal API
                      token bearer auth, auth middleware

@@ -21,9 +21,10 @@ matters from your phone, and keep every decision on your own box.
 
 ## Quick start
 
-Styr is early: v0.3.0 is the latest release, and it covers login, sessions, approvals, triggers,
-runs and unattended investigations, and now review — worktrees, diffs, checkpoints, commit and
-PR — see [Features](#features) below for what's in and what's still to come.
+Styr is early: v0.4.0 is the latest release, and it covers login, sessions, approvals, triggers,
+runs and unattended investigations, review — worktrees, diffs, checkpoints, commit and PR — and
+now schedules and loops — cron-driven runs, until-done loops, a fleet Gantt and a cost dashboard
+— see [Features](#features) below for what's in and what's still to come.
 
 ### Install script (bare host, systemd)
 
@@ -96,6 +97,20 @@ v0.3 "Review":
 See [docs/REVIEW.md](docs/REVIEW.md) for the full worktree, review, checkpoint and plan-approval
 guide.
 
+v0.4 "Schedules and loops":
+
+![Styr fleet Gantt](docs/screenshots/gantt.png)
+
+- Cron schedules that start a template run on a cadence, with overlap protection: a schedule
+  never runs two of its own instances concurrently, skipping (and logging) a tick instead
+- Until-done loops: a template repeats its run on the same session until its structured report
+  says it's done, or its iteration budget runs out
+- Fleet Gantt: one lane per active session, running/waiting/idle over the last 1h/6h/24h
+- Cost dashboard: what the whole box has spent, per day, per user and per origin, and the top
+  templates by spend
+
+See [docs/SCHEDULES.md](docs/SCHEDULES.md) for the full schedule, loop, Gantt and cost guide.
+
 ### Roadmap
 
 | Release | Contents |
@@ -103,7 +118,7 @@ guide.
 | v0.1 Cockpit | OIDC login and profiles, sessions, session view with blocks and activity timeline, inbox with approvals, workspaces, profiles, palette and shortcuts, install script, Docker image, docs |
 | v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
 | v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
-| v0.4 Schedules and loops | Cron, until-done loops, fleet Gantt, cost dashboard |
+| v0.4 Schedules and loops (shipped) | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
 | v1.0 | Second harness (Codex CLI), stable API |
 

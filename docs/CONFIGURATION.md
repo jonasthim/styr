@@ -8,6 +8,10 @@ missing config file is not an error: defaults plus environment variables are eno
 
 ## Keys
 
+v0.4 (schedules and loops) added no new `config.yaml` key or `STYR_*` override — the scheduler's
+cadence and the loop iteration/prompt defaults below are fixed constants, same as the existing
+run timeout row.
+
 | `config.yaml` key | Env override | Default | Notes |
 |---|---|---|---|
 | `env` | `STYR_ENV` | `prod` | `prod` or `dev`. Only `dev` honours `dev_user` and skips the `base_url`/`oidc` requirements below. |
@@ -20,6 +24,10 @@ missing config file is not an error: defaults plus environment variables are eno
 | `idle_timeout` | `STYR_IDLE_TIMEOUT` | `15m` | How long an open session may sit idle before it is closed automatically. |
 | `approval_timeout` | `STYR_APPROVAL_TIMEOUT` | `30m` | How long an unattended profile waits for approval before the request expires (defaults to deny). |
 | *(none — fixed constant)* | *(none)* | `30m` | How long a trigger-started run may stay `running` before the run engine (`internal/runs`) interrupts and closes its session and records it as `timeout`. Set by `runTimeout` in `cmd/styr/wire.go` (matches `runs.DefaultTimeout`); there is no `config.yaml` key or env override for it yet. |
+| *(none — fixed constant)* | *(none)* | `30s` | How often the scheduler (`internal/schedules.Service.Run`) ticks to check for due schedules. `tickInterval` in `internal/schedules/tick.go`; not configurable. |
+| *(none — fixed constant)* | *(none)* | `5` | The iteration budget a looping template gets when its own `loop_max` is `0`/unset. `defaultLoopMax` in `internal/runs/loops.go`; not configurable per-deployment — set `loop_max` on the template instead. |
+| *(none — fixed constant)* | *(none)* | `4000` chars | How much of the previous iteration's report is embedded (compact JSON) in a loop's next-iteration prompt prefix. `reportPreviewLimit` in `internal/runs/loops.go`; the full report stays on the previous run's own row regardless. |
+| *(none — fixed constant)* | *(none)* | `15s` | Shutdown grace period: how long `styr serve` waits, on SIGINT/SIGTERM, for in-flight HTTP handlers to finish (`http.Server.Shutdown`) and, separately, for open Claude Code processes to close (`sessions.Service.Shutdown`) before giving up. `shutdownTimeout` in `cmd/styr/serve.go`, applied to both phases; the request base context is cancelled before either phase starts, ending SSE streams immediately (see `docs/ARCHITECTURE.md`). Not configurable. |
 | `oidc` | *(list, see below)* | *(none)* | One or more OpenID Connect providers shown on the login page. Required in `prod` (at least one). |
 | `dev_user` | `STYR_DEV_USER` | *(none)* | Email of the synthetic logged-in user used when `env` is `dev`. Ignored in `prod`. |
 

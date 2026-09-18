@@ -280,3 +280,73 @@ would have handed to the CLI, but in exchange gets a worktree path it controls f
 before the process starts and while the session is closed — and a checkpoint scheme with no
 coupling to the harness protocol at all. `harness.StartSpec.Worktree` stays in the type for a
 future harness that might genuinely need it, but `internal/sessions` never sets it.
+
+## ADR-014: Loops iterate on one session
+
+Date: 2026-09-19. Status: accepted.
+
+Context: v0.4's loop feature repeats a template's run until its structured report says the work
+is done. The design question was whether each iteration should be a fresh session (`--resume`
+under a new session id, or a wholly new one), giving every iteration a clean slate and its own
+line-item cost, or whether every iteration should be a turn sent to the *same* session the loop
+started, so the model keeps the whole prior conversation in context.
+
+Decision: a loop's iterations are all turns on one session (`internal/runs/loops.go`'s
+`nextIteration` calls `sessions.Send` on the loop's `SessionID`, never `sessions.Create`). The
+next iteration's prompt is the template re-rendered plus an explicit "Iteration N of M. Previous
+report: `<json>`" prefix (see `docs/SCHEDULES.md`), rather than relying on the model's memory of
+its own prior turn alone — but that prior turn, and everything it did (every tool call, every
+file it read or wrote), is still genuinely present in the session's context, not summarised or
+discarded.
+
+Consequences: this is the whole point for a repeat-until-correct workload (fix the tests, keep
+iterating until green) — a fresh session would force the model to rediscover the codebase's state
+from scratch every iteration, at real token cost, with no guarantee it converges on the same
+understanding twice. The tradeoff is cost visibility: **a loop's cost accrues on one session**,
+so there is no per-iteration cost line, only the session's running total — a loop that goes
+through all 5 default iterations looks like one (possibly expensive) session on the cost
+dashboard, not five separate charges, and the origin breakdown attributes it to `loop` as a
+whole rather than to an iteration. A known gap follows from reusing one session rather than
+persisting loop state of its own: the variables a loop's first iteration was rendered with live
+only in an in-process cache (`varsCache`, keyed by loop id), not in the `loops` table — a
+`styr serve` restart while a loop is `running` loses them, so a prompt rendered after restart
+would substitute empty values for any of the original vars a later iteration's template
+references. This is accepted for v0.4 rather than adding a persisted vars column: a loop stuck
+`running` across a restart is not automatically resumed at all (nothing re-drives it), so the gap
+only bites an operator who manually nudges a stale loop rather than stopping it — `docs/
+SCHEDULES.md`'s "Loop variables are held in memory only" documents the operational consequence
+directly rather than leaving it to be discovered.
+
+## ADR-015: Cancel request contexts before HTTP shutdown
+
+Date: 2026-09-19. Status: accepted.
+
+Context: `styr serve`'s graceful shutdown (SIGINT/SIGTERM) must stop accepting new work and let
+in-flight work finish inside a bounded `shutdownTimeout` (15s). `GET /api/v1/events` (the SSE
+feed every open browser tab holds one of, per ADR-005) is a handler that runs indefinitely by
+design — it only returns when its request context is cancelled, since it has no other stopping
+condition. `http.Server.Shutdown` on its own closes idle listeners and waits for in-flight
+handlers to *return*, but does nothing to make a still-blocked handler return sooner; a live SSE
+tab left open at shutdown time would therefore make `Shutdown` block for the entire
+`shutdownTimeout` and then still be forcibly cut off, rather than closing promptly.
+
+Decision: `runServe` builds one long-lived `reqCtx` (`context.WithCancel(context.Background())`)
+and wires it as `http.Server.BaseContext`, so **every** request's context — SSE included —
+derives from `reqCtx` rather than from the per-connection context `net/http` would otherwise
+supply on its own. On shutdown, `reqCancel()` is called *before* `srv.Shutdown(shutCtx)`:
+cancelling `reqCtx` ends every open SSE stream (and unblocks anything else selecting on its
+request context) immediately, so by the time `Shutdown` starts waiting for handlers to return,
+the ones that were only ever blocked on the stream have already finished. `sessionsSvc.Shutdown`
+(closing every open harness child process) runs after `srv.Shutdown` returns, under its own
+15s timeout — HTTP and the sessions service each get the full grace period rather than sharing
+one budget.
+
+Consequences: shutdown is now two ordered phases (cancel request contexts, then wait for HTTP;
+then close harness processes) instead of one `Shutdown` call — a future long-lived handler (a
+websocket, a different streaming response) gets the same clean-cancellation behaviour for free
+as long as it derives its lifetime from the request context rather than `context.Background()`
+directly, which is now a documented expectation rather than an accident of one endpoint's
+implementation. The v0.4 scheduler and loop-advancement goroutines are unaffected by this
+ordering — they stop via their own `maintCtx` cancellation, independent of `reqCtx` — but a
+schedule's own "Run now" HTTP call, and any browser tab watching a loop's session over SSE, both
+depend on this ordering to unblock promptly rather than waiting out the full timeout.
