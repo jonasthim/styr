@@ -317,6 +317,104 @@ belong in the repository, and it demonstrates nothing `07` does not. The `/clear
 **not** kept either: 24 lines of which 20 are the recorder's own `SessionStart` hook noise, and
 the two lines that matter are quoted above.
 
+## Plan mode in `-p` (card T41 spike)
+
+Recorded 2026-09-18 (card T41) against the same real, logged-in workstation CLI 2.1.276 (Max
+subscription, no `ANTHROPIC_API_KEY`), one session in `/tmp/styr-fixture-ws` (seeded with a
+one-file Go module, `main.go` printing `hello`), driven by `hack/recorder/main.go -mode plan`
+with the single prompt `"Plan how you would add a --version flag to a small Go CLI in this
+directory. Produce the plan and then exit plan mode."` Kept as `08_plan_mode.jsonl` (481 lines,
+untrimmed — see "what happens after approval" below for why it is longer than the other
+fixtures).
+
+**How `ExitPlanMode` surfaces.** Exactly like every other tool call: the model emits an ordinary
+`assistant` `tool_use` content block named `"ExitPlanMode"` (fixture 08, line 326), which the CLI
+then turns into the usual `control_request`/`can_use_tool` control message (line 327) — there is
+no separate message type for "plan ready". The plan markdown lives at `request.input.plan`:
+
+```json
+{"type":"control_request","request_id":"75965c44-5ffb-4981-b415-fc942301fc4e","request":{"subtype":"can_use_tool","tool_name":"ExitPlanMode","display_name":"ExitPlanMode","input":{"plan":"# Plan: add a `--version` flag to the Go CLI\n\n## Context\n\n...(full markdown)...\n","planFilePath":"/home/thim/.claude/plans/plan-how-you-would-buzzing-pascal.md"},"tool_use_id":"toolu_01WM1rEQxwJd4X1jCRdPMdQ8","requires_user_interaction":true}}
+```
+
+Fields Styr uses: `request_id`, `request.tool_name` (`"ExitPlanMode"`, the routing signal —
+`claude.IsPlanExit` checks exactly this), `request.input.plan` (the plan markdown, decoded into
+`harness.PermissionRequest.Plan`), `request.tool_use_id`. Two fields are specific to this
+request and not modelled: `request.input.planFilePath` (the CLI's own copy of the plan on disk,
+irrelevant to Styr) and `request.requires_user_interaction` (`true` here; not observed on the
+Bash permission request in fixture 03, so it may be an `ExitPlanMode`-specific hint that this
+request cannot be silently auto-decided — Styr always shows it to a human regardless).
+
+The host answers exactly like any other `can_use_tool` request:
+`{"type":"control_response","response":{"subtype":"success","request_id":"<id>","response":{"behavior":"allow"}}}`.
+
+**What happens after approval: the CLI continues in the same process, unprompted.** This is the
+card's key question, and the answer is unambiguous from the fixture:
+
+1. Immediately after our `control_response` (echoed back on stdout, line 330), a `system`
+   envelope with `subtype: "status"` appears (line 331):
+   `{"type":"system","subtype":"status","status":null,"permissionMode":"default","uuid":"...","session_id":"b7892de3-..."}`
+   — the CLI switched its own permission mode from `plan` to `default` on its own, no
+   `--permission-mode` restart or `--resume` needed.
+2. A `user`/`tool_result` message follows (line 332) with the synthetic text
+   `"User has approved your plan. You can now start coding. ... ## Approved Plan: <the plan
+   again>"` — the CLI's own framing of the approval back to the model, in-band as a normal tool
+   result.
+3. The model then proceeds to **act on the plan in the same process**: it calls `Write` for
+   `main.go` (line 420's `control_request`, `tool_name: "Write"`) and, after that is approved,
+   `Write` for `main_test.go` (line 475). Both are ordinary `can_use_tool` requests — plan
+   approval did not grant blanket edit permission; each Write still asks (the recorder's
+   auto-allow answered both, so real files were written to `/tmp/styr-fixture-ws/main.go` and
+   `main_test.go` on disk, confirmed after the run).
+4. `session_id` is identical (`b7892de3-ffd3-4dec-a961-da8c356db8b9`) on every line of the
+   fixture, from the initial `init` through the final `result` — no second `init`, no
+   `conversation_reset` (contrast `/clear`, above). The run ends with
+   `"subtype":"error_max_turns","terminal_reason":"max_turns","num_turns":7` because the
+   recorder's `--max-turns 6` cap was hit mid-implementation, not because of anything
+   plan-mode-specific — it is simply what "the CLI keeps going" looks like against a low turn
+   budget. This is also why the fixture is 481 lines instead of the ~40-180 of the others: it
+   captures a real plan approval *plus* two full Write turns.
+
+**Conclusion for the design doc's open question** (`2026-09-18-styr-v0.3-review.md`, "Plan
+approval"): the CLI does **not** stop and wait for a `--permission-mode default` resume after
+plan approval — it needs no resume at all. Styr's flow is: render the Plan card from the
+`ExitPlanMode` permission request; "Approve" is exactly `Decide{Allow: true}` on that request,
+after which the same running `Process` carries on into implementation, asking permission for
+each subsequent tool as normal (subject to whatever mode/allowlist the session's `Profile` still
+has — plan mode's auto-switch to `default` observed here is the CLI's own behaviour, not
+something Styr requests). "Request changes" is `Decide{Allow: false, Message: <the typed
+comment>}`; the CLI stays in plan mode and the model gets the denial message to revise the plan
+(not separately verified by this spike, but symmetric with every other tool denial in fixture
+03/05's decision handling). Spike B (resuming with `--permission-mode default`) is **not
+needed and was skipped**, per the card's own fallback rule ("If A shows the process continues on
+its own, skip B").
+
+## Checkpoint safety between turns (card T41 spike C)
+
+Recorded 2026-09-18 (card T41), not kept as a fixture (the card says "keep no fixture" — this
+section is the record of the outcome). `hack/recorder/main.go` gained a `-between '<shell
+command>'` flag that runs `sh -c '<command>'` in `-cwd` immediately before each *subsequent*
+prompt is sent (never before the first). Run in `/tmp/styr-fixture-ws`:
+
+```
+go run ./hack/recorder -cwd /tmp/styr-fixture-ws -out /tmp/spike-c.jsonl \
+  -between "git add -A && git commit -qm 'styr: checkpoint'" \
+  -prompts 'Create a file named hello.txt containing hi||Now append a second line to hello.txt'
+```
+
+Turn 1 created `hello.txt` containing `hi` (`result.subtype: "success"`, `is_error: false`).
+Between turns 1 and 2 the `-between` command ran `git add -A && git commit -qm 'styr:
+checkpoint'` in the workspace — turning the just-created `hello.txt` from an untracked file into
+a tracked, committed one out from under the still-open CLI process. Turn 2 (`"Now append a
+second line to hello.txt"`) then edited that same file via its own `Edit`/`Write` tool call and
+completed normally: `result.subtype: "success"`, `is_error: false`, `num_turns: 2`, and
+`hello.txt` ended up containing both lines (`hi` / `second line`) after the run. No
+`control_request` referenced git state, no tool call failed, and neither `result` envelope nor
+any `assistant`/`user` text mentioned git, staleness, or a conflict. **Outcome: a checkpoint
+commit made between turns, in the same working tree a live session is using, does not disturb
+the session** — the CLI only ever looks at the files on disk for its next tool call, not at git
+history or the index, so `internal/gitops`'s planned "checkpoint after each result" is safe to
+run concurrently with an idle-between-turns session.
+
 ## Init: `slash_commands`
 
 The `system`/`init` envelope's `slash_commands` is a flat array of command names **without** the
