@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/harness"
@@ -172,5 +175,91 @@ func TestRunMaintenance_ExpiresStaleApprovals(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a system audit entry for the expired approval")
+	}
+}
+
+// Finding 1 + 4 regression test: expireApprovals decides the database
+// first (the guarded UPDATE is the sole arbiter that prevents the child
+// from ever seeing two control_responses for the same request — finding
+// 4), so a failure to notify the child afterward cannot undo that
+// decision. expireApprovals must not discard that notify error: it must
+// log it (via the service's *slog.Logger) and, since the process is
+// unreachable and there is no pending approval left for anyone to retry,
+// fail the session directly rather than leave it stuck in "waiting"
+// forever. The approval itself ends up expired and audited regardless of
+// whether the notify succeeded.
+func TestExpireApprovals_NotifyProcessFails_ApprovalExpiresSessionFailsAndIsLogged(t *testing.T) {
+	svc, repos, _ := newService(t)
+	logs := &recordingHandler{}
+	svc.logger = slog.New(logs)
+
+	profile := domain.Profile{ID: "test-unattended-notify-fail", Name: "test-unattended-notify-fail", Mode: "auto", Unattended: true, ApprovalTimeout: time.Millisecond}
+	if err := repos.Profiles.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	owner := testAdminID
+	sess := domain.Session{
+		ID: uuid.NewString(), OwnerID: &owner, Title: "t", WorkspaceID: testWorkspaceID,
+		ProfileID: profile.ID, Harness: "fake", State: domain.SessionWaiting, Origin: domain.OriginSchedule,
+		CreatedAt: time.Now(), LastActiveAt: time.Now(),
+	}
+	if err := repos.Sessions.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	ap := domain.Approval{
+		ID: uuid.NewString(), SessionID: sess.ID, RequestID: "req-notify-fail", Tool: "Bash",
+		Input: json.RawMessage(`{"command":"rm -rf /tmp/x"}`), Risk: domain.RiskDestructive,
+		State: domain.ApprovalPending, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	if err := repos.Approvals.Create(context.Background(), ap); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	proc := newControlledProcess()
+	proc.setDecideErr(errors.New("write to child: broken pipe"))
+	if err := svc.registerProcess(context.Background(), sess.ID, &owner, proc); err != nil {
+		t.Fatalf("register process: %v", err)
+	}
+
+	svc.expireApprovals(context.Background())
+
+	got, err := repos.Approvals.Get(context.Background(), ap.ID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if got.State != domain.ApprovalExpired {
+		t.Fatalf("approval state = %s, want expired (the database write is the source of truth, independent of the notify outcome)", got.State)
+	}
+
+	if n := len(proc.Decisions()); n != 0 {
+		t.Fatalf("expected no successfully recorded decision on the process (Decide errored), got %d", n)
+	}
+
+	if logs.count() == 0 {
+		t.Fatal("expected the notify failure to be logged, got no log records")
+	}
+
+	audit, err := repos.Audit.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	var found bool
+	for _, a := range audit {
+		if a.Actor == "system" && a.Action == "approval.expire" && a.Target == ap.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected a system approval.expire audit entry despite the failed notify")
+	}
+
+	final, err := repos.Sessions.Get(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if final.State != domain.SessionFailed {
+		t.Fatalf("session state = %s, want failed (the process is unreachable, so there is nothing left to retry)", final.State)
 	}
 }

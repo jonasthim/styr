@@ -10,9 +10,18 @@ import (
 	"github.com/jonasthim/styr/internal/harness"
 )
 
-// Decide answers a pending approval: it forwards the decision to the
-// session's process, records the approval, moves the session back to
-// running, and writes an audit entry.
+// Decide answers a pending approval: it records the approval, forwards the
+// decision to the session's process, moves the session back to running, and
+// writes an audit entry.
+//
+// The database write happens before the child is ever touched.
+// Approvals.Decide's UPDATE only affects a row still in state 'pending', so
+// it is the single point that decides who wins a race to answer this
+// approval (a second human clicking decide, or the scheduler's expiry
+// sweep in expireApprovals racing the same approval): the loser gets
+// domain.ErrConflict back and returns immediately, never writing to the
+// child, so the child never sees two control_responses for the same
+// request.
 func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, allow bool, updated json.RawMessage, msg string) error {
 	ap, err := s.repos.Approvals.Get(ctx, approvalID)
 	if err != nil {
@@ -20,6 +29,16 @@ func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, al
 	}
 	sess, err := s.getVisible(ctx, actor, ap.SessionID)
 	if err != nil {
+		return err
+	}
+
+	state := domain.ApprovalDenied
+	action := "approval.deny"
+	if allow {
+		state = domain.ApprovalAllowed
+		action = "approval.allow"
+	}
+	if err := s.repos.Approvals.Decide(ctx, approvalID, state, actor.UserID, updated, msg); err != nil {
 		return err
 	}
 
@@ -37,15 +56,6 @@ func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, al
 		}
 	}
 
-	state := domain.ApprovalDenied
-	action := "approval.deny"
-	if allow {
-		state = domain.ApprovalAllowed
-		action = "approval.allow"
-	}
-	if err := s.repos.Approvals.Decide(ctx, approvalID, state, actor.UserID, updated, msg); err != nil {
-		return err
-	}
 	if err := s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning); err != nil {
 		return err
 	}

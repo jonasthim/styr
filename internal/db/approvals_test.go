@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -53,6 +54,43 @@ func TestApprovals_CreateGetDecide(t *testing.T) {
 	if got.State != domain.ApprovalAllowed || got.DecidedBy == nil || *got.DecidedBy != "user-1" ||
 		got.DecidedAt == nil || string(got.UpdatedInput) != string(updated) || got.Message != "looks fine" {
 		t.Fatalf("Get after decide = %+v", got)
+	}
+}
+
+// Regression test for the Decide UPDATE's state guard: a second Decide on
+// an approval that is no longer pending must not silently overwrite the
+// first decision, and must be distinguishable (ErrConflict) from deciding
+// an id that never existed (ErrNotFound).
+func TestApprovals_DecideTwice_SecondReturnsConflictAndFirstDecisionSticks(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	s := eventsTestFixture(t, ctx, d)
+	approvals := NewApprovals(d)
+
+	a := newTestApproval(s.ID, time.Now())
+	if err := approvals.Create(ctx, a); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := approvals.Decide(ctx, a.ID, domain.ApprovalAllowed, "user-1", nil, "first"); err != nil {
+		t.Fatalf("first Decide: %v", err)
+	}
+
+	err := approvals.Decide(ctx, a.ID, domain.ApprovalDenied, "user-2", nil, "second")
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("second Decide error = %v, want ErrConflict", err)
+	}
+
+	got, err := approvals.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.State != domain.ApprovalAllowed || got.DecidedBy == nil || *got.DecidedBy != "user-1" || got.Message != "first" {
+		t.Fatalf("second Decide overwrote the first: %+v", got)
+	}
+
+	if err := approvals.Decide(ctx, "does-not-exist", domain.ApprovalDenied, "user-3", nil, "nope"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Decide on unknown id error = %v, want ErrNotFound", err)
 	}
 }
 

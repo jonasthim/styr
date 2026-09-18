@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -22,6 +23,15 @@ import (
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness"
 )
+
+// startWaitPoll is how often a Send that is waiting on a concurrent Send's
+// startProcess (see the starting map on Service) rechecks for the process
+// to appear.
+const startWaitPoll = 20 * time.Millisecond
+
+// startWaitTimeout bounds how long a Send waits for a concurrent Send's
+// startProcess to finish before giving up.
+const startWaitTimeout = 10 * time.Second
 
 // Repos bundles the repositories the service reads and writes.
 type Repos struct {
@@ -42,6 +52,11 @@ type Options struct {
 	IdleTimeout time.Duration
 	UsersDir    string // HOME per user: UsersDir/<userID>
 	ServiceHome string // HOME for unattended sessions
+
+	// Logger receives operational errors the service cannot surface any
+	// other way (a control-channel write that failed, an approval that
+	// could not be recorded, ...). Optional; New defaults to slog.Default().
+	Logger *slog.Logger
 }
 
 // Actor identifies who is calling the service, for visibility checks and
@@ -62,30 +77,54 @@ type procEntry struct {
 // Service is the sessions service: it owns every live harness.Process and
 // mediates all session and approval state changes.
 type Service struct {
-	repos Repos
-	h     harness.Harness
-	bus   *events.Bus
-	box   *crypto.Box
-	opt   Options
-	slots *slots
+	repos  Repos
+	h      harness.Harness
+	bus    *events.Bus
+	box    *crypto.Box
+	opt    Options
+	slots  *slots
+	logger *slog.Logger
 
-	mu      sync.Mutex
-	procs   map[string]*procEntry
+	// newApprovalID generates a new approval row's id. It is a field
+	// (rather than a direct uuid.NewString() call in handlePermission) only
+	// so tests can make it deterministic and force a primary-key conflict
+	// on Approvals.Create, exercising the create-failure path without
+	// needing to break the database itself.
+	newApprovalID func() string
+
+	mu sync.Mutex
+	// procs tracks every live process by session id.
+	procs map[string]*procEntry
+	// closing marks a session id whose process is being closed
+	// intentionally (Close, Shutdown, eviction), so its pump goroutine
+	// knows an EventExit was expected.
 	closing map[string]bool
+	// starting marks a session id whose startProcess is currently running
+	// (called from Send), so a second, concurrent Send for the same id
+	// waits for it instead of racing to start a second process. See Send
+	// and waitForStartingProcess.
+	starting map[string]struct{}
 }
 
 // New constructs a Service. The returned Service owns no background
 // goroutines beyond one pump per live session process; call RunMaintenance
 // periodically (e.g. once a minute) and Shutdown on server stop.
 func New(r Repos, h harness.Harness, bus *events.Bus, box *crypto.Box, opt Options) *Service {
+	logger := opt.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	s := &Service{
-		repos:   r,
-		h:       h,
-		bus:     bus,
-		box:     box,
-		opt:     opt,
-		procs:   make(map[string]*procEntry),
-		closing: make(map[string]bool),
+		repos:         r,
+		h:             h,
+		bus:           bus,
+		box:           box,
+		opt:           opt,
+		logger:        logger,
+		newApprovalID: uuid.NewString,
+		procs:         make(map[string]*procEntry),
+		closing:       make(map[string]bool),
+		starting:      make(map[string]struct{}),
 	}
 	s.slots = newSlots(opt.MaxOpen, s.evictOldestIdleUnattended)
 	return s
@@ -145,6 +184,14 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 
 // Send delivers text to a session's process. It reopens a closed session by
 // starting a new process with Resume: true.
+//
+// A closed session has no tracked process, so two concurrent Sends for the
+// same id would otherwise both see procs[id] absent and both call
+// startProcess — a TOCTOU that starts two harness processes (and sends two
+// Resumes) for one session. The starting map closes that window: whichever
+// Send arrives first claims it and starts the process; a second Send for
+// the same id waits for that process to appear (or for the first Send to
+// fail) instead of racing to start its own.
 func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error {
 	sess, err := s.getVisible(ctx, actor, id)
 	if err != nil {
@@ -155,11 +202,25 @@ func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error 
 	}
 
 	s.mu.Lock()
-	entry, ok := s.procs[id]
-	s.mu.Unlock()
-	if ok {
+	if entry, ok := s.procs[id]; ok {
+		s.mu.Unlock()
 		return entry.proc.Send(ctx, harness.UserMessage{Text: text})
 	}
+	if _, already := s.starting[id]; already {
+		s.mu.Unlock()
+		entry, err := s.waitForStartingProcess(ctx, id)
+		if err != nil {
+			return err
+		}
+		return entry.proc.Send(ctx, harness.UserMessage{Text: text})
+	}
+	s.starting[id] = struct{}{}
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.starting, id)
+		s.mu.Unlock()
+	}()
 
 	ws, err := s.repos.Workspaces.Get(ctx, sess.WorkspaceID)
 	if err != nil {
@@ -173,6 +234,35 @@ func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error 
 		return err
 	}
 	return nil
+}
+
+// waitForStartingProcess polls (every startWaitPoll, up to startWaitTimeout)
+// for id's process to be registered by the concurrent Send that is
+// currently starting it. It returns domain.ErrConflict if that Send's
+// startProcess finishes (the starting marker is cleared) without ever
+// registering a process — it failed — or if the wait times out.
+func (s *Service) waitForStartingProcess(ctx context.Context, id string) (*procEntry, error) {
+	deadline := time.Now().Add(startWaitTimeout)
+	for {
+		s.mu.Lock()
+		entry, ok := s.procs[id]
+		_, starting := s.starting[id]
+		s.mu.Unlock()
+		if ok {
+			return entry, nil
+		}
+		if !starting {
+			return nil, fmt.Errorf("%w: session failed to start", domain.ErrConflict)
+		}
+		if time.Now().After(deadline) {
+			return nil, fmt.Errorf("%w: timed out waiting for session to start", domain.ErrConflict)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(startWaitPoll):
+		}
+	}
 }
 
 // Interrupt asks a running session's process to stop the current turn.
@@ -348,7 +438,10 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 		s.slots.release()
 		return err
 	}
-	s.registerProcess(sess.ID, sess.OwnerID, p)
+	if err := s.registerProcess(ctx, sess.ID, sess.OwnerID, p); err != nil {
+		s.slots.release()
+		return err
+	}
 	go s.pump(sess, p)
 
 	if resume {
@@ -359,12 +452,24 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 	return p.Send(ctx, harness.UserMessage{Text: firstMessage})
 }
 
-// registerProcess tracks a live process under sessionID.
-func (s *Service) registerProcess(sessionID string, ownerID *string, p harness.Process) {
+// registerProcess tracks a live process under sessionID. If a live process
+// is already tracked for sessionID, p is a redundant, duplicate start (the
+// starting map in Send exists to prevent exactly this for Send's own
+// callers, but registerProcess enforces it unconditionally as the last
+// line of defence for every caller): p is closed immediately, without ever
+// running its pump goroutine, and domain.ErrConflict is returned so the
+// caller does not mistake it for a tracked, live process.
+func (s *Service) registerProcess(ctx context.Context, sessionID string, ownerID *string, p harness.Process) error {
 	s.mu.Lock()
+	if _, exists := s.procs[sessionID]; exists {
+		s.mu.Unlock()
+		_ = p.Close(ctx)
+		return fmt.Errorf("%w: session %s already has a live process", domain.ErrConflict, sessionID)
+	}
 	s.procs[sessionID] = &procEntry{proc: p, ownerID: ownerID}
 	delete(s.closing, sessionID)
 	s.mu.Unlock()
+	return nil
 }
 
 // unregisterProcess stops tracking sessionID's process.
