@@ -35,17 +35,20 @@ func (l *LoginSessions) Create(ctx context.Context, userID, tokenHash string, ex
 	return id, nil
 }
 
-// GetByHash resolves a login session by its token hash.
-func (l *LoginSessions) GetByHash(ctx context.Context, hash string) (userID string, expires time.Time, err error) {
-	var expiresAt string
-	row := l.d.QueryRowContext(ctx, `SELECT user_id, expires_at FROM login_sessions WHERE token_hash = ?`, hash)
-	if err = row.Scan(&userID, &expiresAt); err != nil {
+// GetByHash resolves a login session by its token hash, returning the row's
+// own id along with the user id, expiry and last-seen timestamps. Returning
+// id lets callers Touch or Delete the exact row without keeping any side
+// state of their own (e.g. across a process restart).
+func (l *LoginSessions) GetByHash(ctx context.Context, hash string) (id string, userID string, expires time.Time, lastSeen time.Time, err error) {
+	var expiresAt, lastSeenAt string
+	row := l.d.QueryRowContext(ctx, `SELECT id, user_id, expires_at, last_seen_at FROM login_sessions WHERE token_hash = ?`, hash)
+	if err = row.Scan(&id, &userID, &expiresAt, &lastSeenAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", time.Time{}, fmt.Errorf("get login session: %w", domain.ErrNotFound)
+			return "", "", time.Time{}, time.Time{}, fmt.Errorf("get login session: %w", domain.ErrNotFound)
 		}
-		return "", time.Time{}, fmt.Errorf("get login session: %w", err)
+		return "", "", time.Time{}, time.Time{}, fmt.Errorf("get login session: %w", err)
 	}
-	return userID, parseTime(expiresAt), nil
+	return id, userID, parseTime(expiresAt), parseTime(lastSeenAt), nil
 }
 
 // Touch bumps last_seen_at to the current time.

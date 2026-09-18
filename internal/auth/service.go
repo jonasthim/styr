@@ -48,17 +48,6 @@ type Service struct {
 
 	mu       sync.Mutex
 	runtimes map[string]*providerRuntime // provider slug -> lazily discovered
-
-	// idByHash and touched track state that db.LoginSessions' public API
-	// (GetByHash only returns user_id and expires_at, never the row id)
-	// does not let us recover after the fact. Both are populated only at
-	// session creation time, when db.LoginSessions.Create does hand back
-	// the row id; see the package doc comment on createSession.
-	idMu     sync.Mutex
-	idByHash map[string]string // token hash -> login_sessions.id
-
-	touchMu sync.Mutex
-	touched map[string]time.Time // token hash -> last last_seen_at touch
 }
 
 // New constructs the auth service. providers is the configured OIDC login
@@ -96,8 +85,6 @@ func New(users *db.Users, logins *db.LoginSessions, providers []config.OIDCProvi
 		secure:    secure,
 		devUser:   devUser,
 		runtimes:  make(map[string]*providerRuntime),
-		idByHash:  make(map[string]string),
-		touched:   make(map[string]time.Time),
 	}, nil
 }
 
@@ -139,9 +126,7 @@ func (s *Service) providerConfig(slug string) (config.OIDCProvider, bool) {
 // ---- session cookie lifecycle ---------------------------------------------
 
 // createSession mints a new random session token, stores its hash via
-// db.LoginSessions.Create (which is the only repository call that ever
-// returns a login_sessions row's true id), remembers hash -> id in memory
-// for later Touch/Delete calls, and sets the styr_session cookie.
+// db.LoginSessions.Create and sets the styr_session cookie.
 func (s *Service) createSession(ctx context.Context, w http.ResponseWriter, userID string, r *http.Request) (id string, err error) {
 	raw, err := randToken(32)
 	if err != nil {
@@ -158,61 +143,22 @@ func (s *Service) createSession(ctx context.Context, w http.ResponseWriter, user
 		return "", fmt.Errorf("create login session: %w", err)
 	}
 
-	s.idMu.Lock()
-	s.idByHash[hash] = id
-	s.idMu.Unlock()
-
 	setSessionCookie(w, s.secure, raw, now.Add(sessionCookieTTL))
 	return id, nil
 }
 
-// sessionIDFor returns the login_sessions row id remembered for hash, or
-// hash itself when the id is unknown (e.g. after a process restart cleared
-// the in-memory cache). The fallback is never a real row id, so a Touch or
-// Delete against it harmlessly fails with domain.ErrNotFound.
-func (s *Service) sessionIDFor(hash string) string {
-	s.idMu.Lock()
-	id, ok := s.idByHash[hash]
-	s.idMu.Unlock()
-	if ok {
-		return id
-	}
-	return hash
-}
-
-func (s *Service) forgetSession(hash string) {
-	s.idMu.Lock()
-	delete(s.idByHash, hash)
-	s.idMu.Unlock()
-	s.touchMu.Lock()
-	delete(s.touched, hash)
-	s.touchMu.Unlock()
-}
-
-// touchIfDue calls db.LoginSessions.Touch at most once every touchInterval
-// per session, tracked in memory (see the Service doc comment on idByHash).
-func (s *Service) touchIfDue(ctx context.Context, hash, id string, now time.Time) {
-	s.touchMu.Lock()
-	last, seen := s.touched[hash]
-	due := !seen || now.Sub(last) >= touchInterval
-	if due {
-		s.touched[hash] = now
-	}
-	s.touchMu.Unlock()
-	if due {
-		_ = s.logins.Touch(ctx, id)
-	}
-}
-
 // principalFromCookie resolves the styr_session cookie carried by r, if
-// any, into a Principal.
+// any, into a Principal. db.LoginSessions.GetByHash returns the row's own
+// id and last_seen_at, so Touch and (in Logout) Delete always target the
+// real row straight from the database — no in-memory state to lose across a
+// process restart.
 func (s *Service) principalFromCookie(ctx context.Context, r *http.Request) (*Principal, bool) {
 	c, err := r.Cookie(sessionCookieName)
 	if err != nil || c.Value == "" {
 		return nil, false
 	}
 	hash := hashToken(c.Value)
-	userID, expires, err := s.logins.GetByHash(ctx, hash)
+	id, userID, expires, lastSeen, err := s.logins.GetByHash(ctx, hash)
 	if err != nil {
 		return nil, false
 	}
@@ -224,8 +170,9 @@ func (s *Service) principalFromCookie(ctx context.Context, r *http.Request) (*Pr
 	if err != nil {
 		return nil, false
 	}
-	id := s.sessionIDFor(hash)
-	s.touchIfDue(ctx, hash, id, now)
+	if now.Sub(lastSeen) > touchInterval {
+		_ = s.logins.Touch(ctx, id)
+	}
 	return &Principal{User: *usr, LoginSessionID: id}, true
 }
 
@@ -281,7 +228,10 @@ func (s *Service) Authenticate(next http.Handler) http.Handler {
 }
 
 // Logout clears the styr_session cookie and, when the request carried a
-// valid one, deletes the corresponding login_sessions row.
+// valid one, deletes the corresponding login_sessions row. The row id comes
+// from db.LoginSessions.GetByHash, so this works even for a cookie whose
+// session was created by a different *Service instance (e.g. before a
+// process restart) — nothing about the delete depends on in-memory state.
 func (s *Service) Logout(w http.ResponseWriter, r *http.Request) error {
 	defer clearSessionCookie(w, s.secure)
 	c, err := r.Cookie(sessionCookieName)
@@ -289,11 +239,16 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) error {
 		return nil
 	}
 	hash := hashToken(c.Value)
-	id := s.sessionIDFor(hash)
+	id, _, _, _, err := s.logins.GetByHash(r.Context(), hash)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil
+		}
+		return fmt.Errorf("logout: %w", err)
+	}
 	if err := s.logins.Delete(r.Context(), id); err != nil && !errors.Is(err, domain.ErrNotFound) {
 		return fmt.Errorf("logout: %w", err)
 	}
-	s.forgetSession(hash)
 	return nil
 }
 

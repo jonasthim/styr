@@ -126,6 +126,21 @@ func (u *Users) TouchLogin(ctx context.Context, id string) error {
 	return nil
 }
 
+// UpdateProfile refreshes the profile fields sourced from the OIDC provider
+// (email, display name, avatar) so a returning user's local row stays in
+// sync with their identity provider on every login.
+func (u *Users) UpdateProfile(ctx context.Context, id, email, displayName, avatarURL string) error {
+	res, err := u.d.ExecContext(ctx, `UPDATE users SET email = ?, display_name = ?, avatar_url = ? WHERE id = ?`,
+		email, displayName, avatarURL, id)
+	if err != nil {
+		return fmt.Errorf("update profile: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("update profile: %w", domain.ErrNotFound)
+	}
+	return nil
+}
+
 // UpdatePrefs replaces the stored prefs JSON blob.
 func (u *Users) UpdatePrefs(ctx context.Context, id string, prefs json.RawMessage) error {
 	res, err := u.d.ExecContext(ctx, `UPDATE users SET prefs = ? WHERE id = ?`, string(prefs), id)

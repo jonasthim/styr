@@ -29,9 +29,12 @@ func TestLoginSessions_CreateGetByHash(t *testing.T) {
 		t.Fatalf("Create returned empty id")
 	}
 
-	userID, gotExpires, err := sessions.GetByHash(ctx, "hash-1")
+	gotID, userID, gotExpires, gotLastSeen, err := sessions.GetByHash(ctx, "hash-1")
 	if err != nil {
 		t.Fatalf("GetByHash: %v", err)
+	}
+	if gotID != id {
+		t.Fatalf("id = %q, want %q", gotID, id)
 	}
 	if userID != u.ID {
 		t.Fatalf("userID = %q, want %q", userID, u.ID)
@@ -39,13 +42,16 @@ func TestLoginSessions_CreateGetByHash(t *testing.T) {
 	if gotExpires.Unix() != expires.Unix() {
 		t.Fatalf("expires = %v, want %v", gotExpires, expires)
 	}
+	if gotLastSeen.IsZero() {
+		t.Fatal("lastSeen is zero, want the created_at/last_seen_at stamp")
+	}
 }
 
 func TestLoginSessions_GetByHashUnknownNotFound(t *testing.T) {
 	ctx := context.Background()
 	sessions := NewLoginSessions(testOpenDB(t))
 
-	_, _, err := sessions.GetByHash(ctx, "no-such-hash")
+	_, _, _, _, err := sessions.GetByHash(ctx, "no-such-hash")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetByHash: err = %v, want ErrNotFound", err)
 	}
@@ -77,10 +83,10 @@ func TestLoginSessions_TouchDeleteDeleteAllForUser(t *testing.T) {
 	if err := sessions.DeleteAllForUser(ctx, u.ID); err != nil {
 		t.Fatalf("DeleteAllForUser: %v", err)
 	}
-	if _, _, err := sessions.GetByHash(ctx, "hash-a"); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, _, _, err := sessions.GetByHash(ctx, "hash-a"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetByHash after DeleteAllForUser: err = %v, want ErrNotFound", err)
 	}
-	if _, _, err := sessions.GetByHash(ctx, "hash-b"); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, _, _, err := sessions.GetByHash(ctx, "hash-b"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetByHash after DeleteAllForUser: err = %v, want ErrNotFound", err)
 	}
 }
@@ -102,7 +108,7 @@ func TestLoginSessions_Delete(t *testing.T) {
 	if err := sessions.Delete(ctx, id); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if _, _, err := sessions.GetByHash(ctx, "hash-c"); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, _, _, err := sessions.GetByHash(ctx, "hash-c"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetByHash after Delete: err = %v, want ErrNotFound", err)
 	}
 }

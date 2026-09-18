@@ -296,6 +296,45 @@ func TestCompleteLogin_SecondDistinctSubject_BecomesMember(t *testing.T) {
 	}
 }
 
+func TestCompleteLogin_ExistingUser_ChangedDisplayName_UpdatesStoredUser(t *testing.T) {
+	fake := newFakeOIDC(t, "test-client")
+	svc, provider, users := newProviderTestService(t, fake, "test-client")
+	slug := slugify(provider.Name)
+
+	u1, pkce1 := beginLogin(t, svc, slug)
+	fake.setUser(u1.Query().Get("nonce"), "user-1", "alice@example.com", "Alice", "https://example.com/old.png")
+	first, _, err := callback(t, svc, pkce1, url.Values{"code": {"code-1"}, "state": {u1.Query().Get("state")}})
+	if err != nil {
+		t.Fatalf("first CompleteLogin: %v", err)
+	}
+
+	// Re-login with a changed display name (and avatar), same subject.
+	u2, pkce2 := beginLogin(t, svc, slug)
+	fake.setUser(u2.Query().Get("nonce"), "user-1", "alice@example.com", "Alice Updated", "https://example.com/new.png")
+	second, _, err := callback(t, svc, pkce2, url.Values{"code": {"code-2"}, "state": {u2.Query().Get("state")}})
+	if err != nil {
+		t.Fatalf("second CompleteLogin: %v", err)
+	}
+
+	if second.ID != first.ID {
+		t.Fatalf("re-login created a new user: %q != %q", second.ID, first.ID)
+	}
+	if second.DisplayName != "Alice Updated" || second.AvatarURL != "https://example.com/new.png" {
+		t.Fatalf("CompleteLogin returned stale profile: %+v", second)
+	}
+
+	reloaded, err := users.GetByID(t.Context(), second.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if reloaded.DisplayName != "Alice Updated" {
+		t.Errorf("stored DisplayName = %q, want %q", reloaded.DisplayName, "Alice Updated")
+	}
+	if reloaded.AvatarURL != "https://example.com/new.png" {
+		t.Errorf("stored AvatarURL = %q, want %q", reloaded.AvatarURL, "https://example.com/new.png")
+	}
+}
+
 func TestCompleteLogin_ExistingUser_TouchesLogin(t *testing.T) {
 	fake := newFakeOIDC(t, "test-client")
 	svc, provider, users := newProviderTestService(t, fake, "test-client")

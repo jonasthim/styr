@@ -219,7 +219,7 @@ func TestLogout_DeletesTheLoginSession(t *testing.T) {
 	_, cookie := seedSession(t, svc, users, domain.RoleMember)
 
 	hash := hashToken(cookie.Value)
-	if _, _, err := logins.GetByHash(t.Context(), hash); err != nil {
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash); err != nil {
 		t.Fatalf("precondition: session should exist: %v", err)
 	}
 
@@ -230,7 +230,7 @@ func TestLogout_DeletesTheLoginSession(t *testing.T) {
 		t.Fatalf("Logout: %v", err)
 	}
 
-	if _, _, err := logins.GetByHash(t.Context(), hash); !errors.Is(err, domain.ErrNotFound) {
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("GetByHash after logout = %v, want ErrNotFound", err)
 	}
 
@@ -242,6 +242,46 @@ func TestLogout_DeletesTheLoginSession(t *testing.T) {
 	}
 	if !cleared {
 		t.Error("expected Logout to clear the session cookie")
+	}
+}
+
+// TestLogout_DeletesSessionCreatedByADifferentServiceInstance simulates a
+// process restart: svc1 creates the session (and, before this fix, would
+// have been the only *Service instance that ever knew the row's real id,
+// since that id lived only in its own in-memory idByHash map). svc2 is a
+// fresh *Service sharing the same repositories/db but none of svc1's
+// process state, exactly like the server after a restart. Logout on svc2
+// must still find and delete the row, because the id now always comes from
+// db.LoginSessions.GetByHash.
+func TestLogout_DeletesSessionCreatedByADifferentServiceInstance(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc1, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New svc1: %v", err)
+	}
+	_, cookie := seedSession(t, svc1, users, domain.RoleMember)
+
+	// A different *Service instance, sharing the same repositories, standing
+	// in for the server after a restart.
+	svc2, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New svc2: %v", err)
+	}
+
+	hash := hashToken(cookie.Value)
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash); err != nil {
+		t.Fatalf("precondition: session should exist: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
+	req.AddCookie(cookie)
+	rec := httptest.NewRecorder()
+	if err := svc2.Logout(rec, req); err != nil {
+		t.Fatalf("Logout on a different Service instance: %v", err)
+	}
+
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetByHash after logout from a different Service instance = %v, want ErrNotFound", err)
 	}
 }
 
