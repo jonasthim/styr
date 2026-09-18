@@ -1,7 +1,7 @@
 // Settings (admin) > Profiles. Builtin rows (docs/openapi.yaml: "Builtin
 // profiles only allow max_turns and approval_timeout to change") lock name
 // and mode; custom rows are fully editable. Every mode select - locked or
-// not - only ever renders these five values, never bypassPermissions.
+// not - only ever renders these five values, never the skip-all-checks mode.
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { Profile, ProfileMode } from '../../api/types'
