@@ -3,6 +3,7 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,7 +18,8 @@ type Sessions struct{ d *DB }
 func NewSessions(d *DB) *Sessions { return &Sessions{d: d} }
 
 const sessionColumns = `id, owner_user_id, title, workspace_id, profile_id, harness, state, origin, origin_ref,
-	worktree, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model`
+	worktree, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model, effort,
+	slash_commands`
 
 // sessionStateOrder is the CASE expression used by ListVisible to sort
 // sessions by lifecycle priority before recency.
@@ -33,11 +35,12 @@ const sessionStateOrder = `CASE state
 func (s *Sessions) Create(ctx context.Context, sess domain.Session) error {
 	_, err := s.d.ExecContext(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.OwnerID, sess.Title, sess.WorkspaceID, sess.ProfileID, sess.Harness,
 		string(sess.State), string(sess.Origin), sess.OriginRef, sess.Worktree,
 		nowString(sess.CreatedAt), nowString(sess.LastActiveAt), sess.NumTurns, sess.CostUSD,
-		sess.TokensIn, sess.TokensOut, sess.NowLine, sess.Model)
+		sess.TokensIn, sess.TokensOut, sess.NowLine, sess.Model, sess.Effort,
+		marshalToolList(sess.SlashCommands))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create session: %w", domain.ErrConflict)
@@ -53,12 +56,15 @@ func scanSession(row interface{ Scan(dest ...any) error }) (*domain.Session, err
 		ownerID               sql.NullString
 		state, origin         string
 		createdAt, lastActive string
+		slashCommands         string
 	)
 	if err := row.Scan(&sess.ID, &ownerID, &sess.Title, &sess.WorkspaceID, &sess.ProfileID, &sess.Harness,
 		&state, &origin, &sess.OriginRef, &sess.Worktree, &createdAt, &lastActive, &sess.NumTurns,
-		&sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model); err != nil {
+		&sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model, &sess.Effort,
+		&slashCommands); err != nil {
 		return nil, err
 	}
+	_ = json.Unmarshal([]byte(slashCommands), &sess.SlashCommands)
 	sess.OwnerID = nullString(ownerID)
 	sess.State = domain.SessionState(state)
 	sess.Origin = domain.Origin(origin)
@@ -128,6 +134,16 @@ func (s *Sessions) UpdateNow(ctx context.Context, id string, nowLine string) err
 // UpdateModel sets the model in use.
 func (s *Sessions) UpdateModel(ctx context.Context, id string, model string) error {
 	return s.exec1(ctx, `UPDATE sessions SET model = ? WHERE id = ?`, model, id)
+}
+
+// UpdateEffort sets the reasoning effort the session's process runs with.
+func (s *Sessions) UpdateEffort(ctx context.Context, id string, effort string) error {
+	return s.exec1(ctx, `UPDATE sessions SET effort = ? WHERE id = ?`, effort, id)
+}
+
+// UpdateSlashCommands stores the command list the CLI reported on its init message.
+func (s *Sessions) UpdateSlashCommands(ctx context.Context, id string, commands []string) error {
+	return s.exec1(ctx, `UPDATE sessions SET slash_commands = ? WHERE id = ?`, marshalToolList(commands), id)
 }
 
 // Touch bumps last_active_at to the current time.

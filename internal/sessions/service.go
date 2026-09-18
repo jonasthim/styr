@@ -139,6 +139,11 @@ type CreateInput struct {
 	Origin      domain.Origin
 	OriginRef   string
 	Owner       *string // nil for an unattended session, run under the service token
+
+	// Model and Effort override the profile's defaults for this session. Empty means "use
+	// the profile's", and an empty profile default in turn means "use the CLI's own".
+	Model  string
+	Effort string
 }
 
 // Create persists a new session, starts its harness process and sends the
@@ -163,6 +168,17 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		return domain.Session{}, err
 	}
 
+	model, effort := in.Model, in.Effort
+	if model == "" {
+		model = profile.Model
+	}
+	if effort == "" {
+		effort = profile.Effort
+	}
+	if !harness.ValidEffort(effort) {
+		return domain.Session{}, fmt.Errorf("%w: effort %q is not allowed", domain.ErrInvalid, effort)
+	}
+
 	now := time.Now()
 	sess := domain.Session{
 		ID:           uuid.NewString(),
@@ -176,6 +192,8 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		OriginRef:    in.OriginRef,
 		CreatedAt:    now,
 		LastActiveAt: now,
+		Model:        model,
+		Effort:       effort,
 	}
 	if err := s.repos.Sessions.Create(ctx, sess); err != nil {
 		return domain.Session{}, err
@@ -418,8 +436,16 @@ func (s *Service) homeDir(ownerID *string) (string, error) {
 
 // startProcess acquires a scheduler slot, starts (or resumes) a harness
 // process for sess, registers it, launches its pump goroutine and sends the
-// first message. On any failure before the process starts, the slot is
-// released.
+// first message. An empty firstMessage starts the process without sending
+// anything — SwitchModel uses that to reopen a session under new flags
+// without inventing a user turn. On any failure before the process starts,
+// the slot is released.
+//
+// The model and effort the process runs with come from sess: Create seeds
+// them from CreateInput (falling back to the profile), SwitchModel rewrites
+// them, and the CLI's init message later replaces sess.Model with the full
+// model name it actually resolved, which is itself a valid --model value on
+// the next resume.
 func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws domain.Workspace, profile domain.Profile, resume bool, firstMessage string) error {
 	token, err := s.resolveToken(ctx, sess.OwnerID)
 	if err != nil {
@@ -448,6 +474,8 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 			DisallowedTools: profile.DisallowedTools,
 			MaxTurns:        profile.MaxTurns,
 		},
+		Model:  sess.Model,
+		Effort: sess.Effort,
 	}
 	p, err := s.h.Start(ctx, spec)
 	if err != nil {
@@ -464,6 +492,9 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 		if err := s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning); err != nil {
 			return err
 		}
+	}
+	if firstMessage == "" {
+		return nil
 	}
 	s.recordUserTurn(ctx, sess, firstMessage)
 	return p.Send(ctx, harness.UserMessage{Text: firstMessage})

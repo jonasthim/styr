@@ -114,8 +114,12 @@ test('/settings lists three builtin profiles and a five-option mode select', asy
   // The mode select is a Radix Select now (role=combobox opening role=option
   // items in a portal), not a native <select>, so its options only exist in
   // the DOM while it is open - they can no longer be read off a closed,
-  // disabled builtin row the way <option> elements could.
-  const modeSelect = page.getByTestId(`profile-row-${editableId}`).getByRole('combobox')
+  // disabled builtin row the way <option> elements could. A row carries three
+  // comboboxes since card T38 (mode, model, effort), so each is addressed by
+  // its accessible name.
+  const modeSelect = page
+    .getByTestId(`profile-row-${editableId}`)
+    .getByRole('combobox', { name: `Mode for ${editableId}` })
   await expect(modeSelect).toHaveText('Default')
   await modeSelect.click()
 
@@ -125,7 +129,9 @@ test('/settings lists three builtin profiles and a five-option mode select', asy
 
   // A builtin's mode still shows its value, but cannot be changed.
   await page.keyboard.press('Escape')
-  const builtinSelect = page.getByTestId('profile-row-interactive').getByRole('combobox')
+  const builtinSelect = page
+    .getByTestId('profile-row-interactive')
+    .getByRole('combobox', { name: 'Mode for interactive' })
   await expect(builtinSelect).toHaveText('Default')
   await expect(builtinSelect).toBeDisabled()
 })

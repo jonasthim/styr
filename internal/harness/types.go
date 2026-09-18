@@ -49,6 +49,33 @@ type StartSpec struct {
 	// CLI's own system prompt. Not observable in the wire protocol; Styr never verifies it
 	// took effect beyond the flag being accepted.
 	SystemPrompt string
+
+	// Model, when non-empty, is passed as --model: either an alias ("fable", "opus",
+	// "sonnet", "haiku") or a full model name. Empty leaves the CLI's own default.
+	Model string
+	// FallbackModel, when non-empty, is passed as --fallback-model: the model the CLI
+	// falls back to when Model is unavailable (e.g. when it is rate limited).
+	FallbackModel string
+	// Effort, when non-empty, is passed as --effort: the reasoning effort level. One of
+	// ValidEfforts.
+	Effort string
+}
+
+// ValidEfforts are the reasoning-effort levels Styr accepts for StartSpec.Effort, in
+// increasing order. The empty string means "leave the CLI's own default".
+var ValidEfforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// ValidEffort reports whether effort is empty (the CLI default) or one of ValidEfforts.
+func ValidEffort(effort string) bool {
+	if effort == "" {
+		return true
+	}
+	for _, e := range ValidEfforts {
+		if e == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // validModes are the permission modes Styr is willing to pass to the CLI. Deliberately
@@ -75,6 +102,9 @@ func (s StartSpec) Validate() error {
 	if s.Profile.MaxTurns < 0 {
 		return errors.New("harness: max turns must be >= 0")
 	}
+	if !ValidEffort(s.Effort) {
+		return fmt.Errorf("harness: effort %q is not allowed", s.Effort)
+	}
 	return nil
 }
 
@@ -99,6 +129,10 @@ type Init struct {
 	SessionID string
 	Model     string
 	Tools     []string
+	// SlashCommands is the CLI's own `slash_commands` list from the init message: custom
+	// project/user commands, plugin skills and the CLI's built-ins, all without the leading
+	// slash (see internal/harness/claude/testdata/PROTOCOL.md).
+	SlashCommands []string
 }
 
 // ToolUse is a tool invocation requested by the model.

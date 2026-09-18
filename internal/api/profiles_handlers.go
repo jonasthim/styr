@@ -9,6 +9,7 @@ import (
 
 	"github.com/jonasthim/styr/internal/auth"
 	"github.com/jonasthim/styr/internal/domain"
+	"github.com/jonasthim/styr/internal/harness"
 )
 
 // registerProfilesRoutes mounts profile listing (any signed-in user) and
@@ -40,12 +41,15 @@ type profileDTO struct {
 	Unattended      bool     `json:"unattended"`
 	ApprovalTimeout int      `json:"approval_timeout"` // seconds
 	Builtin         bool     `json:"builtin"`
+	Model           string   `json:"model"`
+	Effort          string   `json:"effort"`
 }
 
 func profileDTOFrom(p domain.Profile) profileDTO {
 	return profileDTO{
 		ID: p.ID, Name: p.Name, Mode: p.Mode, AllowedTools: p.AllowedTools, DisallowedTools: p.DisallowedTools,
 		MaxTurns: p.MaxTurns, Unattended: p.Unattended, ApprovalTimeout: int(p.ApprovalTimeout / time.Second), Builtin: p.Builtin,
+		Model: p.Model, Effort: p.Effort,
 	}
 }
 
@@ -73,6 +77,8 @@ type profileInput struct {
 	MaxTurns        *int      `json:"max_turns"`
 	Unattended      *bool     `json:"unattended"`
 	ApprovalTimeout *int      `json:"approval_timeout"` // seconds
+	Model           *string   `json:"model"`
+	Effort          *string   `json:"effort"`
 }
 
 // handleProfilesCreate is POST /api/v1/profiles.
@@ -85,6 +91,10 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 		}
 		if !allowedModes[*in.Mode] {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "mode is not allowed")
+			return
+		}
+		if in.Effort != nil && !harness.ValidEffort(*in.Effort) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "effort is not allowed")
 			return
 		}
 		p := domain.Profile{ID: uuid.NewString(), Name: *in.Name, Mode: *in.Mode, Builtin: false}
@@ -103,6 +113,12 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 		if in.ApprovalTimeout != nil {
 			p.ApprovalTimeout = time.Duration(*in.ApprovalTimeout) * time.Second
 		}
+		if in.Model != nil {
+			p.Model = *in.Model
+		}
+		if in.Effort != nil {
+			p.Effort = *in.Effort
+		}
 		if err := d.Profiles.Create(r.Context(), p); err != nil {
 			WriteError(w, err)
 			return
@@ -111,9 +127,10 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 	}
 }
 
-// handleProfilesPatch is PATCH /api/v1/profiles/{id}. Builtin rows only
-// allow max_turns and approval_timeout to change; every profile (builtin or
-// not) rejects a mode that is not in allowedModes.
+// handleProfilesPatch is PATCH /api/v1/profiles/{id}. Builtin rows only allow max_turns,
+// approval_timeout, model and effort to change — the model and effort defaults are an
+// operator preference, not part of what makes a builtin profile safe. Every profile (builtin
+// or not) rejects a mode that is not in allowedModes and an effort that is not a valid level.
 func handleProfilesPatch(d *Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -131,8 +148,12 @@ func handleProfilesPatch(d *Deps) http.HandlerFunc {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "mode is not allowed")
 			return
 		}
+		if in.Effort != nil && !harness.ValidEffort(*in.Effort) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "effort is not allowed")
+			return
+		}
 		if p.Builtin && (in.Name != nil || in.Mode != nil || in.AllowedTools != nil || in.DisallowedTools != nil || in.Unattended != nil) {
-			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "builtin profiles only allow max_turns and approval_timeout to change")
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "builtin profiles only allow max_turns, approval_timeout, model and effort to change")
 			return
 		}
 		if in.Name != nil {
@@ -155,6 +176,12 @@ func handleProfilesPatch(d *Deps) http.HandlerFunc {
 		}
 		if in.ApprovalTimeout != nil {
 			p.ApprovalTimeout = time.Duration(*in.ApprovalTimeout) * time.Second
+		}
+		if in.Model != nil {
+			p.Model = *in.Model
+		}
+		if in.Effort != nil {
+			p.Effort = *in.Effort
 		}
 		if err := d.Profiles.Update(r.Context(), *p); err != nil {
 			WriteError(w, err)

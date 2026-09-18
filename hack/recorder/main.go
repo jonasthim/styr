@@ -24,6 +24,8 @@ func main() {
 	mode := flag.String("mode", "default", "permission mode")
 	jsonSchema := flag.String("json-schema", "", "JSON schema string passed as --json-schema (empty = omit)")
 	systemPrompt := flag.String("system-prompt", "", "system prompt string passed as --append-system-prompt (empty = omit)")
+	model := flag.String("model", "", "model alias or name passed as --model (empty = omit)")
+	effort := flag.String("effort", "", "reasoning effort passed as --effort (empty = omit)")
 	flag.Parse()
 	if *out == "" || *prompts == "" {
 		fmt.Fprintln(os.Stderr, "usage: recorder -out FILE -prompts 'a||b' [-cwd DIR]")
@@ -47,6 +49,12 @@ func main() {
 	}
 	if *systemPrompt != "" {
 		args = append(args, "--append-system-prompt", *systemPrompt)
+	}
+	if *model != "" {
+		args = append(args, "--model", *model)
+	}
+	if *effort != "" {
+		args = append(args, "--effort", *effort)
 	}
 	cmd := exec.Command("claude", args...)
 	cmd.Dir = *cwd

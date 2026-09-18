@@ -14,4 +14,10 @@ type Profile struct {
 	Unattended      bool
 	ApprovalTimeout time.Duration
 	Builtin         bool
+	// Model is the default model for sessions started under this profile: an alias
+	// ("fable", "opus", "sonnet", "haiku") or a full model name. Empty means the CLI's own
+	// default.
+	Model string
+	// Effort is the default reasoning effort ("", low, medium, high, xhigh, max).
+	Effort string
 }

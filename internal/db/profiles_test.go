@@ -95,3 +95,55 @@ func TestProfiles_CreateDuplicateNameConflicts(t *testing.T) {
 		t.Fatalf("Create duplicate: err = %v, want ErrConflict", err)
 	}
 }
+
+func TestProfiles_ModelAndEffortSeededOnUnattendedBuiltins(t *testing.T) {
+	ctx := context.Background()
+	profiles := NewProfiles(testOpenDB(t))
+
+	for _, id := range []string{"investigate", "remediate"} {
+		p, err := profiles.Get(ctx, id)
+		if err != nil {
+			t.Fatalf("Get %s: %v", id, err)
+		}
+		if p.Model != "sonnet" || p.Effort != "medium" {
+			t.Errorf("%s: model/effort = %q/%q, want sonnet/medium", id, p.Model, p.Effort)
+		}
+	}
+	interactive, err := profiles.Get(ctx, "interactive")
+	if err != nil {
+		t.Fatalf("Get interactive: %v", err)
+	}
+	if interactive.Model != "" || interactive.Effort != "" {
+		t.Errorf("interactive: model/effort = %q/%q, want the CLI defaults (empty)", interactive.Model, interactive.Effort)
+	}
+}
+
+func TestProfiles_UpdateModelAndEffort(t *testing.T) {
+	ctx := context.Background()
+	profiles := NewProfiles(testOpenDB(t))
+
+	p := newTestProfile("with-model")
+	p.Model, p.Effort = "opus", "high"
+	if err := profiles.Create(ctx, p); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := profiles.Get(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Model != "opus" || got.Effort != "high" {
+		t.Fatalf("after Create: model/effort = %q/%q, want opus/high", got.Model, got.Effort)
+	}
+
+	got.Model, got.Effort = "haiku", "low"
+	if err := profiles.Update(ctx, *got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err = profiles.Get(ctx, p.ID)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if got.Model != "haiku" || got.Effort != "low" {
+		t.Fatalf("after Update: model/effort = %q/%q, want haiku/low", got.Model, got.Effort)
+	}
+}

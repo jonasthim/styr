@@ -43,12 +43,35 @@ export type Workspace = Omit<Schemas['Workspace'], 'path' | 'error' | 'repo_url'
 
 export type ProfileMode = Schemas['Profile']['mode']
 
-export type Profile = Schemas['Profile']
+// Effort, Profile, Session and StatusInfo below intersect the generated
+// schema with the model/effort/slash-command contract (docs/openapi.yaml, card
+// T38). schema.d.ts is regenerated in the integration wave; until then these
+// intersections carry the fields the backend already returns, the same way
+// Workspace above carries T29's. Field names match the spec exactly, so each
+// intersection becomes a no-op once codegen catches up.
+
+/** Reasoning effort levels; '' means the CLI's own default. */
+export type Effort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** One entry of GET /status's model list: the alias the CLI takes, and its label. */
+export interface ModelOption {
+  alias: string
+  label: string
+}
+
+export type Profile = Schemas['Profile'] & {
+  model: string
+  effort: Effort
+}
 
 export type SessionState = Schemas['Session']['state']
 export type Origin = Schemas['Session']['origin']
 
-export type Session = Schemas['Session']
+export type Session = Schemas['Session'] & {
+  effort: Effort
+  /** What the CLI reported on its last init message, without the leading slash. */
+  slash_commands: string[]
+}
 
 export type SessionEvent = Omit<Schemas['Event'], 'payload'> & { payload: unknown }
 
@@ -60,7 +83,12 @@ export type Approval = Omit<Schemas['Approval'], 'input' | 'updated_input'> & {
   updated_input?: unknown
 }
 
-export type StatusInfo = Schemas['StatusInfo']
+export type StatusInfo = Schemas['StatusInfo'] & {
+  models: ModelOption[]
+  efforts: Exclude<Effort, ''>[]
+  /** CLI built-ins the composer's slash menu must hide (internal/harness/claude/builtins.go). */
+  hidden_commands: string[]
+}
 
 export type Provider = Schemas['Provider']
 

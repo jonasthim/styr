@@ -10,6 +10,8 @@ import type {
   Approval,
   ApiErrorBody,
   ClaudeTokenInfo,
+  Effort,
+  ModelOption,
   Me,
   Profile,
   Provider,
@@ -46,6 +48,30 @@ function verifyToken(token: string): ClaudeTokenInfo | null {
 }
 
 const DEV_USER_ID = '00000000-0000-4000-8000-000000000001'
+
+// --- T38: model, effort and slash commands (additive) ----------------------
+// GET /status's static choices, mirroring internal/api/status_handlers.go and
+// internal/harness/claude/builtins.go, plus the command list the CLI reports
+// on init (a realistic mix: custom commands, a plugin skill, a headless-safe
+// built-in and two hidden ones, so a spec can prove the filter works).
+const MOCK_MODELS: ModelOption[] = [
+  { alias: 'fable', label: 'Fable 5.1' },
+  { alias: 'opus', label: 'Opus 5' },
+  { alias: 'sonnet', label: 'Sonnet 5' },
+  { alias: 'haiku', label: 'Haiku 4.5' },
+]
+
+const MOCK_EFFORTS: Exclude<Effort, ''>[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+const MOCK_HIDDEN_COMMANDS = ['clear', 'doctor', 'color', 'reload-plugins', 'model', 'effort']
+
+const MOCK_SLASH_COMMANDS = ['compact', 'commit-commands:commit', 'superpowers:brainstorming', 'clear', 'doctor']
+
+// How long the mock waits before the resumed process "reports in" with a new
+// init event, so the header's "Resuming with …" state is observable the way it
+// is against the real CLI.
+const RESUME_DELAY_MS = 2000
+// --- end T38 block ---------------------------------------------------------
 
 // Fixed id for the Task 20 seeded session (fixture 02: a Read tool call then
 // "hello"). Hardcoded rather than exported: e2e specs run outside Vite, so
@@ -165,6 +191,8 @@ const profiles: Profile[] = [
     unattended: false,
     approval_timeout: 0,
     builtin: true,
+    model: '',
+    effort: '',
   },
   {
     id: 'investigate',
@@ -183,6 +211,8 @@ const profiles: Profile[] = [
     unattended: true,
     approval_timeout: 1800,
     builtin: true,
+    model: 'sonnet',
+    effort: 'medium',
   },
   {
     id: 'remediate',
@@ -203,6 +233,8 @@ const profiles: Profile[] = [
     unattended: true,
     approval_timeout: 1800,
     builtin: true,
+    model: 'sonnet',
+    effort: 'medium',
   },
   {
     // One editable profile alongside the three builtins. Builtin rows lock
@@ -217,6 +249,8 @@ const profiles: Profile[] = [
     unattended: false,
     approval_timeout: 0,
     builtin: false,
+    model: '',
+    effort: '',
   },
 ]
 
@@ -240,6 +274,8 @@ const sessions: Session[] = [
     tokens_out: 380,
     now_line: 'Waiting on your decision for Bash',
     model: 'claude-fable-5-1',
+    effort: 'medium',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: MOCK_EVENT_SESSION_ID,
@@ -260,6 +296,8 @@ const sessions: Session[] = [
     tokens_out: 2100,
     now_line: 'Editing src/auth.ts',
     model: 'claude-fable-5-1',
+    effort: 'medium',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: '00000000-0000-4000-8000-000000000004',
@@ -280,6 +318,8 @@ const sessions: Session[] = [
     tokens_out: 220,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: '00000000-0000-4000-8000-000000000006',
@@ -300,6 +340,8 @@ const sessions: Session[] = [
     tokens_out: 640,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     // Fixed id (also hardcoded in e2e/session.spec.ts) so the Task 20 session
@@ -325,6 +367,8 @@ const sessions: Session[] = [
     tokens_out: 111,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
 ]
 
@@ -627,6 +671,8 @@ export const handlers = [
       unattended: body.unattended ?? false,
       approval_timeout: body.approval_timeout ?? 0,
       builtin: false,
+      model: body.model ?? '',
+      effort: body.effort ?? '',
     }
     profiles.push(p)
     return HttpResponse.json(p, { status: 201 })
@@ -644,16 +690,19 @@ export const handlers = [
     const p = profiles.find((x) => x.id === params.id)
     if (!p) return HttpResponse.json(errorBody('not_found', 'profile not found'), { status: 404 })
     if (p.builtin) {
-      // "Builtin profiles only allow max_turns and approval_timeout to
-      // change" (docs/openapi.yaml) - reject any other field that would
-      // actually change the stored value.
-      const editableKeys = new Set(['max_turns', 'approval_timeout'])
+      // "Builtin profiles only allow max_turns, approval_timeout, model and
+      // effort to change" (docs/openapi.yaml) - reject any other field that
+      // would actually change the stored value.
+      const editableKeys = new Set(['max_turns', 'approval_timeout', 'model', 'effort'])
       const offending = (Object.keys(body) as Array<keyof Profile>).some(
         (key) => !editableKeys.has(key) && body[key] !== undefined && body[key] !== p[key],
       )
       if (offending) {
         return HttpResponse.json(
-          errorBody('immutable_field', 'Builtin profiles only allow max turns and approval timeout to change.'),
+          errorBody(
+            'immutable_field',
+            'Builtin profiles only allow max turns, approval timeout, model and effort to change.',
+          ),
           { status: 422 },
         )
       }
@@ -665,7 +714,14 @@ export const handlers = [
   http.get('/api/v1/sessions', () => HttpResponse.json(sessions)),
 
   http.post('/api/v1/sessions', async ({ request }) => {
-    const body = (await request.json()) as { workspace_id: string; profile_id: string; title: string; prompt: string }
+    const body = (await request.json()) as {
+      workspace_id: string
+      profile_id: string
+      title: string
+      prompt: string
+      model?: string
+      effort?: Effort
+    }
     const session: Session = {
       id: crypto.randomUUID(),
       owner_id: DEV_USER_ID,
@@ -684,7 +740,9 @@ export const handlers = [
       tokens_in: 0,
       tokens_out: 0,
       now_line: '',
-      model: 'claude-fable-5-1',
+      model: body.model || 'claude-fable-5-1',
+      effort: body.effort ?? '',
+      slash_commands: MOCK_SLASH_COMMANDS,
     }
     sessions.unshift(session)
     return HttpResponse.json(session, { status: 201 })
@@ -712,6 +770,42 @@ export const handlers = [
     session.last_active_at = iso(0)
     return new HttpResponse(null, { status: 202 })
   }),
+
+  // --- T38: switch a session's model and effort (additive) ------------------
+  // Mirrors sessions.Service.SwitchModel: refuse while waiting on an approval,
+  // otherwise accept and resume. The model only changes once the resumed
+  // process's init message lands, which is what clears the header's
+  // "Resuming with …" state.
+  http.post('/api/v1/sessions/:id/model', async ({ request, params }) => {
+    const body = (await request.json()) as { model?: string; effort?: Effort }
+    const session = sessions.find((s) => s.id === params.id)
+    if (!session) return HttpResponse.json(errorBody('not_found', 'session not found'), { status: 404 })
+    if (session.state === 'waiting') {
+      return HttpResponse.json(
+        errorBody('conflict', 'Answer the pending approval before switching model.'),
+        { status: 409 },
+      )
+    }
+    session.effort = body.effort ?? ''
+    setTimeout(() => {
+      session.model = body.model || session.model
+      session.last_active_at = iso(0)
+      const event = appendEvent(session.id, {
+        Type: 'init',
+        At: iso(0),
+        Init: { SessionID: session.id, Model: session.model, Tools: [] },
+      })
+      emitFakeEvent('session.event', {
+        kind: 'session.event',
+        session_id: session.id,
+        owner_id: DEV_USER_ID,
+        seq: event.seq,
+        payload: event.payload,
+      })
+    }, RESUME_DELAY_MS)
+    return new HttpResponse(null, { status: 202 })
+  }),
+  // --- end T38 block --------------------------------------------------------
   http.post('/api/v1/sessions/:id/interrupt', () => new HttpResponse(null, { status: 202 })),
   http.post('/api/v1/sessions/:id/close', ({ params }) => {
     const session = sessions.find((s) => s.id === params.id)
@@ -757,6 +851,9 @@ export const handlers = [
       open_processes: sessions.filter((s) => s.state === 'running' || s.state === 'waiting').length,
       slots: 4,
       queue_depth: 0,
+      models: MOCK_MODELS,
+      efforts: MOCK_EFFORTS,
+      hidden_commands: MOCK_HIDDEN_COMMANDS,
     }
     return HttpResponse.json(status)
   }),

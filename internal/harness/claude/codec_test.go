@@ -210,3 +210,41 @@ func TestInterruptFixture(t *testing.T) {
 		}
 	}
 }
+
+func TestInitFixtureCarriesSlashCommands(t *testing.T) {
+	evs := decodeFixture(t, "01_simple_text.jsonl")
+	if evs[0].Type != harness.EventInit {
+		t.Fatalf("first event = %+v, want init", evs[0])
+	}
+	cmds := evs[0].Init.SlashCommands
+	if len(cmds) == 0 {
+		t.Fatal("Init.SlashCommands is empty, want the CLI's slash_commands list")
+	}
+	for _, want := range []string{"compact", "clear"} {
+		found := false
+		for _, c := range cmds {
+			if c == want {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("slash commands %v lack %q", cmds, want)
+		}
+	}
+}
+
+// Fixture 07 is the /compact spike: the CLI answers a built-in itself with a synthetic
+// assistant text block and a zero-turn, zero-cost successful result.
+func TestSlashCompactFixtureAnswersAsText(t *testing.T) {
+	evs := decodeFixture(t, "07_slash_compact.jsonl")
+	if count(evs, harness.EventText) == 0 {
+		t.Fatal("want a text event: the CLI answers /compact itself")
+	}
+	last := evs[len(evs)-1]
+	if last.Type != harness.EventResult || last.Result.IsError {
+		t.Fatalf("last event = %+v, want a successful result", last)
+	}
+	if last.Result.NumTurns != 0 || last.Result.CostUSD != 0 {
+		t.Errorf("result num_turns=%d cost=%v, want 0 and 0 (no model call)", last.Result.NumTurns, last.Result.CostUSD)
+	}
+}

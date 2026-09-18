@@ -119,3 +119,86 @@ test('phone shows a tabs strip above the composer instead of a fixed side panel'
     expect(box!.width).toBeGreaterThanOrEqual(300)
   }
 })
+
+// T38: the `/` menu, the model and effort selects, and the resuming state.
+// Mock-only: the real backend's shell fake replays a fixture rather than
+// running the CLI, so it reports no slash commands and cannot resume under
+// new flags.
+
+test('typing / lists a custom command and hides a hidden built-in', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  const input = page.getByTestId('composer-input')
+  await input.fill('/')
+
+  const menu = page.getByTestId('slash-menu')
+  await expect(menu).toBeVisible()
+  // Seeded by the mock's MOCK_SLASH_COMMANDS.
+  await expect(menu.getByRole('option', { name: /commit-commands:commit/ })).toBeVisible()
+  // Styr's own commands are always offered.
+  await expect(menu.getByRole('option', { name: /\/help/ })).toBeVisible()
+  // …and the hidden built-ins never are: /clear resets the CLI's conversation
+  // under a new session id (internal/harness/claude/testdata/PROTOCOL.md).
+  await expect(menu.getByRole('option', { name: /\/clear/ })).toHaveCount(0)
+  await expect(menu.getByRole('option', { name: /\/doctor/ })).toHaveCount(0)
+})
+
+test('selecting a CLI command inserts it into the composer', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  const input = page.getByTestId('composer-input')
+  await input.fill('/compact')
+  await expect(page.getByTestId('slash-menu')).toBeVisible()
+  await input.press('Enter')
+
+  await expect(input).toHaveValue('/compact ')
+  await expect(page.getByTestId('slash-menu')).toHaveCount(0)
+})
+
+test('selecting /model focuses the header model select', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  const input = page.getByTestId('composer-input')
+  await input.fill('/model')
+  await expect(page.getByTestId('slash-menu')).toBeVisible()
+  await input.press('Enter')
+
+  await expect(input).toHaveValue('')
+  await expect(page.locator('#session-model-select')).toBeFocused()
+})
+
+test('/help lists the Styr and session commands', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  const input = page.getByTestId('composer-input')
+  await input.fill('/help')
+  await input.press('Enter')
+
+  const help = page.getByTestId('slash-help')
+  await expect(help).toBeVisible()
+  await expect(help).toContainText('/interrupt')
+  await expect(help).toContainText('/commit-commands:commit')
+})
+
+test('switching the model shows the resuming state', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: the fake CLI cannot resume under new flags')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  await page.locator('#session-model-select').click()
+  await page.getByRole('option', { name: 'Haiku 4.5' }).click()
+
+  await expect(page.getByTestId('model-resuming')).toContainText('Resuming with Haiku 4.5')
+  // The mock reports the resumed process's init after a delay, which is what
+  // clears the banner and shows the new model.
+  await expect(page.getByTestId('model-resuming')).toHaveCount(0, { timeout: 15_000 })
+  await expect(page.locator('#session-model-select')).toContainText('Haiku 4.5')
+})

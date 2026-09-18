@@ -15,15 +15,18 @@ import (
 // envelope is the superset of top-level fields Styr reads across every observed message type.
 // Unknown fields are ignored by encoding/json, so additional CLI fields never break decoding.
 type envelope struct {
-	Type      string          `json:"type"`
-	Subtype   string          `json:"subtype"`
-	SessionID string          `json:"session_id"`
-	Model     string          `json:"model"`
-	Tools     []string        `json:"tools"`
-	Message   *apiMessage     `json:"message"`
-	Event     *streamEvent    `json:"event"`
-	RequestID string          `json:"request_id"`
-	Request   *controlRequest `json:"request"`
+	Type      string   `json:"type"`
+	Subtype   string   `json:"subtype"`
+	SessionID string   `json:"session_id"`
+	Model     string   `json:"model"`
+	Tools     []string `json:"tools"`
+	// SlashCommands is the init message's `slash_commands` array: every command the CLI
+	// would accept as a `/name` user turn (custom commands, plugin skills, built-ins).
+	SlashCommands []string        `json:"slash_commands"`
+	Message       *apiMessage     `json:"message"`
+	Event         *streamEvent    `json:"event"`
+	RequestID     string          `json:"request_id"`
+	Request       *controlRequest `json:"request"`
 	// result fields
 	IsError      bool    `json:"is_error"`
 	NumTurns     int     `json:"num_turns"`
@@ -92,7 +95,7 @@ func DecodeLine(line []byte, now time.Time) []harness.Event {
 			return nil
 		}
 		return []harness.Event{{Type: harness.EventInit, At: now, Init: &harness.Init{
-			SessionID: env.SessionID, Model: env.Model, Tools: env.Tools,
+			SessionID: env.SessionID, Model: env.Model, Tools: env.Tools, SlashCommands: env.SlashCommands,
 		}}}
 
 	case "rate_limit_event":

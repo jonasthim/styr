@@ -24,6 +24,7 @@ import (
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
+	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/harness/fake"
 	"github.com/jonasthim/styr/internal/sessions"
 	"github.com/jonasthim/styr/internal/workspaces"
@@ -312,4 +313,12 @@ func (e *testEnv) doJSONHeaders(client *http.Client, method, path string, body, 
 		}
 	}
 	return resp.StatusCode, raw
+}
+
+// createResultStep is the single scripted turn most session handler tests need: the fake
+// harness answers the first Send with a successful result, so the session settles on open.
+func createResultStep() fake.Step {
+	return fake.Step{Events: []harness.Event{
+		{Type: harness.EventResult, Result: &harness.Result{Subtype: "success", NumTurns: 1}},
+	}}
 }

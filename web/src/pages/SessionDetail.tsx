@@ -78,7 +78,7 @@ export function SessionDetail() {
         </div>
         <SidePanel blocks={blocks} session={session} profile={profile} />
       </div>
-      <Composer sessionId={session.id} sessionState={session.state} />
+      <Composer session={session} />
     </div>
   )
 }
