@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -427,5 +428,170 @@ func newTestDomainUser(role domain.Role) domain.User {
 		ID: id, Issuer: "https://issuer.example", Subject: id,
 		Email: id + "@example.com", DisplayName: "Test User", Role: role,
 		CreatedAt: now, LastLoginAt: now,
+	}
+}
+
+// ---- bearer token authentication (T36) --------------------------------------
+
+// fakeAPITokenStore is a minimal in-memory APITokenStore, standing in for
+// T31's db.APITokens repository (which does not exist in this worktree; see
+// the T36 card). Keyed by hash, matching GetByHash's real lookup.
+type fakeAPITokenStore struct {
+	byHash   map[string]domain.APIToken
+	touched  map[string]int
+	touchErr error
+}
+
+func newFakeAPITokenStore() *fakeAPITokenStore {
+	return &fakeAPITokenStore{byHash: map[string]domain.APIToken{}, touched: map[string]int{}}
+}
+
+func (f *fakeAPITokenStore) put(tok domain.APIToken) { f.byHash[tok.TokenHash] = tok }
+
+func (f *fakeAPITokenStore) delete(hash string) { delete(f.byHash, hash) }
+
+func (f *fakeAPITokenStore) GetByHash(_ context.Context, hash string) (*domain.APIToken, error) {
+	tok, ok := f.byHash[hash]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return &tok, nil
+}
+
+func (f *fakeAPITokenStore) TouchUsed(_ context.Context, id string) error {
+	f.touched[id]++
+	return f.touchErr
+}
+
+func TestAuthenticate_BearerToken_SetsTokenAuthPrincipal(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	usr := newTestDomainUser(domain.RoleMember)
+	if err := users.Create(t.Context(), usr); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	raw, hash, _, err := GenerateAPIToken()
+	if err != nil {
+		t.Fatalf("GenerateAPIToken: %v", err)
+	}
+	store := newFakeAPITokenStore()
+	store.put(domain.APIToken{ID: "tok-1", UserID: usr.ID, Name: "ci", TokenHash: hash})
+	svc.WithAPITokens(store)
+
+	var gotPrincipal *Principal
+	handler := svc.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPrincipal, _ = PrincipalFrom(r.Context())
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if gotPrincipal == nil {
+		t.Fatal("expected a principal from the bearer token, got none")
+	}
+	if gotPrincipal.User.ID != usr.ID {
+		t.Errorf("principal user id = %q, want %q", gotPrincipal.User.ID, usr.ID)
+	}
+	if !gotPrincipal.TokenAuth {
+		t.Error("expected TokenAuth = true for a bearer-authenticated principal")
+	}
+	if gotPrincipal.LoginSessionID != "" {
+		t.Errorf("LoginSessionID = %q, want empty for a bearer-authenticated principal", gotPrincipal.LoginSessionID)
+	}
+	if store.touched["tok-1"] != 1 {
+		t.Errorf("TouchUsed called %d times, want 1", store.touched["tok-1"])
+	}
+}
+
+func TestAuthenticate_BearerToken_Expired_LeavesRequestUnauthenticated(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	usr := newTestDomainUser(domain.RoleMember)
+	if err := users.Create(t.Context(), usr); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	raw, hash, _, err := GenerateAPIToken()
+	if err != nil {
+		t.Fatalf("GenerateAPIToken: %v", err)
+	}
+	expired := time.Now().Add(-time.Hour)
+	store := newFakeAPITokenStore()
+	store.put(domain.APIToken{ID: "tok-1", UserID: usr.ID, Name: "ci", TokenHash: hash, ExpiresAt: &expired})
+	svc.WithAPITokens(store)
+
+	var ok bool
+	handler := svc.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok = PrincipalFrom(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if ok {
+		t.Error("expected an expired bearer token to leave the request unauthenticated")
+	}
+}
+
+func TestAuthenticate_BearerToken_Deleted_LeavesRequestUnauthenticated(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	usr := newTestDomainUser(domain.RoleMember)
+	if err := users.Create(t.Context(), usr); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
+	raw, hash, _, err := GenerateAPIToken()
+	if err != nil {
+		t.Fatalf("GenerateAPIToken: %v", err)
+	}
+	store := newFakeAPITokenStore()
+	store.put(domain.APIToken{ID: "tok-1", UserID: usr.ID, Name: "ci", TokenHash: hash})
+	svc.WithAPITokens(store)
+	store.delete(hash) // simulates the owner having revoked it
+
+	var ok bool
+	handler := svc.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok = PrincipalFrom(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+raw)
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if ok {
+		t.Error("expected a deleted bearer token to leave the request unauthenticated")
+	}
+}
+
+func TestAuthenticate_BearerToken_WithoutStore_LeavesRequestUnauthenticated(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	// No WithAPITokens call: apiTokens stays nil, matching a composition
+	// root that has not wired T31's repository yet.
+
+	var ok bool
+	handler := svc.Authenticate(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, ok = PrincipalFrom(r.Context())
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+APITokenPrefix+"whatever")
+	handler.ServeHTTP(httptest.NewRecorder(), req)
+
+	if ok {
+		t.Error("expected no principal when no APITokenStore is wired")
 	}
 }

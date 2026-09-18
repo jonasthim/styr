@@ -31,6 +31,77 @@ import (
 
 const testSecret = "0123456789abcdef0123456789abcdef" // 32+ bytes, for crypto.NewBox
 
+// fakeTokenStore is a minimal in-memory api.TokenStore, standing in for
+// T31's db.APITokens repository (which does not exist in this worktree; see
+// the T36 card). Delete and GetByHash both scope by owner, matching the
+// real repository's contract (Delete never removes another user's token;
+// GetByHash is used by auth.Service.principalFromBearer, not this store's
+// api.TokenStore interface, but the two share the same underlying rows in
+// tests that seed both - see (*testEnv).apiTokens).
+type fakeTokenStore struct {
+	mu   sync.Mutex
+	byID map[string]domain.APIToken
+}
+
+func newFakeTokenStore() *fakeTokenStore {
+	return &fakeTokenStore{byID: map[string]domain.APIToken{}}
+}
+
+func (f *fakeTokenStore) Create(_ context.Context, t domain.APIToken) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byID[t.ID] = t
+	return nil
+}
+
+func (f *fakeTokenStore) ListByUser(_ context.Context, userID string) ([]domain.APIToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]domain.APIToken, 0)
+	for _, t := range f.byID {
+		if t.UserID == userID {
+			out = append(out, t)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeTokenStore) Delete(_ context.Context, id, userID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.byID[id]
+	if !ok || t.UserID != userID {
+		return domain.ErrNotFound
+	}
+	delete(f.byID, id)
+	return nil
+}
+
+func (f *fakeTokenStore) GetByHash(_ context.Context, hash string) (*domain.APIToken, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.byID {
+		if t.TokenHash == hash {
+			cp := t
+			return &cp, nil
+		}
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (f *fakeTokenStore) TouchUsed(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.byID[id]
+	if !ok {
+		return domain.ErrNotFound
+	}
+	now := time.Now()
+	t.LastUsedAt = &now
+	f.byID[id] = t
+	return nil
+}
+
 // stubVerifier is a settable api.TokenVerifier: nil error (the default)
 // means every token verifies; setErr makes every call fail, as the real
 // verifier does for a bad token.
@@ -72,6 +143,7 @@ type testEnv struct {
 	bus          *events.Bus
 	harness      *fake.Harness
 	verifier     *stubVerifier
+	tokenStore   *fakeTokenStore
 	svc          *sessions.Service
 	usersDir     string
 
@@ -119,6 +191,7 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		bus:        events.New(),
 		harness:    fake.New(steps...),
 		verifier:   &stubVerifier{},
+		tokenStore: newFakeTokenStore(),
 		usersDir:   t.TempDir(),
 	}
 	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
@@ -148,9 +221,11 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
+	authSvc.WithAPITokens(e.tokenStore)
 
 	d := &api.Deps{
 		Auth:           authSvc,
+		TokenStore:     e.tokenStore,
 		Sessions:       e.svc,
 		Users:          e.users,
 		Tokens:         e.tokens,

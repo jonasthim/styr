@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
+
+	"github.com/jonasthim/styr/internal/auth"
 )
 
 // csrfHeader and csrfHeaderValue implement the CSRF rule: every
@@ -19,11 +21,21 @@ const (
 	csrfHeaderValue = "styr"
 )
 
-// csrfGuard enforces the CSRF header rule on non-safe methods.
+// csrfGuard enforces the CSRF header rule on non-safe methods. A request
+// authenticated via a personal API token (auth.Principal.TokenAuth, set by
+// auth.Service.Authenticate for an Authorization: Bearer styr_pat_... token)
+// is exempt: the header rule defends against a browser silently carrying an
+// ambient styr_session cookie to a cross-site request, which does not apply
+// to a script that must already know its own bearer secret to authenticate
+// at all.
 func csrfGuard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if p, ok := auth.PrincipalFrom(r.Context()); ok && p.TokenAuth {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -49,6 +49,7 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 			g.Use(middleware.Timeout(requestTimeout))
 
 			registerMeRoutes(g, d)
+			registerAPITokensRoutes(g, d)
 			registerUsersRoutes(g, d)
 			registerWorkspacesRoutes(g, d)
 			registerProfilesRoutes(g, d)

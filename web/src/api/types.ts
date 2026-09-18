@@ -65,3 +65,30 @@ export type StatusInfo = Schemas['StatusInfo']
 export type Provider = Schemas['Provider']
 
 export type ApiErrorBody = Schemas['ErrorBody']
+
+// ApiToken/ApiTokenCreated (T36, personal API tokens: GET/POST
+// /me/api-tokens, DELETE /me/api-tokens/{id}) are hand-written rather than
+// derived from Schemas, like Workspace above: schema.d.ts is regenerated
+// from docs/openapi.yaml by `npm run gen:api`, a step this card does not
+// run (schema.d.ts is a generated file owned by the codegen step, not this
+// card's allowed files), so Schemas['APIToken'] does not exist yet. Field
+// names match docs/openapi.yaml's APIToken/APITokenCreated schemas exactly,
+// so this becomes redundant rather than wrong once codegen catches up.
+export interface ApiToken {
+  id: string
+  name: string
+  prefix: string
+  created_at: string
+  last_used_at: string | null
+  expires_at: string | null
+}
+
+/** POST /me/api-tokens's response: the same shape as ApiToken (destructure
+ * to build one) plus `token`, the raw secret shown once and never returned
+ * by any other response. */
+export interface ApiTokenCreated {
+  id: string
+  name: string
+  prefix: string
+  token: string
+}
