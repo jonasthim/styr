@@ -3,7 +3,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -117,7 +119,8 @@ func handleMeTokenPut(d *Deps) http.HandlerFunc {
 			return
 		}
 		if err := d.Verifier.Verify(r.Context(), in.Token); err != nil {
-			writeErrorCode(w, http.StatusUnprocessableEntity, "token_invalid", "the token could not be verified")
+			slog.Warn("claude token verification failed", "scope", "user", "err", err)
+			writeErrorCode(w, http.StatusUnprocessableEntity, "token_invalid", "the token could not be verified: "+strings.TrimPrefix(err.Error(), "claude: verify: "))
 			return
 		}
 		ciphertext, nonce, err := d.Box.Seal([]byte(in.Token))

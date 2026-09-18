@@ -90,3 +90,23 @@ func TestVerifierDefaultTimeout(t *testing.T) {
 		t.Fatalf("timeout() = %v, want 3s", v2.timeout())
 	}
 }
+
+func TestVerifyErrorCarriesRedactedCLIDetail(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\necho \"Failed to authenticate. API Error: 401 OAuth access token is invalid. token=$CLAUDE_CODE_OAUTH_TOKEN\" >&2\nexit 1\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	err := Verifier{Bin: stub, Timeout: 10 * time.Second}.Verify(context.Background(), "sk-ant-oat01-secret-value")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "401") || !strings.Contains(msg, "exited 1") {
+		t.Fatalf("error lacks CLI detail: %q", msg)
+	}
+	if strings.Contains(msg, "secret-value") || !strings.Contains(msg, "[redacted]") {
+		t.Fatalf("token leaked or not redacted: %q", msg)
+	}
+}
