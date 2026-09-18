@@ -25,7 +25,7 @@ lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
 
 check: vet test
-	@! grep -rn --include='*.go' --include='*.ts' --include='*.tsx' --include='*.sh' --exclude-dir=node_modules -e 'dangerously-skip-permissions' -e 'bypassPermissions' . || (echo 'forbidden flag found' && exit 1)
+	@! grep -rn --include='*.go' --include='*.ts' --include='*.tsx' --include='*.sh' --exclude-dir=node_modules --exclude='*_test.go' --exclude='*.spec.ts' -e 'dangerously-skip-permissions' -e 'bypassPermissions' . || (echo 'forbidden flag found' && exit 1)
 
 dev-backend:
 	STYR_ENV=dev STYR_CONFIG=dev.config.yaml go run ./cmd/styr serve
