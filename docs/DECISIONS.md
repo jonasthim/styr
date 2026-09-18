@@ -231,3 +231,52 @@ simplifying the plan-approval flow to a single `Decide` call plus a UI re-render
 event arrives. The tradeoff is that "approve" and "let it start editing" are the same action —
 Styr cannot approve a plan without also, in effect, un-pausing implementation, matching the real
 CLI's own coupling of the two rather than trying to add a pause point the protocol doesn't offer.
+
+## ADR-013: Styr-managed worktrees and per-turn checkpoints
+
+Date: 2026-09-18. Status: accepted.
+
+Context: the CLI itself already accepts a `--worktree <name>` flag (`harness.StartSpec.Worktree`,
+`internal/harness/claude/harness.go`'s `BuildArgs`) — it will create and manage a git worktree
+for the process on its own. v0.3's Review tab, checkpoints, commit and PR flow all need to know
+exactly where that worktree lives on disk *before* the CLI process even starts (to set the
+process's `cwd` to it, per ADR-001's `-p` model of one process per session) and need to run
+ordinary `git`/`gh` commands against it independently of any live CLI process (a diff or a
+commit while the session is idle between turns, a rewind or discard while it's closed). The
+CLI's own `--worktree` only gives it a *name*, not a resolvable host path — Styr would have to
+either guess or reverse-engineer where the CLI put it, and would have no way to create the
+worktree ahead of starting the process (defeating "cwd is the worktree from the first turn") or
+to touch it while no process is running.
+
+Decision: Styr manages worktrees itself via a new `internal/gitops` package that drives `git`
+directly (`git worktree add -b <branch> <dir> <base>`, plain `os/exec`, no shell), never passing
+`--worktree` to the CLI. Styr picks the path (`<workspace>/.styr/worktrees/<session id>`) and
+the branch name before creating anything, so both are known and stable for the whole life of the
+session — Review, checkpoint, commit, rewind, discard and PR operations all address the worktree
+by that same path regardless of whether a CLI process is currently running against it. A
+`--worktree`-based alternative would need the CLI's cooperation (and its own control-protocol
+surface, none of which is documented) for anything Styr needs to do to that directory outside a
+live turn.
+
+This only works because a `T41` spike answered the question a checkpoint-between-turns scheme
+depends on: does committing the workspace's git state *while a CLI process has it open* disturb
+that process? It does not — a `git add -A && git commit` run between two turns of the same live
+session left the next turn unaffected (`internal/harness/claude/testdata/PROTOCOL.md`,
+"Checkpoint safety between turns"; the CLI only reads files off disk per tool call, never git
+history or the index). That is what makes `internal/gitops.Worktree.Checkpoint` safe to run
+after every turn, unconditionally, without coordinating with the harness process at all.
+
+`Checkpoint` commits under a fixed `Styr <styr@local>` identity, one per turn that actually
+changed something (a clean diff commits nothing); `Commit` — the explicit "publish this" action
+— then folds every checkpoint commit made since the session's `base_ref` into one commit with
+`git reset --soft base_ref` before committing the working tree fresh under the *calling user's*
+identity. The checkpoint trail is disposable bookkeeping for Rewind, never the artifact that
+leaves the session: nothing downstream (a PR, a merge to `base_branch`) ever sees a
+"styr: checkpoint after turn N" commit on its own.
+
+Consequences: Styr owns one more moving part (`internal/gitops`, a package of `git`/`gh`
+invocations to keep in sync with whatever git version operators run) that a `--worktree` flag
+would have handed to the CLI, but in exchange gets a worktree path it controls fully — including
+before the process starts and while the session is closed — and a checkpoint scheme with no
+coupling to the harness protocol at all. `harness.StartSpec.Worktree` stays in the type for a
+future harness that might genuinely need it, but `internal/sessions` never sets it.

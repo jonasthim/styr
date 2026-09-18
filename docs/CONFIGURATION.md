@@ -65,12 +65,34 @@ Styr uses two distinct kinds of Claude token:
   `DELETE /me/api-tokens/{id}`; only its hash is stored, so a lost token cannot be recovered, only
   replaced.
 
+## Workspaces and worktrees
+
+A workspace's own `worktrees` flag (`POST /workspaces`, `PATCH /workspaces/{id}`) opts every
+session created against it into a private git worktree instead of running in the workspace's
+shared checkout — see `docs/REVIEW.md` for the resulting Review tab, checkpoints, commit and PR
+flow. Two more workspace fields tune that behaviour, both plain columns with no `config.yaml`
+key:
+
+| Field | Default | Notes |
+|---|---|---|
+| `base_branch` | `""` | The branch new session worktrees are created from. Empty means "whatever the checkout's current branch is" at the moment each worktree is created, resolved fresh per session rather than cached. |
+| `auto_checkpoint` | `true` | Whether Styr commits the session's worktree after every turn that changed something, so the session can be rewound turn by turn. Off means only manual actions (Commit, Discard) ever touch the worktree's git history. |
+
+Opening a pull request from the Review tab additionally needs a `git remote` named `origin` on
+the workspace's checkout, and the `gh` CLI installed and authenticated **in the environment
+`styr serve` itself runs under** — the `styr` system user on the install-script/systemd
+deployment (`deploy/styr.service`'s `User=styr`), not any per-user Claude `HOME` under
+`data_dir/users/<id>`. Set it up once with `sudo -u styr gh auth login`, or by placing a `gh`
+auth token in that user's own `HOME` (`gh auth login --with-token`, or a `GH_TOKEN`/
+`GITHUB_TOKEN` in `styr`'s own environment file). Missing either answers the PR request with a
+409 (`no_remote` or `gh_unavailable`) rather than failing silently.
+
 ## Profiles
 
 A profile bundles the settings a session starts with: workspace, permission mode and
-allow/deny tool lists, plus (from v0.2) worktree behaviour, a default **model** and reasoning
-**effort**. Profiles are configured in the UI under Settings (admin) and picked per-session from
-the Sessions and Inbox screens; there is no `config.yaml` key for them.
+allow/deny tool lists, a default **model** and reasoning **effort**. Profiles are configured in
+the UI under Settings (admin) and picked per-session from the Sessions and Inbox screens; there
+is no `config.yaml` key for them.
 
 `model` is an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model name, passed to the CLI
 as `--model`; empty means the CLI's own default. `effort` is one of `low`, `medium`, `high`,
@@ -102,7 +124,17 @@ Everything Styr owns lives under `data_dir`:
   users/<user-id>/      one directory per user, used as that user's Claude CLI HOME
                          (keeps ~/.claude state, credentials and settings isolated per user)
   workspaces/<name>/    registered workspace checkouts sessions run against
+    .styr/worktrees/<session-id>/   one git worktree per session, on a worktree-enabled
+                                     workspace (see Workspaces and worktrees above)
 ```
+
+A session worktree is a full checkout of the files at `base_ref`, so disk usage under a
+workspace grows with however many worktree sessions are still open on it — plan `data_dir`
+capacity accordingly for a large repository with many concurrent sessions. **Discard** (or
+closing out a session whose work was already committed or turned into a PR) removes its
+worktree directory immediately (`git worktree remove --force`); nothing prunes an open session's
+worktree automatically, since its checkpoints and uncommitted changes are the whole point of
+keeping it around.
 
 `internal/config/config.go`'s `DBPath()`, `UsersDir()` and `WorkspacesDir()` are the
 authoritative paths (`<data_dir>/styr.db`, `<data_dir>/users`, `<data_dir>/workspaces`).
