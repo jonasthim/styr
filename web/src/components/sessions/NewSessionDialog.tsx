@@ -15,7 +15,7 @@ import { FolderPlus } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api, ApiError } from '../../api/client'
 import type { Session } from '../../api/types'
-import { useMe } from '../../hooks/useMe'
+import { workspaceOptionLabel } from '../workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, Field, Input, Kbd, MOD_KEY, Select, Textarea } from '../ui'
 
 const MAX_PROMPT_ROWS = 8
@@ -30,8 +30,7 @@ interface CreateSessionBody {
 export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  const { data: me } = useMe()
-  const workspaces = useQuery({ ...q.workspaces(), enabled: open })
+  const workspacesQuery = useQuery({ ...q.workspaces(), enabled: open })
   const profiles = useQuery({ ...q.profiles(), enabled: open })
 
   const [workspaceId, setWorkspaceId] = useState('')
@@ -40,22 +39,24 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const noWorkspaces = workspaces.isSuccess && workspaces.data.length === 0
-  const isAdmin = me?.role === 'admin'
+  // A workspace still cloning (or one that failed) can't run a session yet -
+  // only "ready" ones are offered here.
+  const readyWorkspaces = workspacesQuery.data?.filter((w) => w.state === 'ready') ?? []
+  const noWorkspaces = workspacesQuery.isSuccess && readyWorkspaces.length === 0
 
-  // Default the workspace to the first one once the list loads, and the
+  // Default the workspace to the first ready one once the list loads, and the
   // profile to that workspace's default whenever the workspace changes -
   // "profile select (defaults to workspace default)".
   useEffect(() => {
     if (!open) return
-    if (workspaceId || !workspaces.data || workspaces.data.length === 0) return
-    setWorkspaceId(workspaces.data[0].id)
-  }, [open, workspaces.data, workspaceId])
+    if (workspaceId || readyWorkspaces.length === 0) return
+    setWorkspaceId(readyWorkspaces[0].id)
+  }, [open, readyWorkspaces, workspaceId])
 
   useEffect(() => {
-    const workspace = workspaces.data?.find((w) => w.id === workspaceId)
+    const workspace = readyWorkspaces.find((w) => w.id === workspaceId)
     if (workspace) setProfileId(workspace.default_profile_id)
-  }, [workspaceId, workspaces.data])
+  }, [workspaceId, readyWorkspaces])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -166,21 +167,15 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
             <div className="min-w-0">
               <p className="text-[13px] font-medium text-fg-primary">No workspaces yet</p>
               <p className="mt-1 text-[13px] text-fg-secondary">
-                {isAdmin ? (
-                  <>
-                    A session runs inside a registered checkout.{' '}
-                    <Link
-                      to="/workspaces"
-                      onClick={() => handleOpenChange(false)}
-                      className="text-accent underline-offset-2 hover:underline"
-                    >
-                      Add a workspace
-                    </Link>{' '}
-                    to start one.
-                  </>
-                ) : (
-                  'Ask an admin to add a workspace, then start a session here.'
-                )}
+                A session runs inside a workspace.{' '}
+                <Link
+                  to="/workspaces"
+                  onClick={() => handleOpenChange(false)}
+                  className="text-accent underline-offset-2 hover:underline"
+                >
+                  Add a workspace
+                </Link>{' '}
+                to start one.
               </p>
             </div>
           </div>
@@ -201,7 +196,7 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
                     value={workspaceId}
                     onValueChange={setWorkspaceId}
                     placeholder="Choose a workspace"
-                    options={(workspaces.data ?? []).map((w) => ({ value: w.id, label: w.name }))}
+                    options={readyWorkspaces.map((w) => ({ value: w.id, label: workspaceOptionLabel(w) }))}
                   />
                 )}
               </Field>

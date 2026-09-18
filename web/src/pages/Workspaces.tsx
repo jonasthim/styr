@@ -1,39 +1,31 @@
-// Information architecture #9 ("Workspaces"): registered checkouts, default
-// profile, worktree setting. Everyone can see the table; only admins get
-// the "Add workspace" dialog (POST /api/v1/workspaces, path errors inline).
-import { useState, type FormEvent } from 'react'
+// Information architecture #9 ("Workspaces"): a per-user list of checkouts a
+// session can run inside. Styr owns the path for a git or empty workspace -
+// nobody types one - so nothing on this page shows a filesystem path unless
+// the row's source is "path" (an admin registering a repo that already
+// exists on the machine), and even then only to an admin.
+import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { FolderKanban, Plus } from 'lucide-react'
-import { api, ApiError } from '../api/client'
+import { FolderKanban, Plus, Trash2 } from 'lucide-react'
+import { api } from '../api/client'
 import { q } from '../api/queries'
 import { useMe } from '../hooks/useMe'
-import type { Workspace } from '../api/types'
-import {
-  Button,
-  Dialog,
-  DialogContent,
-  EmptyState,
-  Field,
-  Input,
-  PageHeader,
-  Select,
-  Switch,
-  TableFrame,
-  Td,
-  Th,
-  Tr,
-} from '../components/ui'
+import type { Profile, Workspace } from '../api/types'
+import { AddWorkspaceForm } from '../components/workspaces/AddWorkspaceForm'
+import { DeleteWorkspaceDialog } from '../components/workspaces/DeleteWorkspaceDialog'
+import { WorkspaceSourceChip, WorkspaceStateBadge } from '../components/workspaces/workspaceDisplay'
+import { Button, Dialog, DialogContent, EmptyState, PageHeader, Select, Switch, TableFrame, Td, Th, Tr } from '../components/ui'
 
-function WorktreesSwitch({ workspace, editable }: { workspace: Workspace; editable: boolean }) {
+function WorktreesSwitch({ workspace }: { workspace: Workspace }) {
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
 
   async function handleChange(checked: boolean) {
-    if (!editable) return
     setPending(true)
     try {
       await api(`/api/v1/workspaces/${workspace.id}`, { method: 'PATCH', json: { worktrees: checked } })
-      await queryClient.invalidateQueries({ queryKey: ['workspaces'] })
+      queryClient.setQueryData<Workspace[]>(['workspaces'], (prev) =>
+        prev?.map((w) => (w.id === workspace.id ? { ...w, worktrees: checked } : w)),
+      )
     } finally {
       setPending(false)
     }
@@ -42,112 +34,61 @@ function WorktreesSwitch({ workspace, editable }: { workspace: Workspace; editab
   return (
     <Switch
       checked={workspace.worktrees}
-      disabled={!editable || pending}
+      disabled={pending}
       onCheckedChange={(checked) => void handleChange(checked)}
       aria-label={`Worktrees for ${workspace.name}`}
     />
   )
 }
 
-function AddWorkspaceDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+function DefaultProfileSelect({ workspace, profiles }: { workspace: Workspace; profiles: Profile[] }) {
   const queryClient = useQueryClient()
-  const profiles = useQuery({ ...q.profiles(), enabled: open })
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [defaultProfileId, setDefaultProfileId] = useState('')
-  const [worktrees, setWorktrees] = useState(false)
-  const [submitting, setSubmitting] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [pending, setPending] = useState(false)
 
-  const resolvedProfileId = defaultProfileId || profiles.data?.[0]?.id || ''
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault()
-    setSubmitting(true)
-    setErrorMessage('')
+  async function handleChange(value: string) {
+    setPending(true)
     try {
-      await api('/api/v1/workspaces', {
-        method: 'POST',
-        json: { name, path, default_profile_id: resolvedProfileId, worktrees },
-      })
-      await queryClient.invalidateQueries({ queryKey: ['workspaces'] })
-      setName('')
-      setPath('')
-      setWorktrees(false)
-      onOpenChange(false)
-    } catch (err) {
-      setErrorMessage(err instanceof ApiError ? err.message : 'Something went wrong adding the workspace.')
+      await api(`/api/v1/workspaces/${workspace.id}`, { method: 'PATCH', json: { default_profile_id: value } })
+      queryClient.setQueryData<Workspace[]>(['workspaces'], (prev) =>
+        prev?.map((w) => (w.id === workspace.id ? { ...w, default_profile_id: value } : w)),
+      )
     } finally {
-      setSubmitting(false)
+      setPending(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        title="Add workspace"
-        description="Register a checkout Styr can start sessions against."
-        width={460}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" type="submit" form="add-workspace-form" loading={submitting}>
-              Add workspace
-            </Button>
-          </>
-        }
-      >
-        <form id="add-workspace-form" onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
-          <Field label="Name">
-            {({ id }) => <Input id={id} required value={name} onChange={(e) => setName(e.target.value)} />}
-          </Field>
-          <Field label="Path" hint="An absolute path on the machine running Styr.">
-            {({ id, 'aria-describedby': describedBy }) => (
-              <Input
-                id={id}
-                mono
-                required
-                aria-describedby={describedBy}
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder="/home/dev/project"
-              />
-            )}
-          </Field>
-          <Field label="Default profile">
-            {({ id }) => (
-              <Select
-                id={id}
-                value={resolvedProfileId}
-                onValueChange={setDefaultProfileId}
-                placeholder="Choose a profile"
-                options={(profiles.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
-              />
-            )}
-          </Field>
+    <Select
+      aria-label={`Default profile for ${workspace.name}`}
+      value={workspace.default_profile_id}
+      disabled={pending}
+      onValueChange={(value) => void handleChange(value)}
+      options={profiles.map((p) => ({ value: p.id, label: p.name }))}
+      className="max-w-[170px]"
+    />
+  )
+}
 
-          <div className="flex items-center justify-between gap-4 rounded-[var(--radius-control)] border border-hairline bg-surface-1 px-3 py-2.5">
-            <label htmlFor="add-workspace-worktrees" className="text-[13px] text-fg-primary">
-              Worktrees
-              <span className="mt-0.5 block text-[12px] text-fg-secondary">Give each session its own git worktree.</span>
-            </label>
-            <Switch id="add-workspace-worktrees" checked={worktrees} onCheckedChange={setWorktrees} />
-          </div>
+function RetryButton({ workspaceId }: { workspaceId: string }) {
+  const queryClient = useQueryClient()
+  const [pending, setPending] = useState(false)
 
-          {errorMessage && (
-            <p
-              role="alert"
-              data-testid="add-workspace-error"
-              className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
-            >
-              {errorMessage}
-            </p>
-          )}
-        </form>
-      </DialogContent>
-    </Dialog>
+  async function handleRetry() {
+    setPending(true)
+    try {
+      await api(`/api/v1/workspaces/${workspaceId}/retry`, { method: 'POST' })
+      queryClient.setQueryData<Workspace[]>(['workspaces'], (prev) =>
+        prev?.map((w) => (w.id === workspaceId ? { ...w, state: 'cloning', error: null } : w)),
+      )
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Button variant="secondary" size="sm" onClick={() => void handleRetry()} loading={pending}>
+      Retry
+    </Button>
   )
 }
 
@@ -155,67 +96,75 @@ export function Workspaces() {
   const { data: me } = useMe()
   const workspaces = useQuery(q.workspaces())
   const profiles = useQuery(q.profiles())
-  const [dialogOpen, setDialogOpen] = useState(false)
+  const [addOpen, setAddOpen] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null)
   const isAdmin = me?.role === 'admin'
   const isEmpty = workspaces.isSuccess && workspaces.data.length === 0
 
-  function profileName(id: string): string {
-    return profiles.data?.find((p) => p.id === id)?.name ?? id
-  }
+  const addButton = (
+    <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setAddOpen(true)}>
+      Add workspace
+    </Button>
+  )
 
   return (
-    <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col px-4 py-6 sm:px-6">
+    <div className="mx-auto flex w-full max-w-[960px] flex-1 flex-col px-4 py-6 sm:px-6">
       <PageHeader
         title="Workspaces"
-        description="Checkouts on this machine that a session can run inside."
-        actions={
-          isAdmin && !isEmpty ? (
-            <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
-              Add workspace
-            </Button>
-          ) : undefined
-        }
+        description="Where your sessions run. Bring a repository, start from an empty folder, or point at a checkout already on this machine."
+        actions={!isEmpty ? addButton : undefined}
       />
 
       {isEmpty && (
         <EmptyState
           icon={<FolderKanban size={18} aria-hidden />}
           title="No workspaces yet"
-          description={
-            isAdmin
-              ? 'Register a checkout and Styr can start sessions inside it.'
-              : 'Ask an admin to register a checkout, then you can start sessions in it.'
-          }
-          action={
-            isAdmin ? (
-              <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
-                Add workspace
-              </Button>
-            ) : undefined
-          }
+          description="Styr keeps the checkout; you keep the prompt. Add a git repository or start from an empty folder."
+          action={addButton}
         />
       )}
 
       {workspaces.data && workspaces.data.length > 0 && (
-        <TableFrame className="mt-5">
+        <TableFrame className="mt-5" minWidth={760}>
           <thead>
             <tr>
               <Th>Name</Th>
-              <Th>Path</Th>
+              <Th>Source</Th>
+              <Th>State</Th>
               <Th>Default profile</Th>
               <Th className="text-right">Worktrees</Th>
+              <Th className="w-10">
+                <span className="sr-only">Actions</span>
+              </Th>
             </tr>
           </thead>
           <tbody>
             {workspaces.data.map((workspace) => (
               <Tr key={workspace.id} data-testid={`workspace-row-${workspace.id}`}>
                 <Td className="font-medium">{workspace.name}</Td>
-                <Td className="font-mono text-[12px] text-fg-secondary">{workspace.path}</Td>
-                <Td className="text-fg-secondary">{profileName(workspace.default_profile_id)}</Td>
+                <Td>
+                  <WorkspaceSourceChip workspace={workspace} isAdmin={isAdmin} />
+                </Td>
+                <Td>
+                  <div className="flex items-center gap-2">
+                    <WorkspaceStateBadge workspace={workspace} />
+                    {workspace.state === 'failed' && <RetryButton workspaceId={workspace.id} />}
+                  </div>
+                </Td>
+                <Td>{profiles.data && <DefaultProfileSelect workspace={workspace} profiles={profiles.data} />}</Td>
                 <Td className="text-right">
                   <div className="flex justify-end">
-                    <WorktreesSwitch workspace={workspace} editable={isAdmin} />
+                    <WorktreesSwitch workspace={workspace} />
                   </div>
+                </Td>
+                <Td className="text-right">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={`Delete ${workspace.name}`}
+                    onClick={() => setDeleteTarget(workspace)}
+                    icon={<Trash2 size={14} aria-hidden />}
+                  />
                 </Td>
               </Tr>
             ))}
@@ -223,7 +172,23 @@ export function Workspaces() {
         </TableFrame>
       )}
 
-      <AddWorkspaceDialog open={dialogOpen} onOpenChange={setDialogOpen} />
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent
+          title="Add workspace"
+          description="You never need to type a server path unless you're registering a repository that only exists on this machine."
+          width={480}
+        >
+          <AddWorkspaceForm isAdmin={isAdmin} onCreated={() => setAddOpen(false)} onCancel={() => setAddOpen(false)} />
+        </DialogContent>
+      </Dialog>
+
+      <DeleteWorkspaceDialog
+        workspace={deleteTarget}
+        open={deleteTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteTarget(null)
+        }}
+      />
     </div>
   )
 }

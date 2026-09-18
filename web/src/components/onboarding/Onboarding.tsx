@@ -4,7 +4,7 @@
 // cannot itself decide *when* to redirect here - that lives on the Inbox
 // route per the card, which is outside this card's file list - so it only
 // owns what happens once a browser is already on /welcome.
-import { useState, type FormEvent, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Check } from 'lucide-react'
@@ -12,8 +12,10 @@ import clsx from 'clsx'
 import { api, ApiError } from '../../api/client'
 import { q } from '../../api/queries'
 import { useMe } from '../../hooks/useMe'
+import type { Workspace } from '../../api/types'
 import { ClaudeTokenCard } from '../profile/ClaudeTokenCard'
-import { Button, Card, Field, Input, PageHeader, Textarea } from '../ui'
+import { AddWorkspaceForm } from '../workspaces/AddWorkspaceForm'
+import { Button, Card, PageHeader, Textarea } from '../ui'
 
 const WELCOMED_KEY = 'styr.welcomed'
 const FIRST_PROMPT = 'Summarise this repository in five bullet points.'
@@ -34,11 +36,11 @@ const STEPS: Array<{ index: StepIndex; label: string }> = [
   { index: 3, label: 'Start your first session' },
 ]
 
-function ProgressRail({ step }: { step: StepIndex }) {
+function ProgressRail({ step, workspaceReady }: { step: StepIndex; workspaceReady: boolean }) {
   return (
     <ol className="flex gap-4 sm:flex-col sm:gap-1" aria-label="Onboarding steps">
       {STEPS.map((s) => {
-        const done = s.index < step
+        const done = s.index < step || (s.index === 2 && workspaceReady)
         const active = s.index === step
         return (
           <li
@@ -122,75 +124,25 @@ function TokenStep({ onContinue, onSkip }: { onContinue: () => void; onSkip: () 
 function WorkspaceStep({ onContinue, onSkip }: { onContinue: () => void; onSkip: () => void }) {
   const { data: me } = useMe()
   const isAdmin = me?.role === 'admin'
-  const queryClient = useQueryClient()
-  const profiles = useQuery(q.profiles())
-  const [name, setName] = useState('')
-  const [path, setPath] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
-  const [added, setAdded] = useState(false)
-
-  async function handleSubmit(event: FormEvent) {
-    event.preventDefault()
-    setSubmitting(true)
-    setErrorMessage('')
-    try {
-      await api('/api/v1/workspaces', {
-        method: 'POST',
-        json: { name, path, default_profile_id: profiles.data?.[0]?.id ?? '', worktrees: false },
-      })
-      await queryClient.invalidateQueries({ queryKey: ['workspaces'] })
-      setAdded(true)
-    } catch (err) {
-      setErrorMessage(err instanceof ApiError ? err.message : 'Something went wrong adding the workspace.')
-    } finally {
-      setSubmitting(false)
-    }
-  }
+  const [added, setAdded] = useState<Workspace | null>(null)
 
   return (
     <div>
       <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">Add a workspace</h2>
+      <p className="mt-1 text-[13px] text-fg-secondary">
+        Bring a git repository or start from an empty folder - Styr keeps the checkout on this machine for you, no
+        admin needed.
+      </p>
 
-      {!isAdmin && (
-        <p className="mt-1 text-[13px] text-fg-secondary" data-testid="onboarding-ask-admin">
-          Only admins can register a workspace. Ask an admin to add one, then come back here.
+      {added ? (
+        <p className="mt-4 text-[13px] text-fg-secondary" data-testid="onboarding-workspace-added">
+          {added.name} is ready.
         </p>
+      ) : (
+        <div className="mt-4">
+          <AddWorkspaceForm isAdmin={isAdmin} onCreated={setAdded} />
+        </div>
       )}
-
-      {isAdmin && !added && (
-        <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 flex flex-col gap-4">
-          <Field label="Name">
-            {({ id }) => <Input id={id} required value={name} onChange={(e) => setName(e.target.value)} />}
-          </Field>
-          <Field label="Path" hint="An absolute path on the machine running Styr.">
-            {({ id, 'aria-describedby': describedBy }) => (
-              <Input
-                id={id}
-                mono
-                required
-                aria-describedby={describedBy}
-                value={path}
-                onChange={(e) => setPath(e.target.value)}
-                placeholder="/home/dev/project"
-              />
-            )}
-          </Field>
-          {errorMessage && (
-            <p
-              role="alert"
-              className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
-            >
-              {errorMessage}
-            </p>
-          )}
-          <Button type="submit" className="self-start" loading={submitting}>
-            Add workspace
-          </Button>
-        </form>
-      )}
-
-      {isAdmin && added && <p className="mt-3 text-[13px] text-fg-secondary">Workspace added.</p>}
 
       <StepFooter onSkip={onSkip}>
         <Button variant="primary" onClick={onContinue}>
@@ -208,7 +160,7 @@ function FirstSessionStep({ onFinish, onSkip }: { onFinish: (sessionId: string |
   const [starting, setStarting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
 
-  const workspace = workspaces.data?.[0]
+  const workspace = workspaces.data?.find((w) => w.state === 'ready')
   const profile = profiles.data?.find((p) => p.id === workspace?.default_profile_id) ?? profiles.data?.[0]
   const canStart = Boolean(workspace && profile)
 
@@ -261,6 +213,8 @@ function FirstSessionStep({ onFinish, onSkip }: { onFinish: (sessionId: string |
 export function Onboarding() {
   const navigate = useNavigate()
   const [step, setStep] = useState<StepIndex>(1)
+  const workspaces = useQuery(q.workspaces())
+  const workspaceReady = workspaces.data?.some((w) => w.state === 'ready') ?? false
 
   function finish(sessionId: string | null) {
     markWelcomed()
@@ -280,7 +234,7 @@ export function Onboarding() {
       <PageHeader title="Welcome to Styr" description="Three steps to your first session." />
 
       <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-[190px_1fr]">
-        <ProgressRail step={step} />
+        <ProgressRail step={step} workspaceReady={workspaceReady} />
         <Card>
           {step === 1 && <TokenStep onContinue={() => setStep(2)} onSkip={skip} />}
           {step === 2 && <WorkspaceStep onContinue={() => setStep(3)} onSkip={skip} />}

@@ -76,13 +76,17 @@ let realWorkspaceId: string | null = null
 
 // ensureRealWorkspace (idempotent) returns a workspace pointing at this
 // repository's root (validated server-side by handleWorkspacesCreate: must
-// exist, be a directory, contain .git), creating it once per run.
+// exist, be a directory, contain .git), creating it once per run. Source
+// "path" (T29's per-user workspaces contract) is the admin-only escape hatch
+// for a checkout that already exists on the machine - exactly what this repo
+// root is from the running backend's point of view - and the dev account
+// used throughout the suite is always the admin.
 export async function ensureRealWorkspace(page: Page): Promise<string> {
   if (realWorkspaceId) return realWorkspaceId
   const repoRoot = path.resolve(process.cwd(), '..')
   const res = await page.request.post('/api/v1/workspaces', {
     headers: HEADERS,
-    data: { name: 'styr-e2e', path: repoRoot, default_profile_id: REAL_PROFILE_ID },
+    data: { name: 'styr-e2e', source: 'path', path: repoRoot, default_profile_id: REAL_PROFILE_ID },
   })
   if (res.status() === 201) {
     const ws = (await res.json()) as MinimalWorkspace

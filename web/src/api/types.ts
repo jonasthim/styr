@@ -19,7 +19,27 @@ export type Me = Omit<Schemas['Me'], 'prefs'> & { prefs: Record<string, unknown>
 
 export type User = Omit<Schemas['User'], 'prefs'> & { prefs: Record<string, unknown> }
 
-export type Workspace = Schemas['Workspace']
+// Workspace overrides the generated schema outright rather than narrowing it:
+// the backend card implementing the per-user workspaces contract (T29) hasn't
+// regenerated schema.d.ts yet, so Schemas['Workspace'] still describes the
+// old admin-registered-path shape. Field names match the contract exactly so
+// this becomes a no-op once codegen catches up.
+export type WorkspaceSource = 'git' | 'path' | 'empty'
+export type WorkspaceState = 'cloning' | 'ready' | 'failed'
+
+export type Workspace = Omit<Schemas['Workspace'], 'path'> & {
+  owner_id: string | null
+  path: string
+  source: WorkspaceSource
+  repo_url: string | null
+  branch: string | null
+  managed: boolean
+  state: WorkspaceState
+  error: string | null
+  worktrees: boolean
+  created_at: string
+  updated_at: string
+}
 
 export type ProfileMode = Schemas['Profile']['mode']
 

@@ -20,7 +20,7 @@ import type {
   User,
   Workspace,
 } from '../api/types'
-import { MOCK_EVENT_SESSION_ID } from './fakeEventSource'
+import { MOCK_EVENT_SESSION_ID, emitFakeEvent } from './fakeEventSource'
 import { decodeFixtureEvents } from './decodeFixture'
 import fixture02Raw from './fixtures/02_tool_read.jsonl?raw'
 import type { HarnessEventPayload } from '../lib/blocks'
@@ -84,22 +84,75 @@ function appendEvent(sessionId: string, payload: HarnessEventPayload): SessionEv
   return event
 }
 
+// Per-user workspaces (T29): Styr owns the path for "git" and "empty" - only
+// a "path" source (an admin registering a checkout that already exists on
+// this machine) carries one worth showing, and only to an admin. Both seeds
+// are owned by the one dev account and already "ready", so the rest of the
+// e2e suite (session creation, NewSessionDialog defaults, ...) has something
+// to start a session in without waiting on a simulated clone.
 const workspaces: Workspace[] = [
   {
     id: 'w1',
+    owner_id: DEV_USER_ID,
     name: 'styr',
-    path: '/home/dev/styr',
+    path: '/data/workspaces/w1',
+    source: 'git',
+    repo_url: 'https://github.com/styr-dev/styr.git',
+    branch: 'main',
+    managed: true,
+    state: 'ready',
+    error: null,
     default_profile_id: 'interactive',
     worktrees: false,
+    created_at: iso(60 * 24),
+    updated_at: iso(60 * 24),
   },
   {
     id: 'w2',
+    owner_id: DEV_USER_ID,
     name: 'notes',
-    path: '/home/dev/notes',
+    path: '/data/workspaces/w2',
+    source: 'empty',
+    repo_url: null,
+    branch: null,
+    managed: true,
+    state: 'ready',
+    error: null,
     default_profile_id: 'interactive',
     worktrees: true,
+    created_at: iso(60 * 24),
+    updated_at: iso(60 * 24),
   },
 ]
+
+let nextWorkspaceSeq = workspaces.length + 1
+
+// Real clone attempts take a moment; the mock simulates the same "cloning"
+// -> "ready"/"failed" transition on a short timer, publishing the same
+// workspace.state SSE frame docs/openapi.yaml specifies so the live-patch
+// path (useLiveEvents.ts) is exercised the same way in mock and real modes.
+const CLONE_DELAY_MS = 1500
+
+function publishWorkspaceState(workspace: Workspace) {
+  emitFakeEvent('workspace.state', {
+    kind: 'workspace.state',
+    payload: { id: workspace.id, state: workspace.state, error: workspace.error },
+  })
+}
+
+function scheduleCloneOutcome(workspace: Workspace) {
+  setTimeout(() => {
+    if (workspace.repo_url?.includes('fail')) {
+      workspace.state = 'failed'
+      workspace.error = 'fatal: repository not found'
+    } else {
+      workspace.state = 'ready'
+      workspace.error = null
+    }
+    workspace.updated_at = iso(0)
+    publishWorkspaceState(workspace)
+  }, CLONE_DELAY_MS)
+}
 
 const profiles: Profile[] = [
   {
@@ -456,39 +509,109 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
-  http.get('/api/v1/workspaces', () => HttpResponse.json(workspaces)),
+  // Visible workspaces: an admin sees every one, everyone else sees their
+  // own plus the shared (owner_id null) ones - a "path" source an admin
+  // registered for a repo that only exists on this box, per the product
+  // decision that Styr otherwise owns every workspace's path.
+  http.get('/api/v1/workspaces', () => {
+    const visible = devRole === 'admin' ? workspaces : workspaces.filter((w) => w.owner_id === null || w.owner_id === DEV_USER_ID)
+    return HttpResponse.json(visible)
+  }),
+
   http.post('/api/v1/workspaces', async ({ request }) => {
-    const body = (await request.json()) as Partial<Workspace>
-    // Real validation is "exists, is a directory, contains .git"
-    // (docs/openapi.yaml); the mock can't stat a filesystem, so it checks
-    // the one thing it can: an absolute path. Enough to exercise the "Add
-    // workspace" dialog's inline-error path in Task 22.
-    if (!body.path || !body.path.startsWith('/')) {
-      return HttpResponse.json(errorBody('invalid_path', 'Path must be an absolute path to a git repository.'), {
+    const body = (await request.json()) as {
+      name?: string
+      source?: Workspace['source']
+      repo_url?: string
+      branch?: string
+      path?: string
+      default_profile_id?: string
+      worktrees?: boolean
+    }
+    const source = body.source
+    if (source === 'path' && devRole !== 'admin') {
+      return HttpResponse.json(errorBody('forbidden', 'Only an admin can register a server path.'), { status: 403 })
+    }
+    if (!body.name || !body.name.trim()) {
+      return HttpResponse.json(errorBody('invalid', 'Name is required.'), { status: 422 })
+    }
+    if (workspaces.some((w) => w.name === body.name)) {
+      return HttpResponse.json(errorBody('name_taken', `A workspace named "${body.name}" already exists.`), { status: 422 })
+    }
+    if (source === 'git' && (!body.repo_url || !body.repo_url.trim())) {
+      return HttpResponse.json(errorBody('invalid_url', 'Enter a repository URL to clone.'), { status: 422 })
+    }
+    if (source === 'path' && (!body.path || !body.path.startsWith('/'))) {
+      return HttpResponse.json(errorBody('invalid_path', 'Path must be an absolute path on the machine running Styr.'), {
         status: 422,
       })
     }
-    const ws: Workspace = {
-      id: `w${workspaces.length + 1}`,
-      name: body.name ?? 'untitled',
-      path: body.path,
-      default_profile_id: body.default_profile_id ?? 'interactive',
+
+    const id = `w${nextWorkspaceSeq}`
+    nextWorkspaceSeq += 1
+    const now = iso(0)
+    const workspace: Workspace = {
+      id,
+      // A registered server path is a shared resource (there was no such
+      // thing as a personal one before this card); a git clone or an empty
+      // folder is Styr's own managed checkout, scoped to whoever asked for it.
+      owner_id: source === 'path' ? null : DEV_USER_ID,
+      name: body.name,
+      path: source === 'path' ? (body.path as string) : `/data/workspaces/${id}`,
+      source: source ?? 'empty',
+      repo_url: source === 'git' ? (body.repo_url as string) : null,
+      branch: source === 'git' ? body.branch || null : null,
+      managed: source !== 'path',
+      state: source === 'git' ? 'cloning' : 'ready',
+      error: null,
+      default_profile_id: body.default_profile_id || 'interactive',
       worktrees: body.worktrees ?? false,
+      created_at: now,
+      updated_at: now,
     }
-    workspaces.push(ws)
-    return HttpResponse.json(ws, { status: 201 })
+    workspaces.push(workspace)
+    if (workspace.state === 'cloning') scheduleCloneOutcome(workspace)
+    return HttpResponse.json(workspace, { status: 201 })
   }),
+
+  http.get('/api/v1/workspaces/:id', ({ params }) => {
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    return HttpResponse.json(workspace)
+  }),
+
   http.patch('/api/v1/workspaces/:id', async ({ request, params }) => {
-    const body = (await request.json()) as Partial<Workspace>
-    const ws = workspaces.find((w) => w.id === params.id)
-    if (!ws) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
-    Object.assign(ws, body)
-    return HttpResponse.json(ws)
+    const body = (await request.json()) as { default_profile_id?: string; worktrees?: boolean }
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    if (body.default_profile_id !== undefined) workspace.default_profile_id = body.default_profile_id
+    if (body.worktrees !== undefined) workspace.worktrees = body.worktrees
+    workspace.updated_at = iso(0)
+    return HttpResponse.json(workspace)
   }),
+
   http.delete('/api/v1/workspaces/:id', ({ params }) => {
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return new HttpResponse(null, { status: 204 })
+    const OPEN_STATES = new Set(['open', 'running', 'waiting'])
+    const hasOpenSessions = sessions.some((s) => s.workspace_id === workspace.id && OPEN_STATES.has(s.state))
+    if (hasOpenSessions) {
+      return HttpResponse.json(errorBody('sessions_open', 'This workspace has open sessions.'), { status: 409 })
+    }
     const index = workspaces.findIndex((w) => w.id === params.id)
-    if (index !== -1) workspaces.splice(index, 1)
+    workspaces.splice(index, 1)
     return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.post('/api/v1/workspaces/:id/retry', ({ params }) => {
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    workspace.state = 'cloning'
+    workspace.error = null
+    workspace.updated_at = iso(0)
+    publishWorkspaceState(workspace)
+    scheduleCloneOutcome(workspace)
+    return new HttpResponse(null, { status: 202 })
   }),
 
   http.get('/api/v1/profiles', () => HttpResponse.json(profiles)),

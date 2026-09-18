@@ -28,6 +28,21 @@ export interface FakeMessageEvent {
 
 type Listener = (ev: FakeMessageEvent) => void
 
+// Every live FakeEventSource (in practice, at most one - useLiveEvents.ts
+// mounts a single connection at the app root) registers here, so
+// emitFakeEvent below can reach it from a msw handler module that has no
+// reference of its own to whichever instance is currently open.
+const activeInstances = new Set<FakeEventSource>()
+
+/** Delivers an arbitrary frame to every open FakeEventSource, the same way a
+ * real backend push would arrive over SSE. Used by handlers.ts to exercise
+ * useLiveEvents.ts's live-patch path (e.g. `workspace.state`) for frames this
+ * fixture-replay class doesn't generate on its own timer. */
+export function emitFakeEvent(type: string, data: unknown): void {
+  const frame: FakeMessageEvent = { type, data: JSON.stringify(data) }
+  for (const instance of activeInstances) instance.dispatch(type, frame)
+}
+
 /** Drop-in replacement for the subset of EventSource that useLiveEvents uses. */
 export class FakeEventSource {
   readyState = 0 // CONNECTING
@@ -38,6 +53,7 @@ export class FakeEventSource {
   private line = 0
 
   constructor(_url: string) {
+    activeInstances.add(this)
     setTimeout(() => {
       this.readyState = 1 // OPEN
       this.onopen?.()
@@ -54,10 +70,15 @@ export class FakeEventSource {
     this.listeners.get(type)?.delete(listener)
   }
 
+  dispatch(type: string, frame: FakeMessageEvent) {
+    for (const listener of this.listeners.get(type) ?? []) listener(frame)
+  }
+
   close() {
     this.readyState = 2 // CLOSED
     if (this.timer) clearInterval(this.timer)
     this.timer = null
+    activeInstances.delete(this)
   }
 
   private emitNext() {
