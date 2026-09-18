@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -26,6 +28,7 @@ import (
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/harness/fake"
+	"github.com/jonasthim/styr/internal/notify"
 	"github.com/jonasthim/styr/internal/sessions"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
@@ -131,22 +134,27 @@ type testEnv struct {
 
 	ts *httptest.Server
 
-	users        *db.Users
-	tokens       *db.Tokens
-	workspaces   *db.Workspaces
-	workspaceSvc *workspaces.Service
-	profiles     *db.Profiles
-	sessions     *db.Sessions
-	events       *db.Events
-	approvals    *db.Approvals
-	logins       *db.LoginSessions
-	box          *crypto.Box
-	bus          *events.Bus
-	harness      *fake.Harness
-	verifier     *stubVerifier
-	tokenStore   *fakeTokenStore
-	svc          *sessions.Service
-	usersDir     string
+	users         *db.Users
+	tokens        *db.Tokens
+	workspaces    *db.Workspaces
+	workspaceSvc  *workspaces.Service
+	profiles      *db.Profiles
+	sessions      *db.Sessions
+	events        *db.Events
+	approvals     *db.Approvals
+	logins        *db.LoginSessions
+	box           *crypto.Box
+	bus           *events.Bus
+	harness       *fake.Harness
+	verifier      *stubVerifier
+	tokenStore    *fakeTokenStore
+	svc           *sessions.Service
+	usersDir      string
+	notifications *db.NotificationChannels
+
+	triggers *fakeTriggersService
+	runs     *fakeRunsEngine
+	notifier *fakeNotifier
 
 	adminClient *http.Client
 	adminID     string
@@ -180,20 +188,24 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	t.Cleanup(func() { _ = database.Close() })
 
 	e := &testEnv{
-		t:          t,
-		users:      db.NewUsers(database),
-		tokens:     db.NewTokens(database),
-		workspaces: db.NewWorkspaces(database),
-		profiles:   db.NewProfiles(database),
-		sessions:   db.NewSessions(database),
-		events:     db.NewEvents(database),
-		approvals:  db.NewApprovals(database),
-		logins:     db.NewLoginSessions(database),
-		bus:        events.New(),
-		harness:    fake.New(steps...),
-		verifier:   &stubVerifier{},
-		tokenStore: newFakeTokenStore(),
-		usersDir:   t.TempDir(),
+		t:             t,
+		users:         db.NewUsers(database),
+		tokens:        db.NewTokens(database),
+		workspaces:    db.NewWorkspaces(database),
+		profiles:      db.NewProfiles(database),
+		sessions:      db.NewSessions(database),
+		events:        db.NewEvents(database),
+		approvals:     db.NewApprovals(database),
+		logins:        db.NewLoginSessions(database),
+		bus:           events.New(),
+		harness:       fake.New(steps...),
+		verifier:      &stubVerifier{},
+		tokenStore:    newFakeTokenStore(),
+		usersDir:      t.TempDir(),
+		notifications: db.NewNotificationChannels(database),
+		triggers:      newFakeTriggersService(),
+		runs:          newFakeRunsEngine(),
+		notifier:      newFakeNotifier(),
 	}
 	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
 
@@ -237,6 +249,10 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		Bus:            e.bus,
 		Box:            box,
 		Verifier:       e.verifier,
+		Triggers:       e.triggers,
+		Runs:           e.runs,
+		Notifications:  e.notifications,
+		Notifier:       e.notifier,
 		Status: func() api.StatusInfo {
 			return api.StatusInfo{Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0}
 		},
@@ -396,4 +412,271 @@ func createResultStep() fake.Step {
 	return fake.Step{Events: []harness.Event{
 		{Type: harness.EventResult, Result: &harness.Result{Subtype: "success", NumTurns: 1}},
 	}}
+}
+
+// fakeCall records one call made to a fake service, for tests that assert
+// on what was passed through (e.g. deliveries limit, runs list filters).
+type fakeCall struct {
+	method string
+	actor  api.Actor
+	args   []any
+}
+
+// fakeTriggersService is an in-memory api.TriggersService: it records every
+// call and, for each method, either invokes the matching *Fn (set by the
+// test to return canned data or an error) or falls back to a default that
+// makes an unconfigured call fail loudly rather than silently succeed with
+// a zero value.
+type fakeTriggersService struct {
+	mu    sync.Mutex
+	calls []fakeCall
+
+	CreateTemplateFn func(ctx context.Context, actor api.Actor, in domain.TemplateInput) (domain.Template, error)
+	ListTemplatesFn  func(ctx context.Context, actor api.Actor) ([]domain.Template, error)
+	GetTemplateFn    func(ctx context.Context, actor api.Actor, id string) (domain.Template, error)
+	UpdateTemplateFn func(ctx context.Context, actor api.Actor, id string, in domain.TemplateInput) (domain.Template, error)
+	DeleteTemplateFn func(ctx context.Context, actor api.Actor, id string) error
+	RenderTemplateFn func(ctx context.Context, actor api.Actor, id, kind string, payload []byte) (domain.RenderResult, error)
+
+	CreateTriggerFn func(ctx context.Context, actor api.Actor, in domain.TriggerInput) (domain.Trigger, string, error)
+	ListTriggersFn  func(ctx context.Context, actor api.Actor) ([]domain.Trigger, error)
+	GetTriggerFn    func(ctx context.Context, actor api.Actor, id string) (domain.Trigger, error)
+	UpdateTriggerFn func(ctx context.Context, actor api.Actor, id string, in domain.TriggerInput) (domain.Trigger, error)
+	DeleteTriggerFn func(ctx context.Context, actor api.Actor, id string) error
+	RotateSecretFn  func(ctx context.Context, actor api.Actor, id string) (string, error)
+
+	ListDeliveriesFn func(ctx context.Context, actor api.Actor, triggerID string, limit int) ([]domain.Delivery, error)
+	ReplayFn         func(ctx context.Context, actor api.Actor, deliveryID string) (domain.Delivery, error)
+	TestFn           func(ctx context.Context, actor api.Actor, triggerID string, payload []byte, force bool) (domain.Delivery, error)
+	DeliverFn        func(ctx context.Context, in domain.Inbound) (domain.Delivery, error)
+}
+
+func newFakeTriggersService() *fakeTriggersService { return &fakeTriggersService{} }
+
+func (f *fakeTriggersService) record(method string, actor api.Actor, args ...any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{method: method, actor: actor, args: args})
+	f.mu.Unlock()
+}
+
+// lastCall returns the most recent recorded call, for tests asserting on
+// what a handler passed through (e.g. the delivery limit or run filter).
+func (f *fakeTriggersService) lastCall() (fakeCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
+}
+
+var errFakeNotConfigured = errors.New("fake: method not configured for this test")
+
+func (f *fakeTriggersService) CreateTemplate(ctx context.Context, actor api.Actor, in domain.TemplateInput) (domain.Template, error) {
+	f.record("CreateTemplate", actor, in)
+	if f.CreateTemplateFn != nil {
+		return f.CreateTemplateFn(ctx, actor, in)
+	}
+	return domain.Template{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) ListTemplates(ctx context.Context, actor api.Actor) ([]domain.Template, error) {
+	f.record("ListTemplates", actor)
+	if f.ListTemplatesFn != nil {
+		return f.ListTemplatesFn(ctx, actor)
+	}
+	return nil, nil
+}
+
+func (f *fakeTriggersService) GetTemplate(ctx context.Context, actor api.Actor, id string) (domain.Template, error) {
+	f.record("GetTemplate", actor, id)
+	if f.GetTemplateFn != nil {
+		return f.GetTemplateFn(ctx, actor, id)
+	}
+	return domain.Template{}, fmt.Errorf("get template: %w", domain.ErrNotFound)
+}
+
+func (f *fakeTriggersService) UpdateTemplate(ctx context.Context, actor api.Actor, id string, in domain.TemplateInput) (domain.Template, error) {
+	f.record("UpdateTemplate", actor, id, in)
+	if f.UpdateTemplateFn != nil {
+		return f.UpdateTemplateFn(ctx, actor, id, in)
+	}
+	return domain.Template{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) DeleteTemplate(ctx context.Context, actor api.Actor, id string) error {
+	f.record("DeleteTemplate", actor, id)
+	if f.DeleteTemplateFn != nil {
+		return f.DeleteTemplateFn(ctx, actor, id)
+	}
+	return nil
+}
+
+func (f *fakeTriggersService) RenderTemplate(ctx context.Context, actor api.Actor, id, kind string, payload []byte) (domain.RenderResult, error) {
+	f.record("RenderTemplate", actor, id, kind, payload)
+	if f.RenderTemplateFn != nil {
+		return f.RenderTemplateFn(ctx, actor, id, kind, payload)
+	}
+	return domain.RenderResult{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) CreateTrigger(ctx context.Context, actor api.Actor, in domain.TriggerInput) (domain.Trigger, string, error) {
+	f.record("CreateTrigger", actor, in)
+	if f.CreateTriggerFn != nil {
+		return f.CreateTriggerFn(ctx, actor, in)
+	}
+	return domain.Trigger{}, "", errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) ListTriggers(ctx context.Context, actor api.Actor) ([]domain.Trigger, error) {
+	f.record("ListTriggers", actor)
+	if f.ListTriggersFn != nil {
+		return f.ListTriggersFn(ctx, actor)
+	}
+	return nil, nil
+}
+
+func (f *fakeTriggersService) GetTrigger(ctx context.Context, actor api.Actor, id string) (domain.Trigger, error) {
+	f.record("GetTrigger", actor, id)
+	if f.GetTriggerFn != nil {
+		return f.GetTriggerFn(ctx, actor, id)
+	}
+	return domain.Trigger{}, fmt.Errorf("get trigger: %w", domain.ErrNotFound)
+}
+
+func (f *fakeTriggersService) UpdateTrigger(ctx context.Context, actor api.Actor, id string, in domain.TriggerInput) (domain.Trigger, error) {
+	f.record("UpdateTrigger", actor, id, in)
+	if f.UpdateTriggerFn != nil {
+		return f.UpdateTriggerFn(ctx, actor, id, in)
+	}
+	return domain.Trigger{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) DeleteTrigger(ctx context.Context, actor api.Actor, id string) error {
+	f.record("DeleteTrigger", actor, id)
+	if f.DeleteTriggerFn != nil {
+		return f.DeleteTriggerFn(ctx, actor, id)
+	}
+	return nil
+}
+
+func (f *fakeTriggersService) RotateSecret(ctx context.Context, actor api.Actor, id string) (string, error) {
+	f.record("RotateSecret", actor, id)
+	if f.RotateSecretFn != nil {
+		return f.RotateSecretFn(ctx, actor, id)
+	}
+	return "", errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) ListDeliveries(ctx context.Context, actor api.Actor, triggerID string, limit int) ([]domain.Delivery, error) {
+	f.record("ListDeliveries", actor, triggerID, limit)
+	if f.ListDeliveriesFn != nil {
+		return f.ListDeliveriesFn(ctx, actor, triggerID, limit)
+	}
+	return nil, nil
+}
+
+func (f *fakeTriggersService) Replay(ctx context.Context, actor api.Actor, deliveryID string) (domain.Delivery, error) {
+	f.record("Replay", actor, deliveryID)
+	if f.ReplayFn != nil {
+		return f.ReplayFn(ctx, actor, deliveryID)
+	}
+	return domain.Delivery{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) Test(ctx context.Context, actor api.Actor, triggerID string, payload []byte, force bool) (domain.Delivery, error) {
+	f.record("Test", actor, triggerID, payload, force)
+	if f.TestFn != nil {
+		return f.TestFn(ctx, actor, triggerID, payload, force)
+	}
+	return domain.Delivery{}, errFakeNotConfigured
+}
+
+func (f *fakeTriggersService) Deliver(ctx context.Context, in domain.Inbound) (domain.Delivery, error) {
+	f.record("Deliver", api.Actor{}, in)
+	if f.DeliverFn != nil {
+		return f.DeliverFn(ctx, in)
+	}
+	return domain.Delivery{}, fmt.Errorf("deliver: %w", domain.ErrUnknownTrigger)
+}
+
+// fakeRunsEngine is an in-memory api.RunsEngine, recording calls the same
+// way fakeTriggersService does.
+type fakeRunsEngine struct {
+	mu    sync.Mutex
+	calls []fakeCall
+
+	GetFn  func(ctx context.Context, id string) (domain.RunView, error)
+	ListFn func(ctx context.Context, f domain.RunFilter) ([]domain.RunView, error)
+}
+
+func newFakeRunsEngine() *fakeRunsEngine { return &fakeRunsEngine{} }
+
+func (f *fakeRunsEngine) record(method string, args ...any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{method: method, args: args})
+	f.mu.Unlock()
+}
+
+func (f *fakeRunsEngine) lastCall() (fakeCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
+}
+
+func (f *fakeRunsEngine) Get(ctx context.Context, id string) (domain.RunView, error) {
+	f.record("Get", id)
+	if f.GetFn != nil {
+		return f.GetFn(ctx, id)
+	}
+	return domain.RunView{}, fmt.Errorf("get run: %w", domain.ErrNotFound)
+}
+
+func (f *fakeRunsEngine) List(ctx context.Context, filter domain.RunFilter) ([]domain.RunView, error) {
+	f.record("List", filter)
+	if f.ListFn != nil {
+		return f.ListFn(ctx, filter)
+	}
+	return nil, nil
+}
+
+// fakeNotifierCall records one Send call: the channel (including whatever
+// token the handler decrypted and passed in) and the event.
+type fakeNotifierCall struct {
+	channel notify.Channel
+	event   notify.Event
+}
+
+// fakeNotifier is an in-memory api.Notifier: it records every Send call
+// (so a test can assert the token it received was already decrypted) and
+// never performs a real HTTP request.
+type fakeNotifier struct {
+	mu    sync.Mutex
+	calls []fakeNotifierCall
+
+	SendFn func(ctx context.Context, ch notify.Channel, ev notify.Event) error
+}
+
+func newFakeNotifier() *fakeNotifier { return &fakeNotifier{} }
+
+func (f *fakeNotifier) Send(ctx context.Context, ch notify.Channel, ev notify.Event) error {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeNotifierCall{channel: ch, event: ev})
+	f.mu.Unlock()
+	if f.SendFn != nil {
+		return f.SendFn(ctx, ch, ev)
+	}
+	return nil
+}
+
+func (f *fakeNotifier) lastCall() (fakeNotifierCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeNotifierCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
 }

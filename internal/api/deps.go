@@ -13,9 +13,63 @@ import (
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
+	"github.com/jonasthim/styr/internal/notify"
 	"github.com/jonasthim/styr/internal/sessions"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
+
+// Actor is sessions.Actor, re-exported so triggers/runs handlers (and the
+// TriggersService/RunsEngine interfaces below) don't need their own import
+// of internal/sessions just for this one type.
+type Actor = sessions.Actor
+
+// TriggersService is what internal/api's templates, triggers, deliveries
+// and inbound-hook handlers call. Card T34 implements it as
+// internal/triggers.Service; here it is declared as an interface so T35
+// compiles and tests independently of T34, with the orchestrator wiring the
+// concrete type into Deps.Triggers at merge.
+type TriggersService interface {
+	CreateTemplate(ctx context.Context, actor Actor, in domain.TemplateInput) (domain.Template, error)
+	ListTemplates(ctx context.Context, actor Actor) ([]domain.Template, error)
+	GetTemplate(ctx context.Context, actor Actor, id string) (domain.Template, error)
+	UpdateTemplate(ctx context.Context, actor Actor, id string, in domain.TemplateInput) (domain.Template, error)
+	DeleteTemplate(ctx context.Context, actor Actor, id string) error
+	RenderTemplate(ctx context.Context, actor Actor, id, kind string, payload []byte) (domain.RenderResult, error)
+
+	CreateTrigger(ctx context.Context, actor Actor, in domain.TriggerInput) (domain.Trigger, string, error)
+	ListTriggers(ctx context.Context, actor Actor) ([]domain.Trigger, error)
+	GetTrigger(ctx context.Context, actor Actor, id string) (domain.Trigger, error)
+	UpdateTrigger(ctx context.Context, actor Actor, id string, in domain.TriggerInput) (domain.Trigger, error)
+	DeleteTrigger(ctx context.Context, actor Actor, id string) error
+	RotateSecret(ctx context.Context, actor Actor, id string) (string, error)
+
+	ListDeliveries(ctx context.Context, actor Actor, triggerID string, limit int) ([]domain.Delivery, error)
+	Replay(ctx context.Context, actor Actor, deliveryID string) (domain.Delivery, error)
+	Test(ctx context.Context, actor Actor, triggerID string, payload []byte, force bool) (domain.Delivery, error)
+
+	// Deliver handles one inbound POST /hooks/{slug} call: secret/HMAC
+	// check, dedupe, cooldown, storm cap, delivery log and (when accepted)
+	// starting a run. It is unauthenticated at the HTTP layer — in.Slug
+	// and in.Headers carry everything Deliver needs to authenticate the
+	// caller itself, returning domain.ErrUnknownTrigger or
+	// domain.ErrBadSecret for the two documented failure modes.
+	Deliver(ctx context.Context, in domain.Inbound) (domain.Delivery, error)
+}
+
+// RunsEngine is what internal/api's runs handlers call. Card T34 implements
+// it as internal/runs.Engine; see TriggersService's doc comment for why
+// this is an interface here.
+type RunsEngine interface {
+	Get(ctx context.Context, id string) (domain.RunView, error)
+	List(ctx context.Context, f domain.RunFilter) ([]domain.RunView, error)
+}
+
+// Notifier sends one notification through a channel. The concrete
+// implementation is *notify.Service; tests substitute a fake that records
+// the call instead of making a real HTTP request.
+type Notifier interface {
+	Send(ctx context.Context, ch notify.Channel, ev notify.Event) error
+}
 
 // TokenVerifier checks that a Claude token actually works before Styr
 // stores it. The real implementation (Task 14) runs the claude CLI; tests
@@ -69,6 +123,18 @@ type Deps struct {
 	TokenStore TokenStore
 	Status     func() StatusInfo
 	Version    string
+
+	// Triggers and Runs back the templates/triggers/deliveries/runs/hooks
+	// routes (internal/triggers.Service and internal/runs.Engine at
+	// runtime, wired in by the composition root). Notifications is the
+	// repository for notification_channels (a plain CRUD resource with no
+	// per-user ownership, unlike Triggers' owned/shared resources).
+	// Notifier sends the "test" notification for POST
+	// /notifications/{id}/test.
+	Triggers      TriggersService
+	Runs          RunsEngine
+	Notifications *db.NotificationChannels
+	Notifier      Notifier
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not

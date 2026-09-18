@@ -30,6 +30,11 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 	// neither Authenticate nor csrfGuard nor the timeout ever run for it.
 	r.Get("/healthz", healthzHandler)
 
+	// POST /hooks/{slug} is the inbound webhook endpoint: unauthenticated
+	// by cookie (the trigger's own secret is the credential) and outside
+	// csrfGuard and the request timeout, same as /healthz.
+	registerHooksRoutes(r, d)
+
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(d.Auth.Authenticate)
 
@@ -56,6 +61,11 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 			registerSessionsRoutes(g, d)
 			registerApprovalsRoutes(g, d)
 			registerStatusRoutes(g, d)
+			registerTemplatesRoutes(g, d)
+			registerTriggersRoutes(g, d)
+			registerDeliveriesRoutes(g, d)
+			registerRunsRoutes(g, d)
+			registerNotificationsRoutes(g, d)
 		})
 
 		// The SSE stream requires a signed-in user too, but must not be cut
