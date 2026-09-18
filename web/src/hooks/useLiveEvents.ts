@@ -5,21 +5,36 @@
 // (AuthGate, once the user is known) rather than per page.
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import type { Approval, Session, SessionEvent } from '../api/types'
+import type { Approval, Session, SessionEvent, Workspace, WorkspaceState } from '../api/types'
 import { usePartialsStore } from '../store/partials'
 import { useLiveStatusStore } from '../store/live'
 
 const isMock = import.meta.env.VITE_MOCK === '1'
 
-const LIVE_KINDS = ['session.event', 'session.state', 'session.stats', 'approval.created', 'approval.decided'] as const
+const LIVE_KINDS = [
+  'session.event',
+  'session.state',
+  'session.stats',
+  'approval.created',
+  'approval.decided',
+  'workspace.state',
+] as const
 type LiveKind = (typeof LIVE_KINDS)[number]
 
 interface BusMessage {
   kind: LiveKind
-  session_id: string
-  owner_id: string | null
+  // Every kind except workspace.state carries a session; that one instead
+  // carries {id, state, error} directly in `payload` (see applyMessage).
+  session_id?: string
+  owner_id?: string | null
   seq?: number
   payload: unknown
+}
+
+interface WorkspaceStatePayload {
+  id: string
+  state: WorkspaceState
+  error: string | null
 }
 
 interface StreamDelta {
@@ -49,17 +64,19 @@ interface LiveSource {
 }
 
 function applySessionEvent(client: QueryClient, message: BusMessage) {
+  const sessionId = message.session_id
+  if (!sessionId) return
   const envelope = message.payload as CliEnvelope
   const delta = envelope?.type === 'stream_event' ? envelope.event : undefined
   if (delta?.type === 'content_block_delta' && delta.delta?.type === 'text_delta') {
-    usePartialsStore.getState().append(message.session_id, delta.delta.text)
+    usePartialsStore.getState().append(sessionId, delta.delta.text)
     return
   }
-  client.setQueryData<SessionEvent[]>(['session-events', message.session_id], (prev) => {
+  client.setQueryData<SessionEvent[]>(['session-events', sessionId], (prev) => {
     const seq = message.seq ?? (prev?.length ?? 0) + 1
     const event: SessionEvent = {
       id: seq,
-      session_id: message.session_id,
+      session_id: sessionId,
       seq,
       at: new Date().toISOString(),
       type: envelope?.type ?? 'raw',
@@ -68,8 +85,18 @@ function applySessionEvent(client: QueryClient, message: BusMessage) {
     return [...(prev ?? []), event]
   })
   if (envelope?.type === 'result') {
-    usePartialsStore.getState().clear(message.session_id)
+    usePartialsStore.getState().clear(sessionId)
   }
+}
+
+/** workspace.state carries no session_id - the row it patches lives in the
+ * ['workspaces'] list cache, keyed by the workspace id in its own payload. */
+function applyWorkspaceState(client: QueryClient, message: BusMessage) {
+  const patch = message.payload as WorkspaceStatePayload
+  if (!patch?.id) return
+  client.setQueryData<Workspace[]>(['workspaces'], (prev) =>
+    prev?.map((w) => (w.id === patch.id ? { ...w, state: patch.state, error: patch.error } : w)),
+  )
 }
 
 function applyMessage(client: QueryClient, kind: LiveKind, message: BusMessage) {
@@ -79,16 +106,19 @@ function applyMessage(client: QueryClient, kind: LiveKind, message: BusMessage) 
       return
     case 'session.state':
     case 'session.stats': {
+      const sessionId = message.session_id
+      if (!sessionId) return
       const patch = message.payload as Partial<Session>
-      client.setQueryData<Session>(['session', message.session_id], (prev) => (prev ? { ...prev, ...patch } : prev))
-      client.setQueryData<Session[]>(['sessions'], (prev) =>
-        prev?.map((s) => (s.id === message.session_id ? { ...s, ...patch } : s)),
-      )
+      client.setQueryData<Session>(['session', sessionId], (prev) => (prev ? { ...prev, ...patch } : prev))
+      client.setQueryData<Session[]>(['sessions'], (prev) => prev?.map((s) => (s.id === sessionId ? { ...s, ...patch } : s)))
       return
     }
     case 'approval.created':
     case 'approval.decided':
       void client.invalidateQueries({ queryKey: ['approvals'] })
+      return
+    case 'workspace.state':
+      applyWorkspaceState(client, message)
       return
   }
 }

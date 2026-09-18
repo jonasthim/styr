@@ -142,15 +142,18 @@ test('an admin with no workspaces gets a link to add one and cannot start', asyn
   await expect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled()
 })
 
-test('a member with no workspaces is told to ask an admin', async ({ page }, testInfo) => {
+test('a member with no workspaces gets a link to add one too', async ({ page }, testInfo) => {
+  // Per-user workspaces (T29): a member can add a git or empty workspace
+  // without an admin, so the empty-state notice no longer singles out
+  // admins the way it did when only an admin could register one.
   test.skip(isReal(testInfo), 'drives the mock backend in place')
   await gotoReady(page, '/sessions', 'Sessions')
   await firstRun(page, 'member')
 
   await page.getByRole('button', { name: 'New session' }).first().click()
   const dialog = page.getByRole('dialog')
-  await expect(dialog.getByText('Ask an admin to add a workspace, then start a session here.')).toBeVisible()
-  await expect(dialog.getByRole('link', { name: 'Add a workspace' })).toHaveCount(0)
+  await expect(dialog.getByTestId('no-workspaces-notice')).toBeVisible()
+  await expect(dialog.getByRole('link', { name: 'Add a workspace' })).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled()
 })
 

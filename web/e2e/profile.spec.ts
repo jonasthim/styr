@@ -150,7 +150,7 @@ test('/workspaces lists at least the workspaces this run created', async ({ page
     for (const name of names) {
       const res = await page.request.post('/api/v1/workspaces', {
         headers: { 'X-Requested-With': 'styr' },
-        data: { name, path: repoRoot, default_profile_id: 'interactive' },
+        data: { name, source: 'path', path: repoRoot, default_profile_id: 'interactive' },
       })
       if (!res.ok()) throw new Error(`seed: create workspace ${name} failed: ${res.status()}`)
     }
