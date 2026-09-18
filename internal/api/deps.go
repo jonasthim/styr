@@ -13,6 +13,7 @@ import (
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/workspaces"
 )
 
 // TokenVerifier checks that a Claude token actually works before Styr
@@ -33,18 +34,23 @@ type StatusInfo struct {
 
 // Deps is everything the API handlers need.
 type Deps struct {
-	Auth       *auth.Service
-	Sessions   *sessions.Service
-	Users      *db.Users
-	Tokens     *db.Tokens
-	Workspaces *db.Workspaces
-	Profiles   *db.Profiles
-	Audit      *db.Audit
-	Bus        *events.Bus
-	Box        *crypto.Box
-	Verifier   TokenVerifier
-	Status     func() StatusInfo
-	Version    string
+	Auth *auth.Service
+	// Workspaces is the workspaces service handlers call for every
+	// workspace route; WorkspacesRepo is kept for callers (and tests) that
+	// need direct repository access, e.g. to seed a workspace bypassing
+	// service-level validation.
+	Workspaces     *workspaces.Service
+	WorkspacesRepo *db.Workspaces
+	Sessions       *sessions.Service
+	Users          *db.Users
+	Tokens         *db.Tokens
+	Profiles       *db.Profiles
+	Audit          *db.Audit
+	Bus            *events.Bus
+	Box            *crypto.Box
+	Verifier       TokenVerifier
+	Status         func() StatusInfo
+	Version        string
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not

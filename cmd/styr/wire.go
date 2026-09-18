@@ -17,6 +17,7 @@ import (
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness/claude"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/workspaces"
 )
 
 // probeVersionTimeout bounds the one-time `claude --version` call at
@@ -36,7 +37,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	users := db.NewUsers(d)
 	tokens := db.NewTokens(d)
 	logins := db.NewLoginSessions(d)
-	workspaces := db.NewWorkspaces(d)
+	workspacesRepo := db.NewWorkspaces(d)
 	profiles := db.NewProfiles(d)
 	sessionsRepo := db.NewSessions(d)
 	eventsRepo := db.NewEvents(d)
@@ -45,11 +46,13 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 
 	h := claude.New(cfg.ClaudeBin)
 
+	workspacesSvc := workspaces.New(workspacesRepo, sessionsRepo, bus, cfg.UsersDir(), nil)
+
 	svc := sessions.New(sessions.Repos{
 		Sessions:   sessionsRepo,
 		Events:     eventsRepo,
 		Approvals:  approvals,
-		Workspaces: workspaces,
+		Workspaces: workspacesRepo,
 		Profiles:   profiles,
 		Tokens:     tokens,
 		Audit:      audit,
@@ -87,17 +90,18 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	claudeVersion := probeClaudeVersion(cfg.ClaudeBin)
 
 	deps := &api.Deps{
-		Auth:       authSvc,
-		Sessions:   svc,
-		Users:      users,
-		Tokens:     tokens,
-		Workspaces: workspaces,
-		Profiles:   profiles,
-		Audit:      audit,
-		Bus:        bus,
-		Box:        box,
-		Verifier:   verifier,
-		Version:    version,
+		Auth:           authSvc,
+		Sessions:       svc,
+		Users:          users,
+		Tokens:         tokens,
+		Workspaces:     workspacesSvc,
+		WorkspacesRepo: workspacesRepo,
+		Profiles:       profiles,
+		Audit:          audit,
+		Bus:            bus,
+		Box:            box,
+		Verifier:       verifier,
+		Version:        version,
 		Status: func() api.StatusInfo {
 			// sessions.Service tracks its live processes privately and
 			// exposes no counters, so OpenProcesses and QueueDepth are

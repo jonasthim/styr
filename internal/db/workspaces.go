@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jonasthim/styr/internal/domain"
 )
@@ -15,14 +16,16 @@ type Workspaces struct{ d *DB }
 // NewWorkspaces constructs a Workspaces repository.
 func NewWorkspaces(d *DB) *Workspaces { return &Workspaces{d: d} }
 
-const workspaceColumns = `id, name, path, default_profile_id, worktrees, created_at`
+const workspaceColumns = `id, owner_user_id, name, path, default_profile_id, worktrees, source, repo_url, branch, managed, state, error, created_at, updated_at`
 
 // Create inserts a new workspace row. w.ID must already be set.
 func (w *Workspaces) Create(ctx context.Context, ws domain.Workspace) error {
 	_, err := w.d.ExecContext(ctx, `
 		INSERT INTO workspaces (`+workspaceColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?)`,
-		ws.ID, ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees), nowString(ws.CreatedAt))
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ws.ID, ownerArg(ws.OwnerID), ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees),
+		string(ws.Source), ws.RepoURL, ws.Branch, boolToInt(ws.Managed), string(ws.State), ws.Error,
+		nowString(ws.CreatedAt), nowString(ws.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create workspace: %w", domain.ErrConflict)
@@ -32,21 +35,41 @@ func (w *Workspaces) Create(ctx context.Context, ws domain.Workspace) error {
 	return nil
 }
 
+// ownerArg converts a nullable owner id into a driver-friendly value.
+func ownerArg(ownerID *string) any {
+	if ownerID == nil {
+		return nil
+	}
+	return *ownerID
+}
+
 func scanWorkspace(row interface{ Scan(dest ...any) error }) (*domain.Workspace, error) {
 	var (
-		ws        domain.Workspace
-		worktrees int
-		createdAt string
+		ws                   domain.Workspace
+		ownerID              sql.NullString
+		worktrees, managed   int
+		source, state        string
+		createdAt, updatedAt string
 	)
-	if err := row.Scan(&ws.ID, &ws.Name, &ws.Path, &ws.DefaultProfileID, &worktrees, &createdAt); err != nil {
+	if err := row.Scan(
+		&ws.ID, &ownerID, &ws.Name, &ws.Path, &ws.DefaultProfileID, &worktrees,
+		&source, &ws.RepoURL, &ws.Branch, &managed, &state, &ws.Error, &createdAt, &updatedAt,
+	); err != nil {
 		return nil, err
 	}
+	ws.OwnerID = nullString(ownerID)
 	ws.Worktrees = worktrees != 0
+	ws.Managed = managed != 0
+	ws.Source = domain.WorkspaceSource(source)
+	ws.State = domain.WorkspaceState(state)
 	ws.CreatedAt = parseTime(createdAt)
+	ws.UpdatedAt = parseTime(updatedAt)
 	return &ws, nil
 }
 
-// Get loads a workspace by id.
+// Get loads a workspace by id, with no visibility filtering. Callers that
+// must enforce owner/admin visibility do so themselves (see
+// internal/workspaces.Service and internal/sessions.Service).
 func (w *Workspaces) Get(ctx context.Context, id string) (*domain.Workspace, error) {
 	row := w.d.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE id = ?`, id)
 	ws, err := scanWorkspace(row)
@@ -59,11 +82,21 @@ func (w *Workspaces) Get(ctx context.Context, id string) (*domain.Workspace, err
 	return ws, nil
 }
 
-// List returns every workspace ordered by name.
-func (w *Workspaces) List(ctx context.Context) ([]domain.Workspace, error) {
-	rows, err := w.d.QueryContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces ORDER BY name`)
+// ListVisible returns every workspace visible to userID: workspaces they
+// own, shared (owner-less) workspaces, and — for an admin — every
+// workspace, ordered by name.
+func (w *Workspaces) ListVisible(ctx context.Context, userID string, isAdmin bool) ([]domain.Workspace, error) {
+	query := `SELECT ` + workspaceColumns + ` FROM workspaces`
+	var args []any
+	if !isAdmin {
+		query += ` WHERE owner_user_id = ? OR owner_user_id IS NULL`
+		args = append(args, userID)
+	}
+	query += ` ORDER BY name`
+
+	rows, err := w.d.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list workspaces: %w", err)
+		return nil, fmt.Errorf("list visible workspaces: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []domain.Workspace
@@ -77,11 +110,16 @@ func (w *Workspaces) List(ctx context.Context) ([]domain.Workspace, error) {
 	return out, rows.Err()
 }
 
-// Update replaces a workspace's mutable fields.
+// Update replaces a workspace's mutable fields (everything but id and
+// created_at).
 func (w *Workspaces) Update(ctx context.Context, ws domain.Workspace) error {
 	res, err := w.d.ExecContext(ctx, `
-		UPDATE workspaces SET name = ?, path = ?, default_profile_id = ?, worktrees = ? WHERE id = ?`,
-		ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees), ws.ID)
+		UPDATE workspaces SET owner_user_id = ?, name = ?, path = ?, default_profile_id = ?, worktrees = ?,
+			source = ?, repo_url = ?, branch = ?, managed = ?, state = ?, error = ?, updated_at = ?
+		WHERE id = ?`,
+		ownerArg(ws.OwnerID), ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees),
+		string(ws.Source), ws.RepoURL, ws.Branch, boolToInt(ws.Managed), string(ws.State), ws.Error,
+		nowString(ws.UpdatedAt), ws.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("update workspace: %w", domain.ErrConflict)
@@ -90,6 +128,21 @@ func (w *Workspaces) Update(ctx context.Context, ws domain.Workspace) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("update workspace: %w", domain.ErrNotFound)
+	}
+	return nil
+}
+
+// SetState updates only a workspace's state, error message and updated_at,
+// for the async clone lifecycle where the caller does not hold (and must
+// not clobber) the rest of the row.
+func (w *Workspaces) SetState(ctx context.Context, id string, state domain.WorkspaceState, errMsg string, updatedAt time.Time) error {
+	res, err := w.d.ExecContext(ctx, `UPDATE workspaces SET state = ?, error = ?, updated_at = ? WHERE id = ?`,
+		string(state), errMsg, nowString(updatedAt), id)
+	if err != nil {
+		return fmt.Errorf("set workspace state: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set workspace state: %w", domain.ErrNotFound)
 	}
 	return nil
 }
