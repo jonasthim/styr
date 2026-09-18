@@ -178,13 +178,17 @@ func TestRunMaintenance_ExpiresStaleApprovals(t *testing.T) {
 	}
 }
 
-// Finding 1 regression test: expireApprovals must not discard the error
-// from notifying a live process's Decide call. On failure it must log the
-// error (via the service's *slog.Logger) and leave the approval and
-// session state alone — no DB decide, no audit entry, no state change — so
-// the pending approval is retried on the next maintenance tick instead of
-// being silently expired without ever telling the still-blocked child.
-func TestExpireApprovals_NotifyProcessFails_ApprovalStaysPendingAndIsLogged(t *testing.T) {
+// Finding 1 + 4 regression test: expireApprovals decides the database
+// first (the guarded UPDATE is the sole arbiter that prevents the child
+// from ever seeing two control_responses for the same request — finding
+// 4), so a failure to notify the child afterward cannot undo that
+// decision. expireApprovals must not discard that notify error: it must
+// log it (via the service's *slog.Logger) and, since the process is
+// unreachable and there is no pending approval left for anyone to retry,
+// fail the session directly rather than leave it stuck in "waiting"
+// forever. The approval itself ends up expired and audited regardless of
+// whether the notify succeeded.
+func TestExpireApprovals_NotifyProcessFails_ApprovalExpiresSessionFailsAndIsLogged(t *testing.T) {
 	svc, repos, _ := newService(t)
 	logs := &recordingHandler{}
 	svc.logger = slog.New(logs)
@@ -225,12 +229,12 @@ func TestExpireApprovals_NotifyProcessFails_ApprovalStaysPendingAndIsLogged(t *t
 	if err != nil {
 		t.Fatalf("get approval: %v", err)
 	}
-	if got.State != domain.ApprovalPending {
-		t.Fatalf("approval state = %s, want pending (untouched so the next tick retries)", got.State)
+	if got.State != domain.ApprovalExpired {
+		t.Fatalf("approval state = %s, want expired (the database write is the source of truth, independent of the notify outcome)", got.State)
 	}
 
 	if n := len(proc.Decisions()); n != 0 {
-		t.Fatalf("expected no successfully recorded decision, got %d", n)
+		t.Fatalf("expected no successfully recorded decision on the process (Decide errored), got %d", n)
 	}
 
 	if logs.count() == 0 {
@@ -241,17 +245,21 @@ func TestExpireApprovals_NotifyProcessFails_ApprovalStaysPendingAndIsLogged(t *t
 	if err != nil {
 		t.Fatalf("list audit: %v", err)
 	}
+	var found bool
 	for _, a := range audit {
-		if a.Target == ap.ID {
-			t.Fatalf("unexpected audit entry for an approval that was not actually expired: %+v", a)
+		if a.Actor == "system" && a.Action == "approval.expire" && a.Target == ap.ID {
+			found = true
 		}
+	}
+	if !found {
+		t.Fatal("expected a system approval.expire audit entry despite the failed notify")
 	}
 
 	final, err := repos.Sessions.Get(context.Background(), sess.ID)
 	if err != nil {
 		t.Fatalf("get session: %v", err)
 	}
-	if final.State != domain.SessionWaiting {
-		t.Fatalf("session state = %s, want waiting (unchanged)", final.State)
+	if final.State != domain.SessionFailed {
+		t.Fatalf("session state = %s, want failed (the process is unreachable, so there is nothing left to retry)", final.State)
 	}
 }

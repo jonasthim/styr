@@ -145,18 +145,22 @@ func (s *Service) reapIdle(ctx context.Context) {
 // expireApprovals denies every pending approval whose session's profile is
 // unattended and whose age exceeds that profile's ApprovalTimeout.
 //
-// For each expiring approval with a live process, that process is notified
-// first. If the notify fails, the failure is logged and this approval is
-// left untouched — no database write, no state change — so the pending
-// approval is not silently abandoned: the next maintenance tick retries it
-// from scratch. Only once the notify succeeds (or there is no live process
-// to notify) does the database write happen, via the same guarded
-// Approvals.Decide as the human Decide path (internal/sessions/approvals.go):
-// its "AND state = 'pending'" means that if a human decided this exact
-// approval between ListPendingVisible above and here, this call returns
-// domain.ErrConflict and the loop moves on without an audit entry or a
-// session state change, since the human decision already accounted for
-// both.
+// The database write happens first, via the same guarded Approvals.Decide
+// as the human Decide path (internal/sessions/approvals.go): its "AND
+// state = 'pending'" makes it the single arbiter of who wins a race to
+// decide this approval. If a human decided this exact approval between
+// ListPendingVisible above and here, this call returns domain.ErrConflict
+// and the loop moves on silently (the human decision already accounted
+// for both the database and the child) — that guard is what prevents the
+// child from ever seeing two control_responses for the same request.
+//
+// Only once this service has won that race does it notify the child. If
+// that notify fails, the approval has already been recorded expired
+// regardless (there is no going back on the database write), and the
+// child is either dead or unreachable — its own exit event, when it
+// arrives, will move the session to failed on its own; but to avoid
+// leaving the session stuck in "waiting" forever if that exit never
+// comes, the failure is logged and the session is marked failed directly.
 func (s *Service) expireApprovals(ctx context.Context) {
 	pending, err := s.repos.Approvals.ListPendingVisible(ctx, "", true)
 	if err != nil {
@@ -178,23 +182,24 @@ func (s *Service) expireApprovals(ctx context.Context) {
 			continue
 		}
 
+		if err := s.repos.Approvals.Decide(ctx, ap.ID, domain.ApprovalExpired, "system", nil, timeoutMsg); err != nil {
+			if !errors.Is(err, domain.ErrConflict) {
+				s.logger.Error("expire approval: db decide failed", "approval_id", ap.ID, "session_id", sess.ID, "error", err)
+			}
+			continue // ErrConflict: a human already decided; nothing more to do.
+		}
+		_ = s.repos.Audit.Append(ctx, "system", "approval.expire", ap.ID, nil)
+
 		s.mu.Lock()
 		entry, ok := s.procs[sess.ID]
 		s.mu.Unlock()
 		if ok {
 			if err := entry.proc.Decide(ctx, harness.Decision{RequestID: ap.RequestID, Allow: false, Message: timeoutMsg}); err != nil {
 				s.logger.Error("expire approval: notify process failed", "approval_id", ap.ID, "session_id", sess.ID, "error", err)
+				_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionFailed)
 				continue
 			}
 		}
-
-		if err := s.repos.Approvals.Decide(ctx, ap.ID, domain.ApprovalExpired, "system", nil, timeoutMsg); err != nil {
-			if !errors.Is(err, domain.ErrConflict) {
-				s.logger.Error("expire approval: db decide failed", "approval_id", ap.ID, "session_id", sess.ID, "error", err)
-			}
-			continue
-		}
-		_ = s.repos.Audit.Append(ctx, "system", "approval.expire", ap.ID, nil)
 		_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionOpen)
 	}
 }
