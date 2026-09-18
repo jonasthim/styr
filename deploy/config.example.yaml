@@ -1,0 +1,50 @@
+# Example styr configuration. Copy to /etc/styr/config.yaml (or point
+# STYR_CONFIG at a copy) and edit. Every field may also be set with a
+# STYR_* environment variable; env values win over this file.
+
+# env: deployment mode, "prod" or "dev". Defaults to "prod". Only "dev"
+# honours dev_user and skips the base_url/oidc requirements below.
+env: prod
+
+# listen: address the HTTP server binds to.
+listen: 127.0.0.1:8080
+
+# base_url: the public URL users reach styr at. Required in prod; used to
+# build the OIDC redirect URI.
+base_url: https://styr.example.com
+
+# data_dir: directory for the sqlite database, per-user data and workspace
+# checkouts. Defaults to /var/lib/styr in prod, ./data in dev.
+data_dir: /var/lib/styr
+
+# secret_key: 32+ bytes (base64 or raw), used to encrypt stored Claude
+# tokens at rest. Required. Generate with: openssl rand -base64 32
+secret_key: change-me-to-a-random-32-byte-value
+
+# claude_bin: path to the Claude Code CLI binary.
+claude_bin: claude
+
+# max_open_sessions: maximum number of concurrently open Claude sessions.
+max_open_sessions: 4
+
+# idle_timeout: how long an open session may sit idle before it is closed.
+idle_timeout: 15m
+
+# approval_timeout: how long an unattended profile waits for approval
+# before the request expires.
+approval_timeout: 30m
+
+# oidc: one or more OpenID Connect providers shown on the login page.
+# Required in prod (at least one provider).
+oidc:
+  - name: Authentik
+    issuer: https://auth.example.com/application/o/styr/
+    client_id: styr
+    # client_secret can instead be supplied via STYR_OIDC_CLIENT_SECRET,
+    # which always fills provider 0's secret.
+    client_secret: change-me
+    scopes: [openid, profile, email]
+
+# dev_user: email of the synthetic logged-in user used when env is "dev".
+# Ignored in prod.
+dev_user: dev@example.com
