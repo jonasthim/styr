@@ -825,3 +825,60 @@ func TestSlugify(t *testing.T) {
 		}
 	}
 }
+
+func TestTemplateLoopFields(t *testing.T) {
+	f := newFixture(t, domain.TriggerGeneric, nil)
+	ctx := context.Background()
+
+	// A loop with no budget would iterate forever.
+	if _, err := f.svc.CreateTemplate(ctx, member, domain.TemplateInput{
+		Name: "Endless", WorkspaceID: "ws-1", ProfileID: "investigate", PromptTemplate: "x",
+		LoopUntil: "done",
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("loop_until without loop_max: err = %v, want ErrInvalid", err)
+	}
+	if _, err := f.svc.CreateTemplate(ctx, member, domain.TemplateInput{
+		Name: "Endless", WorkspaceID: "ws-1", ProfileID: "investigate", PromptTemplate: "x",
+		LoopUntil: "done", LoopMax: 0,
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("loop_max 0: err = %v, want ErrInvalid", err)
+	}
+
+	tpl, err := f.svc.CreateTemplate(ctx, member, domain.TemplateInput{
+		Name: "Until fixed", WorkspaceID: "ws-1", ProfileID: "investigate", PromptTemplate: "x",
+		LoopUntil: " done ", LoopMax: 3,
+	})
+	if err != nil {
+		t.Fatalf("CreateTemplate: %v", err)
+	}
+	if tpl.LoopUntil != "done" || tpl.LoopMax != 3 {
+		t.Fatalf("loop fields = %q/%d", tpl.LoopUntil, tpl.LoopMax)
+	}
+
+	got, err := f.svc.GetTemplate(ctx, member, tpl.ID)
+	if err != nil {
+		t.Fatalf("GetTemplate: %v", err)
+	}
+	if got.LoopUntil != "done" || got.LoopMax != 3 {
+		t.Fatalf("stored loop fields = %q/%d", got.LoopUntil, got.LoopMax)
+	}
+
+	// A template without loop fields is not a loop, whatever loop_max says.
+	plain, err := f.svc.UpdateTemplate(ctx, member, tpl.ID, domain.TemplateInput{
+		Name: "Until fixed", WorkspaceID: "ws-1", ProfileID: "investigate", PromptTemplate: "x",
+		LoopMax: 7,
+	})
+	if err != nil {
+		t.Fatalf("UpdateTemplate: %v", err)
+	}
+	if plain.LoopUntil != "" || plain.LoopMax != 7 {
+		t.Fatalf("cleared loop = %q/%d", plain.LoopUntil, plain.LoopMax)
+	}
+
+	if _, err := f.svc.UpdateTemplate(ctx, member, tpl.ID, domain.TemplateInput{
+		Name: "Until fixed", WorkspaceID: "ws-1", ProfileID: "investigate", PromptTemplate: "x",
+		LoopUntil: "done",
+	}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("update to an endless loop: err = %v, want ErrInvalid", err)
+	}
+}

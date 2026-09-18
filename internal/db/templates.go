@@ -16,15 +16,16 @@ type Templates struct{ d *DB }
 func NewTemplates(d *DB) *Templates { return &Templates{d: d} }
 
 const templateColumns = `id, owner_user_id, name, workspace_id, profile_id, title_template, prompt_template,
-	system_prompt, report_schema, created_at, updated_at`
+	system_prompt, report_schema, loop_until, loop_max, created_at, updated_at`
 
 // Create inserts a new template row. t.ID must already be set.
 func (t *Templates) Create(ctx context.Context, tpl domain.Template) error {
 	_, err := t.d.ExecContext(ctx, `
 		INSERT INTO templates (`+templateColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tpl.ID, ownerArg(tpl.OwnerID), tpl.Name, tpl.WorkspaceID, tpl.ProfileID, tpl.TitleTemplate,
-		tpl.PromptTemplate, tpl.SystemPrompt, tpl.ReportSchema, nowString(tpl.CreatedAt), nowString(tpl.UpdatedAt))
+		tpl.PromptTemplate, tpl.SystemPrompt, tpl.ReportSchema, tpl.LoopUntil, tpl.LoopMax,
+		nowString(tpl.CreatedAt), nowString(tpl.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create template: %w", domain.ErrConflict)
@@ -42,7 +43,8 @@ func scanTemplate(row interface{ Scan(dest ...any) error }) (*domain.Template, e
 	)
 	if err := row.Scan(
 		&tpl.ID, &ownerID, &tpl.Name, &tpl.WorkspaceID, &tpl.ProfileID, &tpl.TitleTemplate,
-		&tpl.PromptTemplate, &tpl.SystemPrompt, &tpl.ReportSchema, &createdAt, &updatedAt,
+		&tpl.PromptTemplate, &tpl.SystemPrompt, &tpl.ReportSchema, &tpl.LoopUntil, &tpl.LoopMax,
+		&createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -98,10 +100,12 @@ func (t *Templates) ListVisible(ctx context.Context, userID string, isAdmin bool
 func (t *Templates) Update(ctx context.Context, tpl domain.Template) error {
 	res, err := t.d.ExecContext(ctx, `
 		UPDATE templates SET owner_user_id = ?, name = ?, workspace_id = ?, profile_id = ?, title_template = ?,
-			prompt_template = ?, system_prompt = ?, report_schema = ?, updated_at = ?
+			prompt_template = ?, system_prompt = ?, report_schema = ?, loop_until = ?, loop_max = ?,
+			updated_at = ?
 		WHERE id = ?`,
 		ownerArg(tpl.OwnerID), tpl.Name, tpl.WorkspaceID, tpl.ProfileID, tpl.TitleTemplate,
-		tpl.PromptTemplate, tpl.SystemPrompt, tpl.ReportSchema, nowString(tpl.UpdatedAt), tpl.ID)
+		tpl.PromptTemplate, tpl.SystemPrompt, tpl.ReportSchema, tpl.LoopUntil, tpl.LoopMax,
+		nowString(tpl.UpdatedAt), tpl.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("update template: %w", domain.ErrConflict)

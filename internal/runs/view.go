@@ -49,5 +49,10 @@ func (e *Engine) view(ctx context.Context, r domain.Run) domain.RunView {
 			v.Template = tpl
 		}
 	}
+	if r.LoopID != "" && e.repos.Loops != nil {
+		if loop, err := e.repos.Loops.Get(ctx, r.LoopID); err == nil {
+			v.Loop = loop
+		}
+	}
 	return v
 }

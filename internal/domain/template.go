@@ -17,6 +17,12 @@ type Template struct {
 	SystemPrompt   string
 	ReportSchema   string // JSON schema text; empty = no structured report expected
 
+	// LoopUntil is the report field that ends a loop started from this
+	// template; empty means the template does not loop. LoopMax caps how
+	// many iterations such a loop may run.
+	LoopUntil string
+	LoopMax   int
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }

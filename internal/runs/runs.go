@@ -56,6 +56,9 @@ type Repos struct {
 	Sessions   *db.Sessions
 	Channels   *db.NotificationChannels
 	Deliveries *db.Deliveries
+	// Loops backs until-done loops (see loops.go). Optional: without it a
+	// looping template simply runs once.
+	Loops *db.Loops
 	// Events is the session transcript, read once per run to close the
 	// window between a session starting and its run row existing (see
 	// Engine.reconcile).
@@ -75,7 +78,10 @@ type RunInput struct {
 	TriggerID  string
 	DeliveryID string
 	Vars       templates.Vars
-	Origin     domain.Origin
+	// Origin is what asked for this run: webhook (the default), schedule,
+	// ui (a template started by hand) or loop. It is carried onto the
+	// session, and onto every further iteration when the template loops.
+	Origin domain.Origin
 }
 
 // Engine starts unattended runs and follows them to completion.
@@ -98,6 +104,10 @@ type Engine struct {
 	// process.
 	notified  *onceSet
 	completed *onceSet
+
+	// loopVars holds the template variables of every live loop, so each
+	// iteration renders the same prompt as the first one did.
+	loopVars *varsCache
 }
 
 // New constructs an Engine. baseURL is the public URL used to build the
@@ -122,6 +132,7 @@ func New(repos Repos, sessionsSvc *sessions.Service, bus *events.Bus, notifier N
 		logger:    logger,
 		notified:  newOnceSet(),
 		completed: newOnceSet(),
+		loopVars:  newVarsCache(),
 	}
 }
 
@@ -165,6 +176,14 @@ func (e *Engine) Start(ctx context.Context, in RunInput) (domain.Run, error) {
 		return domain.Run{}, err
 	}
 
+	loopID, iteration, err := e.startLoop(ctx, *tpl, in, sess.ID, origin)
+	if err != nil {
+		if cErr := e.sessions.Close(ctx, serviceActor, sess.ID); cErr != nil {
+			e.logger.Error("runs: close orphaned session", "session_id", sess.ID, "error", cErr)
+		}
+		return domain.Run{}, err
+	}
+
 	run := domain.Run{
 		ID:         runID,
 		SessionID:  sess.ID,
@@ -172,6 +191,8 @@ func (e *Engine) Start(ctx context.Context, in RunInput) (domain.Run, error) {
 		TriggerID:  optional(in.TriggerID),
 		DeliveryID: optional(in.DeliveryID),
 		Origin:     string(origin),
+		LoopID:     loopID,
+		Iteration:  iteration,
 		StartedAt:  time.Now(),
 		Outcome:    domain.RunRunning,
 		Report:     json.RawMessage("{}"),
@@ -182,9 +203,16 @@ func (e *Engine) Start(ctx context.Context, in RunInput) (domain.Run, error) {
 		if cErr := e.sessions.Close(ctx, serviceActor, sess.ID); cErr != nil {
 			e.logger.Error("runs: close orphaned session", "session_id", sess.ID, "error", cErr)
 		}
+		if loopID != "" {
+			if uErr := e.repos.Loops.Update(ctx, loopID, domain.LoopFailed, iteration, nil); uErr != nil {
+				e.logger.Error("runs: fail orphaned loop", "loop_id", loopID, "error", uErr)
+			}
+			e.loopVars.forget(loopID)
+		}
 		return domain.Run{}, err
 	}
-	e.logger.Info("runs: started", "run_id", run.ID, "session_id", sess.ID, "template_id", tpl.ID, "origin", origin)
+	e.logger.Info("runs: started", "run_id", run.ID, "session_id", sess.ID, "template_id", tpl.ID,
+		"origin", origin, "loop_id", loopID)
 	e.reconcile(ctx, run)
 	return run, nil
 }
