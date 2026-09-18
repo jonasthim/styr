@@ -6,9 +6,14 @@ import { api } from './client'
 import type {
   Approval,
   Checkpoint,
+  CostStats,
   Delivery,
   DiffSummary,
   FileDiff,
+  GanttStats,
+  Loop,
+  LoopState,
+  LoopView,
   Me,
   NotificationChannel,
   Profile,
@@ -16,6 +21,8 @@ import type {
   ReviewComment,
   RunOutcome,
   RunView,
+  Schedule,
+  ScheduleFiring,
   Session,
   SessionEvent,
   StatusInfo,
@@ -125,6 +132,46 @@ export const q = {
       queryKey: ['session-checkpoints', id],
       queryFn: () => api<Checkpoint[]>(`/api/v1/sessions/${id}/checkpoints`),
     }),
+
+  // --- schedules, loops and stats (T49) ------------------------------------
+  schedules: () => queryOptions({ queryKey: ['schedules'], queryFn: () => api<Schedule[]>('/api/v1/schedules') }),
+
+  scheduleFirings: (id: string) =>
+    queryOptions({
+      queryKey: ['schedule-firings', id],
+      queryFn: () => api<ScheduleFiring[]>(`/api/v1/schedules/${id}/firings?limit=50`),
+    }),
+
+  loops: (state: LoopState | '' = '') =>
+    queryOptions({
+      queryKey: ['loops', state],
+      queryFn: () => api<Loop[]>(`/api/v1/loops${state ? `?state=${state}` : ''}`),
+      // A running loop chains a new run every few minutes and nothing pushes
+      // that over SSE yet, so the tab keeps itself honest.
+      refetchInterval: 10_000,
+    }),
+
+  loop: (id: string) => queryOptions({ queryKey: ['loop', id], queryFn: () => api<LoopView>(`/api/v1/loops/${id}`) }),
+
+  /** The fleet Gantt for the `hours` ending now, refetched on the plan's
+   * 30 s cadence. The window bounds are part of the key so switching
+   * 1 h/6 h/24 h refetches, but `to` is rounded down to the minute: an
+   * unrounded one would mint a new key - and a new request - every render. */
+  gantt: (hours: number) => {
+    const to = new Date(Math.floor(Date.now() / 60_000) * 60_000)
+    const from = new Date(to.getTime() - hours * 3_600_000)
+    return queryOptions({
+      queryKey: ['gantt', hours, to.toISOString()],
+      queryFn: () =>
+        api<GanttStats>(
+          `/api/v1/stats/gantt?from=${encodeURIComponent(from.toISOString())}&to=${encodeURIComponent(to.toISOString())}`,
+        ),
+      refetchInterval: 30_000,
+    })
+  },
+
+  costs: (days: number) =>
+    queryOptions({ queryKey: ['costs', days], queryFn: () => api<CostStats>(`/api/v1/stats/costs?days=${days}`) }),
 }
 
 /** Everything the review surface reads that a review action can change.

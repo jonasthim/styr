@@ -16,7 +16,11 @@ export function TableFrame({
   return (
     <div
       className={clsx(
-        'overflow-x-auto rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]',
+        // `relative` is load-bearing: a wide table's sr-only cells are
+        // absolutely positioned, and without a positioned scroller their
+        // containing block is the page - so on a phone they escape this
+        // frame's clipping and push the whole document sideways.
+        'relative overflow-x-auto rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]',
         className,
       )}
     >

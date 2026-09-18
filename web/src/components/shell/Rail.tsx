@@ -6,7 +6,7 @@ import { useState, type ComponentType } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Activity, FolderKanban, Inbox as InboxIcon, MessagesSquare, Settings as SettingsIcon, Zap } from 'lucide-react'
+import { Activity, Clock, FolderKanban, Inbox as InboxIcon, MessagesSquare, Settings as SettingsIcon, Zap } from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
 import { useMe } from '../../hooks/useMe'
@@ -104,6 +104,7 @@ export function Rail() {
     { to: '/sessions', label: 'Sessions', icon: MessagesSquare },
     { to: '/runs', label: 'Runs', icon: Activity },
     { to: '/triggers', label: 'Triggers', icon: Zap },
+    { to: '/schedules', label: 'Schedules', icon: Clock },
     { to: '/workspaces', label: 'Workspaces', icon: FolderKanban },
   ]
   if (me?.role === 'admin') {

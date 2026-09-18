@@ -14,7 +14,7 @@ import { DeliveriesDialog } from '../components/triggers/DeliveriesDialog'
 import { TestPayloadDialog } from '../components/triggers/TestPayloadDialog'
 import { TriggerRow } from '../components/triggers/TriggerRow'
 import { relativeTime } from '../components/inbox/format'
-import { Button, EmptyState, PageHeader, TableFrame, Tabs, TabsList, TabsTrigger, Td, Th, Tr } from '../components/ui'
+import { Badge, Button, EmptyState, PageHeader, TableFrame, Tabs, TabsList, TabsTrigger, Td, Th, Tr } from '../components/ui'
 
 function TriggersTab() {
   const triggers = useQuery(q.triggers())
@@ -154,9 +154,20 @@ function TemplatesTab() {
             {templates.data.map((template) => (
               <Tr key={template.id} data-testid={`template-row-${template.id}`}>
                 <Td>
-                  <Link to="/templates/$id" params={{ id: template.id }} className="font-medium text-fg-primary no-underline hover:text-accent hover:underline">
-                    {template.name}
-                  </Link>
+                  <span className="flex items-center gap-2">
+                    <Link to="/templates/$id" params={{ id: template.id }} className="font-medium text-fg-primary no-underline hover:text-accent hover:underline">
+                      {template.name}
+                    </Link>
+                    {/* A looping template keeps going on its own, which is
+                        worth knowing before you point a trigger at it. */}
+                    {template.loop_until && (
+                      <span title={`Repeats until the report's ${template.loop_until} is true`}>
+                        <Badge tone="accent" variant="outline">
+                          Loop
+                        </Badge>
+                      </span>
+                    )}
+                  </span>
                 </Td>
                 <Td className="font-mono text-[12px] text-fg-secondary">{workspaceName(template.workspace_id)}</Td>
                 <Td className="font-mono text-[12px] text-fg-secondary">{profileName(template.profile_id)}</Td>

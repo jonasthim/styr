@@ -2,7 +2,7 @@
 // Profile (Shell renders exactly one of Rail/TabBar, never both).
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Inbox as InboxIcon, MessagesSquare, User, Zap } from 'lucide-react'
+import { Activity, Clock, Inbox as InboxIcon, MessagesSquare, User, Zap } from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
 
@@ -11,6 +11,7 @@ const ITEMS = [
   { to: '/sessions', label: 'Sessions', icon: MessagesSquare },
   { to: '/runs', label: 'Runs', icon: Activity },
   { to: '/triggers', label: 'Triggers', icon: Zap },
+  { to: '/schedules', label: 'Schedules', icon: Clock },
   { to: '/profile', label: 'Profile', icon: User },
 ] as const
 
@@ -32,7 +33,10 @@ export function TabBar() {
             key={to}
             to={to}
             className={clsx(
-              'flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-150',
+              // min-w-0 + a truncating label: six tabs at 390px leave each
+              // one ~65px, and a label must shorten rather than push the
+              // page sideways.
+              'flex min-w-0 flex-1 flex-col items-center justify-center gap-1 px-0.5 text-[11px] font-medium transition-colors duration-150',
               active ? 'text-fg-primary' : 'text-fg-muted',
             )}
           >
@@ -47,7 +51,7 @@ export function TabBar() {
                 </span>
               )}
             </span>
-            {label}
+            <span className="max-w-full truncate">{label}</span>
           </Link>
         )
       })}

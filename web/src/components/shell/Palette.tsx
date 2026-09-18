@@ -24,6 +24,7 @@ const GO_TO_ITEMS = [
   { to: '/sessions', label: 'Sessions' },
   { to: '/runs', label: 'Runs' },
   { to: '/triggers', label: 'Triggers' },
+  { to: '/schedules', label: 'Schedules' },
   { to: '/workspaces', label: 'Workspaces' },
   { to: '/profile', label: 'Profile' },
 ] as const

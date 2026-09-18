@@ -11,7 +11,17 @@ import { q } from '../api/queries'
 import type { Session, SessionState } from '../api/types'
 import { SessionRow } from '../components/sessions/SessionRow'
 import { NewSessionDialog } from '../components/sessions/NewSessionDialog'
-import { Badge, Button, EmptyState, PageHeader, Skeleton } from '../components/ui'
+import { FleetGantt } from '../components/stats/FleetGantt'
+import { Badge, Button, EmptyState, PageHeader, Skeleton, Tabs, TabsList, TabsTrigger } from '../components/ui'
+
+// The Gantt's window, as the segmented control offers it.
+const WINDOWS = [
+  { value: '1h', label: '1 h', hours: 1 },
+  { value: '6h', label: '6 h', hours: 6 },
+  { value: '24h', label: '24 h', hours: 24 },
+] as const
+
+type WindowValue = (typeof WINDOWS)[number]['value']
 
 type Group = 'needs-you' | 'running' | 'idle' | 'closed'
 
@@ -66,7 +76,26 @@ export function Sessions() {
   const sessions = useQuery(q.sessions())
   const workspaces = useQuery(q.workspaces())
 
+  const view = search.view === 'gantt' ? 'gantt' : 'list'
+  const windowValue: WindowValue = search.window ?? '1h'
+  const hours = WINDOWS.find((w) => w.value === windowValue)?.hours ?? 1
+  // Only asked for while the Gantt is on screen; it polls every 30 s
+  // (api/queries.ts) so the lanes keep up with the fleet.
+  const gantt = useQuery({ ...q.gantt(hours), enabled: view === 'gantt' })
+
   const dialogOpen = search.new === 1
+
+  function setView(next: 'list' | 'gantt') {
+    void navigate({
+      to: '/sessions',
+      search: next === 'gantt' ? { view: 'gantt', window: windowValue === '1h' ? undefined : windowValue } : {},
+      replace: true,
+    })
+  }
+
+  function setWindow(next: WindowValue) {
+    void navigate({ to: '/sessions', search: { view: 'gantt', window: next === '1h' ? undefined : next }, replace: true })
+  }
 
   function setDialogOpen(open: boolean) {
     void navigate({ to: '/sessions', search: open ? { new: 1 } : {}, replace: true })
@@ -100,8 +129,47 @@ export function Sessions() {
         }
       />
 
-      {sessions.isLoading && (
-        <div className="mt-5 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Tabs value={view} onValueChange={(v) => setView(v as 'list' | 'gantt')}>
+          <TabsList aria-label="Sessions view">
+            <TabsTrigger value="list">List</TabsTrigger>
+            <TabsTrigger value="gantt">Gantt</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {view === 'gantt' && (
+          <Tabs value={windowValue} onValueChange={(v) => setWindow(v as WindowValue)}>
+            <TabsList aria-label="Gantt window">
+              {WINDOWS.map((w) => (
+                <TabsTrigger key={w.value} value={w.value}>
+                  {w.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+      </div>
+
+      {view === 'gantt' && (
+        <>
+          {gantt.isLoading && <Skeleton className="mt-4 h-40 w-full" />}
+          {gantt.data && gantt.data.lanes.length > 0 && <FleetGantt lanes={gantt.data.lanes} hours={hours} />}
+          {gantt.isSuccess && gantt.data.lanes.length === 0 && (
+            <EmptyState
+              icon={<MessagesSquare size={18} aria-hidden />}
+              title="Nothing ran in this window"
+              description="Widen the window, or start a session — the fleet view fills in as sessions work."
+              action={
+                <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+                  New session
+                </Button>
+              }
+            />
+          )}
+        </>
+      )}
+
+      {view === 'list' && sessions.isLoading && (
+        <div className="mt-4 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
           <SkeletonRow />
           <SkeletonRow />
           <SkeletonRow />
@@ -110,7 +178,7 @@ export function Sessions() {
 
       {/* Centred in the content area rather than boxed at the top of the
           page: an empty screen is the whole screen. */}
-      {isEmpty && (
+      {view === 'list' && isEmpty && (
         <EmptyState
           icon={<MessagesSquare size={18} aria-hidden />}
           title="No sessions yet"
@@ -123,8 +191,8 @@ export function Sessions() {
         />
       )}
 
-      {!sessions.isLoading && !isEmpty && (
-        <div className="mt-5 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
+      {view === 'list' && !sessions.isLoading && !isEmpty && (
+        <div className="mt-4 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
           {GROUP_ORDER.filter(({ key }) => (grouped.get(key)?.length ?? 0) > 0).map(({ key, label }) => (
             // The last row in the card drops its divider so the hairline
             // doesn't double up with the card's own bottom edge.

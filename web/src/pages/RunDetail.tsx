@@ -68,7 +68,7 @@ export function RunDetail() {
   // (internal/api/runs_handlers.go's runViewDTO); the trigger's name is not
   // one of them, so it is resolved from the triggers list the same way the
   // runs list does it.
-  const { run: detail, session, delivery } = run.data
+  const { run: detail, session, delivery, loop } = run.data
   const triggerName = detail.trigger_id ? (triggers.data?.find((t) => t.id === detail.trigger_id)?.name ?? null) : null
 
   return (
@@ -88,6 +88,20 @@ export function RunDetail() {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-secondary">
             <Badge tone={detail.outcome === 'running' ? 'running' : 'neutral'}>{OUTCOME_LABEL[detail.outcome]}</Badge>
+            {/* A run inside a loop is one of several; the chip says which,
+                and goes to the loop holding the rest. */}
+            {loop && (
+              <Link
+                to="/runs/loops"
+                data-testid="loop-chip"
+                className="no-underline"
+                title="Open the loop this run belongs to"
+              >
+                <Badge tone="accent" variant="outline">
+                  Iteration {detail.iteration} of {loop.max_iterations}
+                </Badge>
+              </Link>
+            )}
             {triggerName && <span className="font-mono">{triggerName}</span>}
             <span aria-hidden>·</span>
             <span className="font-mono tabular-nums">{formatDuration(detail.started_at, detail.finished_at)}</span>
