@@ -39,3 +39,46 @@ test('sending a message shows it as a user block', async ({ page }) => {
   await expect(page.getByText('again', { exact: true })).toBeVisible()
   await expect(input).toHaveValue('')
 })
+
+// Task 21: the side panel's Activity tab shows the fixture's Read tool call
+// as a span, and the Changes tab lists the file it touched (note.txt).
+test('the Activity tab shows a span for the fixture session', async ({ page }) => {
+  await page.goto(`/sessions/${SESSION_ID}`)
+
+  await page.getByRole('tab', { name: 'Activity' }).click()
+  await expect(page.getByTestId('span').first()).toBeVisible()
+})
+
+test('the Changes tab lists note.txt', async ({ page }) => {
+  await page.goto(`/sessions/${SESSION_ID}`)
+
+  await page.getByRole('tab', { name: 'Changes' }).click()
+  await expect(page.getByTestId('changes-list')).toContainText('note.txt')
+})
+
+test('clicking a file in Changes filters the transcript to blocks touching it', async ({ page }) => {
+  await page.goto(`/sessions/${SESSION_ID}`)
+
+  await page.getByRole('tab', { name: 'Changes' }).click()
+  await page.getByTestId('changes-list').getByRole('button', { name: /note\.txt/ }).click()
+
+  await expect(page).toHaveURL(/[?&]file=/)
+  await expect(page.getByRole('button', { expanded: false }).filter({ hasText: 'Read' })).toBeVisible()
+  await expect(page.getByText('hello', { exact: true })).not.toBeVisible()
+})
+
+test('phone shows a tabs strip above the composer instead of a fixed side panel', async ({ page }, testInfo) => {
+  await page.goto(`/sessions/${SESSION_ID}`)
+
+  const panel = page.getByTestId('side-panel')
+  await expect(panel).toBeVisible()
+  const box = await panel.boundingBox()
+  expect(box).not.toBeNull()
+
+  if (testInfo.project.name === 'mock-phone') {
+    expect(box!.width).toBeGreaterThan(350)
+  } else {
+    expect(box!.width).toBeLessThanOrEqual(340)
+    expect(box!.width).toBeGreaterThanOrEqual(300)
+  }
+})
