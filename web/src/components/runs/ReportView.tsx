@@ -12,14 +12,13 @@ const SEVERITY_TONE: Record<NonNullable<StructuredReport['severity']>, 'neutral'
   critical: 'failed',
 }
 
-function parseReport(raw: string): StructuredReport | null {
-  if (!raw.trim()) return null
-  try {
-    const parsed: unknown = JSON.parse(raw)
-    return parsed && typeof parsed === 'object' ? (parsed as StructuredReport) : null
-  } catch {
-    return null
-  }
+/** A run's report arrives as already-parsed JSON (the API sends the
+ * structured output verbatim, null until the run finishes with one), so this
+ * only has to reject the shapes the seeded schema never produces - a null, an
+ * array, a bare string or number. */
+function asReport(raw: unknown): StructuredReport | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  return raw as StructuredReport
 }
 
 /** 4px confidence meter - a plain filled track rather than a numeric gauge,
@@ -44,8 +43,8 @@ function ConfidenceMeter({ confidence }: { confidence: number }) {
   )
 }
 
-export function ReportView({ report }: { report: string }) {
-  const parsed = parseReport(report)
+export function ReportView({ report }: { report: unknown }) {
+  const parsed = asReport(report)
 
   if (!parsed) {
     return <p className="text-[13px] text-fg-secondary">No report yet.</p>

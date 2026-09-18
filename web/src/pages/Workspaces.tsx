@@ -79,7 +79,7 @@ function RetryButton({ workspaceId }: { workspaceId: string }) {
     try {
       await api(`/api/v1/workspaces/${workspaceId}/retry`, { method: 'POST' })
       queryClient.setQueryData<Workspace[]>(['workspaces'], (prev) =>
-        prev?.map((w) => (w.id === workspaceId ? { ...w, state: 'cloning', error: null } : w)),
+        prev?.map((w) => (w.id === workspaceId ? { ...w, state: 'cloning', error: '' } : w)),
       )
     } finally {
       setPending(false)

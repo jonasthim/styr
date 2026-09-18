@@ -34,7 +34,7 @@ interface BusMessage {
 interface WorkspaceStatePayload {
   id: string
   state: WorkspaceState
-  error: string | null
+  error: string
 }
 
 interface StreamDelta {

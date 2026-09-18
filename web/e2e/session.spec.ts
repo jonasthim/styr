@@ -121,12 +121,12 @@ test('phone shows a tabs strip above the composer instead of a fixed side panel'
 })
 
 // T38: the `/` menu, the model and effort selects, and the resuming state.
-// Mock-only: the real backend's shell fake replays a fixture rather than
-// running the CLI, so it reports no slash commands and cannot resume under
-// new flags.
+// These are mock-only because they assert the mock's own seeded command list
+// and its scripted resume; the real-backend block at the bottom covers the
+// same two controls against the server (T37).
 
 test('typing / lists a custom command and hides a hidden built-in', async ({ page }, testInfo) => {
-  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  test.skip(isReal(testInfo), 'mock-only: asserts the mock-seeded command list')
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
@@ -146,7 +146,7 @@ test('typing / lists a custom command and hides a hidden built-in', async ({ pag
 })
 
 test('selecting a CLI command inserts it into the composer', async ({ page }, testInfo) => {
-  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  test.skip(isReal(testInfo), 'mock-only: asserts the mock-seeded command list')
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
@@ -160,7 +160,7 @@ test('selecting a CLI command inserts it into the composer', async ({ page }, te
 })
 
 test('selecting /model focuses the header model select', async ({ page }, testInfo) => {
-  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  test.skip(isReal(testInfo), 'mock-only: asserts the mock-seeded command list')
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
@@ -174,7 +174,7 @@ test('selecting /model focuses the header model select', async ({ page }, testIn
 })
 
 test('/help lists the Styr and session commands', async ({ page }, testInfo) => {
-  test.skip(isReal(testInfo), 'mock-only: the shell fake reports no slash commands')
+  test.skip(isReal(testInfo), 'mock-only: asserts the mock-seeded command list')
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
@@ -189,7 +189,7 @@ test('/help lists the Styr and session commands', async ({ page }, testInfo) => 
 })
 
 test('switching the model shows the resuming state', async ({ page }, testInfo) => {
-  test.skip(isReal(testInfo), 'mock-only: the fake CLI cannot resume under new flags')
+  test.skip(isReal(testInfo), 'mock-only: the mock scripts the resumed init on a timer')
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
@@ -201,4 +201,61 @@ test('switching the model shows the resuming state', async ({ page }, testInfo) 
   // clears the banner and shows the new model.
   await expect(page.getByTestId('model-resuming')).toHaveCount(0, { timeout: 15_000 })
   await expect(page.locator('#session-model-select')).toContainText('Haiku 4.5')
+})
+
+// --- real backend ----------------------------------------------------------
+// The same two controls against the running server. The shell fake replays a
+// recorded transcript, so the session's slash_commands are the ones the real
+// CLI reported on that recording's init message (fixture 02's, which the
+// seeded session replays), and a resume comes back with that same init - it
+// just ignores the --model flag it was restarted with.
+
+test('the / menu lists a command the real CLI reported and hides clear', async ({ page }, testInfo) => {
+  test.skip(!isReal(testInfo), 'real-backend only: the mock seeds its own command list')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  const input = page.getByTestId('composer-input')
+  await input.fill('/')
+
+  const menu = page.getByTestId('slash-menu')
+  await expect(menu).toBeVisible()
+  // Reported by the recorded init message, and a built-in that survives
+  // headless mode (internal/harness/claude/builtins.go).
+  await expect(menu.getByRole('option', { name: /\/compact/ })).toBeVisible()
+  // …while /clear is reported too and must never be offered: the CLI resets
+  // the conversation under a new session id.
+  await expect(menu.getByRole('option', { name: /\/clear/ })).toHaveCount(0)
+  // Styr's own commands are always there.
+  await expect(menu.getByRole('option', { name: /\/help/ })).toBeVisible()
+})
+
+test('switching the model resumes the session and it settles again', async ({ page }, testInfo) => {
+  test.skip(!isReal(testInfo), 'real-backend only: the mock fakes the resumed init')
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+
+  async function sessionField<T>(field: string): Promise<T> {
+    const res = await page.request.get(`/api/v1/sessions/${sessionId}`, { headers: { 'X-Requested-With': 'styr' } })
+    return ((await res.json()) as Record<string, T>)[field]
+  }
+
+  await page.locator('#session-model-select').click()
+  await page.getByRole('option', { name: 'Haiku 4.5' }).click()
+
+  // The switch closes the process and starts a resumed one, which the header
+  // says out loud until the CLI reports back.
+  await expect(page.getByTestId('model-resuming')).toContainText('Resuming with Haiku 4.5')
+  await expect.poll(() => sessionField<string>('state'), { timeout: 20_000 }).toBe('running')
+
+  // The resumed fake only speaks when spoken to, so the next turn is what
+  // makes it report its init and finish - and that is what clears the banner.
+  await page.getByTestId('composer-input').fill('again')
+  await page.getByTestId('composer-send').click()
+
+  await expect(page.getByTestId('model-resuming')).toHaveCount(0, { timeout: 30_000 })
+  await expect.poll(() => sessionField<string>('state'), { timeout: 30_000 }).toBe('open')
+  // The fake ignores --model and reports the model its recording ran on, so
+  // the assertion is that the session ends up with a model at all, not which.
+  expect(await sessionField<string>('model')).not.toBe('')
 })

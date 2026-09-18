@@ -10,9 +10,8 @@ import type {
   NotificationChannel,
   Profile,
   Provider,
-  Run,
-  RunDetail,
   RunOutcome,
+  RunView,
   Session,
   SessionEvent,
   StatusInfo,
@@ -81,18 +80,18 @@ export const q = {
     params.set('limit', String(filters.limit ?? 100))
     return queryOptions({
       queryKey: ['runs', filters.outcome ?? '', filters.trigger ?? ''],
-      queryFn: () => api<Run[]>(`/api/v1/runs?${params.toString()}`),
+      queryFn: () => api<RunView[]>(`/api/v1/runs?${params.toString()}`),
     })
   },
 
   run: (id: string) =>
     queryOptions({
       queryKey: ['run', id],
-      queryFn: () => api<RunDetail>(`/api/v1/runs/${id}`),
+      queryFn: () => api<RunView>(`/api/v1/runs/${id}`),
       // A running run has no push channel wired up yet (T33 has no SSE
       // frames for run state) - poll while it's still running so the page
       // notices the moment it finishes.
-      refetchInterval: (query) => (query.state.data?.outcome === 'running' ? 2000 : false),
+      refetchInterval: (query) => (query.state.data?.run.outcome === 'running' ? 2000 : false),
     }),
 
   notifications: () =>

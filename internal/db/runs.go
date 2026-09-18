@@ -68,7 +68,16 @@ func scanRun(row interface{ Scan(dest ...any) error }) (*domain.Run, error) {
 	r.StartedAt = parseTime(startedAt)
 	r.FinishedAt = nullTime(finishedAt)
 	r.Outcome = domain.RunOutcome(outcome)
-	r.Report = json.RawMessage(report)
+	// The report column is TEXT NOT NULL DEFAULT '' and stays empty until the
+	// run finishes with a structured report. An empty (but non-nil)
+	// json.RawMessage is not valid JSON, so marshalling a Run carrying one
+	// fails with "unexpected end of JSON input" and GET /runs would answer
+	// 500 for as long as any run is still running; a nil RawMessage marshals
+	// as null, which is what the contract documents (docs/openapi.yaml,
+	// Run.report).
+	if report != "" {
+		r.Report = json.RawMessage(report)
+	}
 	return &r, nil
 }
 

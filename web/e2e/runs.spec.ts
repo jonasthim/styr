@@ -1,9 +1,11 @@
 // Runs (T33): the list, filtering by outcome, a run's report rendered from
-// its schema, re-running it, and the phone layout. Mock only for now (real
-// backend for this contract arrives in T34/T35); see triggers.spec.ts for
-// triggers, templates and notifications.
+// its schema, re-running it, and the phone layout. The mock's seeded runs
+// cover outcomes the real pipeline cannot be pushed into quickly (a run
+// stuck at needs_human, a re-run chain); the "Runs (real backend)" block at
+// the bottom filters the list against a real run the trigger pipeline
+// actually produced (T37). See triggers.spec.ts for the full real pipeline.
 import { test, expect } from '@playwright/test'
-import { isReal } from './helpers/seed'
+import { ensureRealSuccessRun, isReal } from './helpers/seed'
 
 // Fixed mock ids (web/src/mocks/triggersHandlers.ts) - duplicated as
 // literals; e2e specs run outside Vite (see triggers.spec.ts's own comment).
@@ -59,6 +61,9 @@ test.describe('Runs', () => {
 
   test('phone layout: the runs list stays usable at 390px', async ({ page }, testInfo) => {
     const isPhone = testInfo.project.name.includes('phone')
+    // The mock seeds runs; the real backend only has the ones this suite's
+    // own deliveries produced, and this test needs a row to measure.
+    if (isReal(testInfo)) await ensureRealSuccessRun(page)
     await page.goto('/runs')
     await expect(page.getByRole('heading', { name: 'Runs' })).toBeVisible()
 
@@ -73,5 +78,39 @@ test.describe('Runs', () => {
     await expect(row).toBeVisible()
     const overflowing = await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth + 1)
     expect(overflowing).toBeFalsy()
+  })
+})
+
+// --- real backend ----------------------------------------------------------
+test.describe('Runs (real backend)', () => {
+  test('filter chips narrow the list to a real successful run', async ({ page }, testInfo) => {
+    test.skip(!isReal(testInfo), 'real-backend only: needs a run the trigger pipeline produced')
+    const runId = await ensureRealSuccessRun(page)
+
+    await page.goto('/runs')
+    await expect(page.getByRole('heading', { name: 'Runs' })).toBeVisible()
+    await expect(page.getByTestId('run-row').first()).toBeVisible()
+
+    await page.getByRole('button', { name: 'Success' }).click()
+    await expect(page).toHaveURL(/outcome=success/)
+    const successRows = page.getByTestId('run-row')
+    await expect(successRows.filter({ hasText: /Disk on host x at 91%/ }).first()).toBeVisible()
+    // Every row the success filter left is a success run.
+    for (const label of await successRows.evaluateAll((rows) => rows.map((r) => r.getAttribute('aria-label') ?? ''))) {
+      expect(label.startsWith('Success')).toBeTruthy()
+    }
+
+    // An outcome nothing in this run's data has empties the list.
+    await page.getByRole('button', { name: 'Timed out' }).click()
+    await expect(page).toHaveURL(/outcome=timeout/)
+    await expect(page.getByTestId('run-row')).toHaveCount(0)
+
+    await page.getByRole('button', { name: 'All' }).click()
+    await expect(page).not.toHaveURL(/outcome=/)
+    await expect(page.getByTestId('run-row').first()).toBeVisible()
+
+    // The filtered row still leads to its own run.
+    await page.goto(`/runs/${runId}`)
+    await expect(page.getByTestId('run-report')).toBeVisible()
   })
 })

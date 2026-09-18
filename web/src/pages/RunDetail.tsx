@@ -30,13 +30,14 @@ export function RunDetail() {
   const { toast } = useToast()
   const queryClient = useQueryClient()
   const run = useQuery(q.run(id))
+  const triggers = useQuery(q.triggers())
   const [replaying, setReplaying] = useState(false)
 
   async function handleRerun() {
-    if (!run.data?.delivery_id) return
+    if (!run.data?.run.delivery_id) return
     setReplaying(true)
     try {
-      const result = await api<ReplayResult>(`/api/v1/deliveries/${run.data.delivery_id}/replay`, { method: 'POST' })
+      const result = await api<ReplayResult>(`/api/v1/deliveries/${run.data.run.delivery_id}/replay`, { method: 'POST' })
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       if (result.run_id) {
         toast({ title: 'Re-run started', description: 'Opening the new run.', tone: 'success' })
@@ -63,7 +64,12 @@ export function RunDetail() {
     return <div className="mx-auto w-full max-w-[880px] flex-1 px-4 py-6 text-[13px] text-fg-secondary sm:px-6">Run not found.</div>
   }
 
-  const detail = run.data
+  // GET /runs/{id} answers with the run row plus the records it came from
+  // (internal/api/runs_handlers.go's runViewDTO); the trigger's name is not
+  // one of them, so it is resolved from the triggers list the same way the
+  // runs list does it.
+  const { run: detail, session, delivery } = run.data
+  const triggerName = detail.trigger_id ? (triggers.data?.find((t) => t.id === detail.trigger_id)?.name ?? null) : null
 
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col px-4 py-6 sm:px-6">
@@ -82,15 +88,15 @@ export function RunDetail() {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-secondary">
             <Badge tone={detail.outcome === 'running' ? 'running' : 'neutral'}>{OUTCOME_LABEL[detail.outcome]}</Badge>
-            {detail.trigger_name && <span className="font-mono">{detail.trigger_name}</span>}
+            {triggerName && <span className="font-mono">{triggerName}</span>}
             <span aria-hidden>·</span>
             <span className="font-mono tabular-nums">{formatDuration(detail.started_at, detail.finished_at)}</span>
             <span aria-hidden>·</span>
             <span className="font-mono tabular-nums">${detail.cost_usd.toFixed(2)}</span>
-            {detail.session && (
+            {session && (
               <>
                 <span aria-hidden>·</span>
-                <Link to="/sessions/$id" params={{ id: detail.session.id }} className="text-accent no-underline hover:underline">
+                <Link to="/sessions/$id" params={{ id: session.id }} className="text-accent no-underline hover:underline">
                   Open session
                 </Link>
               </>
@@ -113,9 +119,9 @@ export function RunDetail() {
         <ReportView report={detail.report} />
       </Card>
 
-      {detail.delivery && (
+      {delivery && (
         <div className="mt-5">
-          <CollapsibleJson label="Delivery payload" value={detail.delivery.payload} />
+          <CollapsibleJson label="Delivery payload" value={delivery.payload} />
         </div>
       )}
     </div>

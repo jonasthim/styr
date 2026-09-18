@@ -109,7 +109,7 @@ export function AddWorkspaceForm({ isAdmin, onCreated, onCancel }: AddWorkspaceF
     try {
       await api(`/api/v1/workspaces/${createdId}/retry`, { method: 'POST' })
       queryClient.setQueryData<Workspace[]>(['workspaces'], (prev) =>
-        prev?.map((w) => (w.id === createdId ? { ...w, state: 'cloning', error: null } : w)),
+        prev?.map((w) => (w.id === createdId ? { ...w, state: 'cloning', error: '' } : w)),
       )
     } finally {
       setRetrying(false)

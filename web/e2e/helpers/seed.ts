@@ -106,6 +106,170 @@ export async function ensureRealWorkspace(page: Page): Promise<string> {
   return realWorkspaceId
 }
 
+// --- triggers, templates and runs (v0.2) ----------------------------------
+
+// The service-wide Claude token an unattended run needs: a run's session is
+// created with no owner (internal/runs/runs.go), so sessions.Service resolves
+// its token from the server-wide setting, not from the dev user's own. Without
+// it every delivery is logged as "failed: add a service token in settings".
+export async function ensureRealServiceToken(page: Page): Promise<void> {
+  const res = await page.request.put('/api/v1/settings/service-token', {
+    headers: HEADERS,
+    data: { token: 'sk-ant-oat01-e2e-service-token' },
+  })
+  await ok(res, 'PUT /settings/service-token')
+}
+
+// The shared Grafana template's name, matching what a fresh install seeds
+// (internal/templates/seed.go).
+export const GRAFANA_TEMPLATE_NAME = 'Grafana alert investigation'
+
+// The prompt the real-mode template renders. It is the seeded Grafana prompt
+// with fake-claude.sh's "[fixture:06]" marker in front, so the run's first
+// (and only) turn replays internal/harness/claude/testdata/06_json_schema.jsonl
+// - the recording of a --json-schema session, whose result carries a
+// structured_output the run engine turns into the run's report.
+const GRAFANA_PROMPT_TEMPLATE = `[fixture:06] A Grafana alert is {{ .status }}. Investigate read-only and report.
+{{ range .alerts }}- {{ .labels.alertname }} on {{ default "unknown" .labels.instance }}: {{ .annotations.summary }}
+  {{ .annotations.description }} (since {{ .startsAt }})
+{{ end }}
+Use the workspace's runbooks and only read-only commands. Do not change anything.`
+
+const GRAFANA_REPORT_SCHEMA = JSON.stringify({
+  type: 'object',
+  required: ['severity', 'diagnosis', 'proposed_action', 'confidence'],
+  properties: {
+    severity: { enum: ['info', 'warning', 'critical'] },
+    diagnosis: { type: 'string' },
+    evidence: { type: 'array', items: { type: 'string' } },
+    proposed_action: { type: 'string' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    resolved_itself: { type: 'boolean' },
+  },
+})
+
+interface MinimalTemplate {
+  id: string
+  name: string
+}
+
+let realTemplateId: string | null = null
+
+// ensureRealGrafanaTemplate (idempotent) returns the shared "Grafana alert
+// investigation" template, creating it when it is missing.
+//
+// A fresh install seeds it at serve start (cmd/styr/serve.go's seedTemplates),
+// but only bound to a shared workspace that already exists then - and this
+// suite registers its own shared workspace long after the server booted, so
+// nothing is seeded and the template has to be created here. When one does
+// exist (an operator's, or a future boot-time seed), it is updated in place
+// instead, so its prompt always carries the fixture marker.
+export async function ensureRealGrafanaTemplate(page: Page): Promise<MinimalTemplate> {
+  if (realTemplateId) return { id: realTemplateId, name: GRAFANA_TEMPLATE_NAME }
+  const workspaceId = await ensureRealWorkspace(page)
+  const body = {
+    name: GRAFANA_TEMPLATE_NAME,
+    workspace_id: workspaceId,
+    profile_id: 'investigate',
+    title_template: '{{ .status }}: {{ join ", " (alertnames .alerts) }}',
+    prompt_template: GRAFANA_PROMPT_TEMPLATE,
+    system_prompt: 'You are investigating a production alert read-only. Never change state.',
+    report_schema: GRAFANA_REPORT_SCHEMA,
+    shared: true,
+  }
+
+  const list = await page.request.get('/api/v1/templates', { headers: HEADERS })
+  await ok(list, 'GET /templates')
+  const existing = ((await list.json()) as MinimalTemplate[]).find((t) => t.name === GRAFANA_TEMPLATE_NAME)
+  if (existing) {
+    const patch = await page.request.patch(`/api/v1/templates/${existing.id}`, { headers: HEADERS, data: body })
+    await ok(patch, 'PATCH /templates/{id}')
+    realTemplateId = existing.id
+    return { id: existing.id, name: GRAFANA_TEMPLATE_NAME }
+  }
+
+  const res = await page.request.post('/api/v1/templates', { headers: HEADERS, data: body })
+  await ok(res, 'POST /templates')
+  const created = (await res.json()) as MinimalTemplate
+  realTemplateId = created.id
+  return created
+}
+
+// grafanaSamplePayload returns the backend's own Grafana example body
+// (GET /triggers/samples/grafana), the same one the "Send test payload"
+// dialog prefills, so a delivery test posts exactly what the UI would.
+export async function grafanaSamplePayload(page: Page): Promise<Record<string, unknown>> {
+  const res = await page.request.get('/api/v1/triggers/samples/grafana', { headers: HEADERS })
+  await ok(res, 'GET /triggers/samples/grafana')
+  return (await res.json()) as Record<string, unknown>
+}
+
+export interface RealTrigger {
+  id: string
+  name: string
+  slug: string
+  secret: string
+}
+
+// createRealTrigger creates a grafana trigger bound to the shared template
+// over the API, for specs that need a trigger but are not themselves
+// exercising the create dialog (e2e/triggers.spec.ts drives that through the
+// UI and captures the secret from the "Webhook ready" panel).
+export async function createRealTrigger(page: Page, name: string): Promise<RealTrigger> {
+  await ensureRealServiceToken(page)
+  const template = await ensureRealGrafanaTemplate(page)
+  const res = await page.request.post('/api/v1/triggers', {
+    headers: HEADERS,
+    data: { name, kind: 'grafana', template_id: template.id, cooldown_s: 600, storm_cap_per_hour: 10 },
+  })
+  await ok(res, 'POST /triggers')
+  const body = (await res.json()) as { trigger: { id: string; name: string; slug: string }; secret: string }
+  return { ...body.trigger, secret: body.secret }
+}
+
+interface MinimalRunView {
+  run: { id: string; outcome: string; report: unknown; summary: string }
+}
+
+// waitForRunOutcome polls GET /runs/{id} until the run leaves "running".
+// The run engine closes a run out from the session's result event, which the
+// shell fake produces within a second or two; the generous default leaves
+// room for a loaded machine without masking a stuck pipeline.
+export async function waitForRunOutcome(page: Page, runId: string, timeoutMs = 30_000): Promise<MinimalRunView> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const res = await page.request.get(`/api/v1/runs/${runId}`, { headers: HEADERS })
+    await ok(res, `GET /runs/${runId}`)
+    const view = (await res.json()) as MinimalRunView
+    if (view.run.outcome !== 'running') return view
+    if (Date.now() > deadline) throw new Error(`seed: run ${runId} was still running after ${timeoutMs}ms`)
+    await new Promise((r) => setTimeout(r, 200))
+  }
+}
+
+let realSuccessRunId: string | null = null
+
+// ensureRealSuccessRun (idempotent) guarantees the real backend has at least
+// one finished, successful run - what e2e/runs.spec.ts's filter chips need to
+// assert against. It forces a delivery through POST /triggers/{id}/test
+// (force: true skips dedupe, cooldown and the storm cap) rather than the
+// inbound hook, so it never competes with triggers.spec.ts's own deliveries.
+export async function ensureRealSuccessRun(page: Page): Promise<string> {
+  if (realSuccessRunId) return realSuccessRunId
+  const trigger = await createRealTrigger(page, `Runs list source ${Date.now()}`)
+  const res = await page.request.post(`/api/v1/triggers/${trigger.id}/test`, {
+    headers: HEADERS,
+    data: { payload: await grafanaSamplePayload(page), force: true },
+  })
+  await ok(res, 'POST /triggers/{id}/test')
+  const result = (await res.json()) as { status: string; run_id?: string }
+  if (!result.run_id) throw new Error(`seed: test delivery did not start a run (status ${result.status})`)
+  const view = await waitForRunOutcome(page, result.run_id)
+  if (view.run.outcome !== 'success') throw new Error(`seed: run ${result.run_id} finished as ${view.run.outcome}`)
+  realSuccessRunId = result.run_id
+  return realSuccessRunId
+}
+
 async function createRealSession(page: Page, title: string, prompt: string): Promise<MinimalSession> {
   await ensureRealToken(page)
   const workspaceId = await ensureRealWorkspace(page)
