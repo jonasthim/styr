@@ -88,8 +88,10 @@ func runServe(stdout io.Writer) int {
 	go runMaintenanceLoop(maintCtx, sessionsSvc, func(ctx context.Context) { seedTemplates(ctx, deps, bg, log) })
 	// The run engine follows unattended sessions on the event bus and
 	// closes out runs that overrun their timeout; it lives as long as the
-	// server does.
+	// server does. The scheduler ticks every 30s alongside it, firing
+	// cron-driven runs through the same engine.
 	go bg.Runs.Run(maintCtx)
+	go bg.Schedules.Run(maintCtx)
 
 	// Every request context derives from reqCtx so that cancelling it ends the
 	// long-lived SSE streams; http.Server.Shutdown only waits for handlers and

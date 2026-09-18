@@ -14,7 +14,11 @@ import (
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/runs"
+	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/stats"
+	"github.com/jonasthim/styr/internal/templates"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
 
@@ -56,12 +60,46 @@ type TriggersService interface {
 	Deliver(ctx context.Context, in domain.Inbound) (domain.Delivery, error)
 }
 
-// RunsEngine is what internal/api's runs handlers call. Card T34 implements
-// it as internal/runs.Engine; see TriggersService's doc comment for why
-// this is an interface here.
+// RunsEngine is what internal/api's runs, templates and loops handlers
+// call. Card T34 implements it as internal/runs.Engine; see
+// TriggersService's doc comment for why this is an interface here.
 type RunsEngine interface {
 	Get(ctx context.Context, id string) (domain.RunView, error)
 	List(ctx context.Context, f domain.RunFilter) ([]domain.RunView, error)
+
+	// StartManual starts a run of templateID by hand, backing POST
+	// /templates/{id}/run.
+	StartManual(ctx context.Context, actor Actor, templateID string, vars templates.Vars) (domain.Run, error)
+
+	// GetLoop, ListLoops and Stop back the /loops routes.
+	GetLoop(ctx context.Context, id string) (runs.LoopView, error)
+	ListLoops(ctx context.Context, state string, limit int) ([]domain.Loop, error)
+	Stop(ctx context.Context, actor Actor, id string) error
+}
+
+// SchedulesService is what internal/api's schedules handlers call. Card T46
+// implements it as internal/schedules.Service; see TriggersService's doc
+// comment for why this is an interface here.
+type SchedulesService interface {
+	Create(ctx context.Context, actor Actor, in domain.ScheduleInput) (domain.Schedule, error)
+	List(ctx context.Context, actor Actor) ([]domain.Schedule, error)
+	Get(ctx context.Context, actor Actor, id string) (domain.Schedule, error)
+	Update(ctx context.Context, actor Actor, id string, in domain.ScheduleInput) (domain.Schedule, error)
+	Delete(ctx context.Context, actor Actor, id string) error
+	RunNow(ctx context.Context, actor Actor, id string) (domain.Run, error)
+	Firings(ctx context.Context, actor Actor, id string, limit int) ([]domain.ScheduleFiring, error)
+	// Preview validates a cron expression and returns its next few fire
+	// times plus a human-readable description; it takes no actor since it
+	// reads nothing schedule-specific.
+	Preview(cronExpr string) (schedules.Preview, error)
+}
+
+// StatsService is what internal/api's stats handlers call. Card T48
+// implements it as internal/stats.Service; see TriggersService's doc
+// comment for why this is an interface here.
+type StatsService interface {
+	Gantt(ctx context.Context, from, to time.Time, actor Actor) ([]stats.Lane, error)
+	Costs(ctx context.Context, days int, actor Actor) (stats.Costs, error)
 }
 
 // Notifier sends one notification through a channel. The concrete
@@ -135,6 +173,11 @@ type Deps struct {
 	Runs          RunsEngine
 	Notifications *db.NotificationChannels
 	Notifier      Notifier
+
+	// Schedules and Stats back the /schedules, /loops and /stats routes
+	// (internal/schedules.Service and internal/stats.Service at runtime).
+	Schedules SchedulesService
+	Stats     StatsService
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not

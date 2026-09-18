@@ -20,7 +20,9 @@ import (
 	"github.com/jonasthim/styr/internal/harness/claude"
 	"github.com/jonasthim/styr/internal/notify"
 	"github.com/jonasthim/styr/internal/runs"
+	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/stats"
 	"github.com/jonasthim/styr/internal/triggers"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
@@ -44,10 +46,12 @@ const notifyTimeout = 30 * time.Second
 // bus, and returns the Deps the HTTP router needs plus the sessions.Service
 // serve.go drives directly (maintenance ticker, shutdown).
 // background holds the concrete services serve needs beyond the API deps:
-// the run engine's loop and the trigger service's seeding.
+// the run engine's loop, the trigger service's seeding and the scheduler's
+// tick.
 type background struct {
-	Runs     *runs.Engine
-	Triggers *triggers.Service
+	Runs      *runs.Engine
+	Triggers  *triggers.Service
+	Schedules *schedules.Service
 }
 
 func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *sessions.Service, *background, error) {
@@ -72,6 +76,9 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	channelsRepo := db.NewNotificationChannels(d)
 	reviewCommentsRepo := db.NewReviewComments(d)
 	checkpointsRepo := db.NewCheckpoints(d)
+	loopsRepo := db.NewLoops(d)
+	schedulesRepo := db.NewSchedules(d)
+	scheduleFiringsRepo := db.NewScheduleFirings(d)
 
 	h := claude.New(cfg.ClaudeBin)
 
@@ -105,6 +112,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Sessions:   sessionsRepo,
 		Channels:   channelsRepo,
 		Deliveries: deliveriesRepo,
+		Loops:      loopsRepo,
 		Events:     eventsRepo,
 	}, svc, bus, notifier, box, cfg.BaseURL, runTimeout, slog.Default())
 	triggersSvc := triggers.New(triggers.Repos{
@@ -112,6 +120,17 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Triggers:   triggersRepo,
 		Deliveries: deliveriesRepo,
 	}, runsEngine, box, slog.Default(), nil)
+
+	// The scheduler ticks schedules through the same run engine every 30s;
+	// runsEngine satisfies both schedules.RunStarter (Start) and
+	// schedules.RunLookup (Get), so a schedule's overlap check reads the
+	// same run rows the API and the trigger router do.
+	schedulesSvc := schedules.New(schedules.Repos{
+		Schedules: schedulesRepo,
+		Firings:   scheduleFiringsRepo,
+	}, runsEngine, runsEngine, nil, slog.Default())
+
+	statsSvc := stats.New(d, sessionsRepo, users, slog.Default())
 
 	// devUser only enables the dev auto-login bypass when the server is
 	// actually running in dev mode, even if a stale dev_user lingers in a
@@ -161,6 +180,8 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Runs:           runsEngine,
 		Notifications:  channelsRepo,
 		Notifier:       notifier,
+		Schedules:      schedulesSvc,
+		Stats:          statsSvc,
 		Users:          users,
 		Tokens:         tokens,
 		Workspaces:     workspacesSvc,
@@ -187,7 +208,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		MaxOpenSessions: cfg.MaxOpenSessions,
 		IdleTimeout:     cfg.IdleTimeout,
 	}
-	return deps, svc, &background{Runs: runsEngine, Triggers: triggersSvc}, nil
+	return deps, svc, &background{Runs: runsEngine, Triggers: triggersSvc, Schedules: schedulesSvc}, nil
 }
 
 // probeClaudeVersion runs `<bin> --version` once at startup and returns its
