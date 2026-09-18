@@ -1,34 +1,30 @@
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect } from '@playwright/test'
+import { isReal, setClaudeTokenPresence } from './helpers/seed'
 
-// Runs against the mock backend (see e2e/login.spec.ts for the general mock
-// setup notes). /api/v1/me starts logged in as the dev admin with a present
-// Claude token, so /inbox loads normally by default; these tests flip the
-// token to absent in place (POST /__mock/reset-claude-token,
-// src/mocks/handlers.ts), the same pattern e2e/profile.spec.ts uses, since a
-// fresh page.goto() would re-evaluate the mock handlers module and reset
-// that flag right back.
+// Runs against both backends. /api/v1/me starts logged in as the dev admin
+// with a present Claude token in both, so /inbox loads normally by
+// default; these tests flip the token to absent in place via
+// setClaudeTokenPresence (e2e/helpers/seed.ts) - the mock's POST
+// /__mock/reset-claude-token control route, or DELETE
+// /api/v1/me/claude-token on the real backend - the same pattern
+// e2e/profile.spec.ts uses, since a fresh page.goto() would re-evaluate
+// the mock handlers module and reset that flag right back. Real mode
+// restores the token afterwards (setClaudeTokenPresence(..., true)): the
+// real projects share one backend and account across every spec file
+// (workers: 1, web/playwright.config.ts), and later files create sessions
+// that require one.
 
-interface MockWindow {
-  __queryClient: { refetchQueries: (f: { queryKey: string[] }) => Promise<unknown> }
-}
-
-async function resetClaudeTokenAbsentAndRefetchMe(page: Page) {
-  await page.evaluate(async () => {
-    const res = await fetch('/__mock/reset-claude-token', { method: 'POST' })
-    if (!res.ok) throw new Error(`reset-claude-token failed: ${res.status}`)
-    await (window as unknown as MockWindow).__queryClient.refetchQueries({ queryKey: ['me'] })
-  })
-}
+test.describe.configure({ mode: 'serial' })
 
 test('redirects /inbox to /welcome when the Claude token is absent and onboarding has not been seen, and Skip does not bounce back', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
 
   // Starting state for a fresh browser context: no styr.welcomed flag yet.
   await page.evaluate(() => sessionStorage.removeItem('styr.welcomed'))
-  await resetClaudeTokenAbsentAndRefetchMe(page)
+  await setClaudeTokenPresence(page, testInfo, false)
 
   await expect(page).toHaveURL(/\/welcome$/)
   await expect(page.getByRole('heading', { name: 'Welcome to Styr' })).toBeVisible()
@@ -50,17 +46,21 @@ test('redirects /inbox to /welcome when the Claude token is absent and onboardin
   await page.getByRole('link', { name: 'Inbox' }).first().click()
   await expect(page).toHaveURL(/\/inbox$/)
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+
+  if (isReal(testInfo)) await setClaudeTokenPresence(page, testInfo, true)
 })
 
 test('does not redirect /inbox to /welcome once styr.welcomed is set, even with the Claude token absent', async ({
   page,
-}) => {
+}, testInfo) => {
   await page.goto('/inbox')
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
 
   await page.evaluate(() => sessionStorage.setItem('styr.welcomed', '1'))
-  await resetClaudeTokenAbsentAndRefetchMe(page)
+  await setClaudeTokenPresence(page, testInfo, false)
 
   await expect(page).toHaveURL(/\/inbox$/)
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
+
+  if (isReal(testInfo)) await setClaudeTokenPresence(page, testInfo, true)
 })

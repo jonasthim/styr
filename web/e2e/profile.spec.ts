@@ -1,35 +1,24 @@
-import { test, expect, type Page } from '@playwright/test'
+import path from 'node:path'
+import { test, expect } from '@playwright/test'
+import { ensureRealToken, isReal, setClaudeTokenPresence } from './helpers/seed'
 
-// Runs against the mock backend (see e2e/login.spec.ts for the general mock
-// setup notes). /api/v1/me starts logged in as the dev admin with a present
-// Claude token; the absent-state tests flip it via POST
-// /__mock/reset-claude-token (src/mocks/handlers.ts) instead of relying on a
+// Runs against both backends. /api/v1/me starts logged in as the dev admin
+// with a present Claude token in both; the absent-state tests flip it via
+// setClaudeTokenPresence (e2e/helpers/seed.ts) instead of relying on a
 // fresh page load, matching the pattern e2e/login.spec.ts uses for the
-// logged-out flag.
+// mock's logged-out flag. The dev-mode token verifier (both backends:
+// web/src/mocks/handlers.ts's verifyToken and cmd/styr/wire.go's
+// devVerifier) accepts anything starting with "sk-ant-" and rejects
+// everything else, so the same "…testtoken" / "bad" inputs exercise the
+// same accept/reject paths in both modes.
 
-interface MockWindow {
-  __queryClient: { refetchQueries: (f: { queryKey: string[] }) => Promise<unknown> }
-}
-
-// A second page.goto() would reload the document and re-evaluate the mock
-// handlers module, undoing the reset (see e2e/login.spec.ts's note on the
-// same pattern for the logged-out flag) - so reset and refetch in place on
-// a page /profile is already loaded on. refetchQueries (not
-// invalidateQueries) is awaited so the DOM has already re-rendered with the
-// absent state by the time this call returns.
-async function resetClaudeTokenAbsent(page: Page) {
-  await page.evaluate(async () => {
-    const res = await fetch('/__mock/reset-claude-token', { method: 'POST' })
-    if (!res.ok) throw new Error(`reset-claude-token failed: ${res.status}`)
-    await (window as unknown as MockWindow).__queryClient.refetchQueries({ queryKey: ['me'] })
-  })
-}
+test.describe.configure({ mode: 'serial' })
 
 test.describe('Profile - Claude token card', () => {
-  test('shows the absent state and an entered token flips it to present', async ({ page }) => {
+  test('shows the absent state and an entered token flips it to present', async ({ page }, testInfo) => {
     await page.goto('/profile')
     await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible()
-    await resetClaudeTokenAbsent(page)
+    await setClaudeTokenPresence(page, testInfo, false)
 
     const card = page.getByTestId('claude-token-card')
     await expect(card.getByTestId('claude-token-card-absent')).toBeVisible()
@@ -46,12 +35,14 @@ test.describe('Profile - Claude token card', () => {
     await expect(present.getByText(/Verified/)).toBeVisible()
     await expect(card.getByRole('button', { name: 'Replace' })).toBeVisible()
     await expect(card.getByRole('button', { name: 'Remove' })).toBeVisible()
+    // Ends present (with this test's own token) either way - nothing to
+    // restore for later real-mode tests.
   })
 
-  test('an invalid token shows the 422 message', async ({ page }) => {
+  test('an invalid token shows the 422 message', async ({ page }, testInfo) => {
     await page.goto('/profile')
     await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible()
-    await resetClaudeTokenAbsent(page)
+    await setClaudeTokenPresence(page, testInfo, false)
 
     const card = page.getByTestId('claude-token-card')
     const input = card.getByLabel('Claude token')
@@ -60,9 +51,20 @@ test.describe('Profile - Claude token card', () => {
 
     const error = card.getByTestId('claude-token-card-error')
     await expect(error).toBeVisible()
-    await expect(error).toHaveText(/wasn't accepted/)
+    // ClaudeTokenCard shows the server's own error message verbatim
+    // (ApiError.message), and the two dev-mode verifiers word it
+    // differently: the mock's is longer UX copy (web/src/mocks/handlers.ts's
+    // TOKEN_INVALID_MESSAGE), the real handler's a short one
+    // (internal/api/me_handlers.go's handleMeTokenPut) - both are the same
+    // 422 token_invalid outcome for the same "bad" input.
+    await expect(error).toHaveText(isReal(testInfo) ? /could not be verified/ : /wasn't accepted/)
     // Still absent: a failed verify must not have stored anything.
     await expect(card.getByTestId('claude-token-card-absent')).toBeVisible()
+
+    // Restore before this file's other tests (and every later real spec
+    // file, given workers: 1 - web/playwright.config.ts) need a working
+    // Claude token to create sessions.
+    if (isReal(testInfo)) await ensureRealToken(page)
   })
 })
 
@@ -81,12 +83,47 @@ test('/settings lists three builtin profiles and a five-option mode select', asy
   expect(values.sort()).toEqual(['acceptEdits', 'auto', 'default', 'dontAsk', 'plan'].sort())
 })
 
-test('/workspaces lists two workspaces', async ({ page }) => {
-  await page.goto('/workspaces')
-  await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible()
-  await expect(page.locator('[data-testid^="workspace-row-"]')).toHaveCount(2)
-  await expect(page.getByTestId('workspace-row-w1')).toContainText('styr')
-  await expect(page.getByTestId('workspace-row-w2')).toContainText('notes')
+test('/workspaces lists at least the workspaces this run created', async ({ page }, testInfo) => {
+  if (isReal(testInfo)) {
+    // A fresh real backend starts with none, and by the time this test runs
+    // other real-mode spec files (workers: 1 serializes the whole run, see
+    // web/playwright.config.ts) may already have created the shared
+    // "styr-e2e" workspace (e2e/helpers/seed.ts's ensureRealWorkspace) -
+    // an exact count is therefore fragile; this checks two distinct
+    // workspaces created here are present and correctly rendered instead.
+    // Both point at the repo root (path.resolve, like e2e/helpers/seed.ts's
+    // ensureRealWorkspace) - only name is unique in the workspaces table
+    // (internal/db/migrations/00001_init.sql), so two rows may share a path.
+    const repoRoot = path.resolve(process.cwd(), '..')
+    // Unique per project: this file's workspace names must not collide with
+    // real-desktop's and real-phone's own runs of this same test against
+    // the one shared backend (workers: 1, web/playwright.config.ts) - name
+    // is the only unique column on workspaces (00001_init.sql).
+    const names = [`styr-e2e-profile-${testInfo.project.name}-0`, `styr-e2e-profile-${testInfo.project.name}-1`]
+    for (const name of names) {
+      const res = await page.request.post('/api/v1/workspaces', {
+        headers: { 'X-Requested-With': 'styr' },
+        data: { name, path: repoRoot, default_profile_id: 'interactive' },
+      })
+      if (!res.ok()) throw new Error(`seed: create workspace ${name} failed: ${res.status()}`)
+    }
+    await page.goto('/workspaces')
+    await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible()
+    // getByText below auto-retries until the list finishes loading; a bare
+    // rows.count() would not (it reads the DOM once, racing the initial
+    // fetch), so the count check runs after those two settle instead of
+    // before them.
+    await expect(page.getByText(names[0])).toBeVisible()
+    await expect(page.getByText(names[1])).toBeVisible()
+    const rows = page.locator('[data-testid^="workspace-row-"]')
+    expect(await rows.count()).toBeGreaterThanOrEqual(2)
+  } else {
+    await page.goto('/workspaces')
+    await expect(page.getByRole('heading', { name: 'Workspaces' })).toBeVisible()
+    await expect(page.locator('[data-testid^="workspace-row-"]')).toHaveCount(2)
+    await expect(page.getByTestId('workspace-row-w1')).toContainText('styr')
+    await expect(page.getByTestId('workspace-row-w2')).toContainText('notes')
+  }
 })
 
 test('/welcome shows three steps and Skip lands on /inbox', async ({ page }) => {
