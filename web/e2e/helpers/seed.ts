@@ -558,3 +558,110 @@ export async function seedPlanSession(page: Page, title: string): Promise<string
   await waitForSessionState(page, sess.id, ['waiting'])
   return sess.id
 }
+
+// --- schedules, loops and stats (v0.4) -------------------------------------
+
+// Both templates below render no variables at all, unlike the Grafana one: a
+// schedule fires with only its own `vars` plus the `schedule` key, and a loop
+// re-renders the same prompt every iteration, so a prompt that needed a
+// webhook payload would render empty either way. What matters is the
+// "[fixture:06]" marker, which makes every turn replay
+// internal/harness/claude/testdata/06_json_schema.jsonl - a recorded
+// --json-schema session whose result carries a structured_output the run
+// engine stores as the run's report.
+const FIXTURE_06_PROMPT = '[fixture:06] The disk on host x is 91 percent full. Give your diagnosis.'
+
+// Fixture 06's structured_output has severity, diagnosis and confidence -
+// and no `done` field, which is what makes the loop template below iterate
+// until it runs out of budget rather than finishing on its first report.
+const FIXTURE_06_REPORT_SCHEMA = JSON.stringify({
+  type: 'object',
+  required: ['severity', 'diagnosis'],
+  properties: {
+    severity: { enum: ['info', 'warning', 'critical'] },
+    diagnosis: { type: 'string' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    done: { type: 'boolean' },
+  },
+})
+
+export const SCHEDULE_TEMPLATE_NAME = 'Disk check (scheduled)'
+export const LOOP_TEMPLATE_NAME = 'Disk check until done'
+
+interface TemplateBody {
+  name: string
+  workspace_id: string
+  profile_id: string
+  title_template: string
+  prompt_template: string
+  system_prompt: string
+  report_schema: string
+  loop_until: string
+  loop_max: number
+  shared: boolean
+}
+
+/** Creates the named shared template, or updates the existing one in place
+ * so its prompt always carries the fixture marker - the same idempotent
+ * shape ensureRealGrafanaTemplate uses, and for the same reason: the real
+ * projects share one backend and database for the whole run. */
+async function ensureRealTemplate(page: Page, body: TemplateBody): Promise<string> {
+  const list = await page.request.get('/api/v1/templates', { headers: HEADERS })
+  await ok(list, 'GET /templates')
+  const existing = ((await list.json()) as MinimalTemplate[]).find((t) => t.name === body.name)
+  if (existing) {
+    const patch = await page.request.patch(`/api/v1/templates/${existing.id}`, { headers: HEADERS, data: body })
+    await ok(patch, 'PATCH /templates/{id}')
+    return existing.id
+  }
+  const res = await page.request.post('/api/v1/templates', { headers: HEADERS, data: body })
+  await ok(res, 'POST /templates')
+  return ((await res.json()) as MinimalTemplate).id
+}
+
+let realScheduleTemplateId: string | null = null
+
+// ensureRealScheduleTemplate (idempotent): the one-shot template a real-mode
+// schedule fires. A schedule's run is unattended - its session has no owner -
+// so the service token has to be in place before it can start.
+export async function ensureRealScheduleTemplate(page: Page): Promise<string> {
+  if (realScheduleTemplateId) return realScheduleTemplateId
+  await ensureRealServiceToken(page)
+  realScheduleTemplateId = await ensureRealTemplate(page, {
+    name: SCHEDULE_TEMPLATE_NAME,
+    workspace_id: await ensureRealWorkspace(page),
+    profile_id: 'investigate',
+    title_template: 'Disk check',
+    prompt_template: FIXTURE_06_PROMPT,
+    system_prompt: 'You are checking a host read-only. Never change state.',
+    report_schema: FIXTURE_06_REPORT_SCHEMA,
+    loop_until: '',
+    loop_max: 0,
+    shared: true,
+  })
+  return realScheduleTemplateId
+}
+
+let realLoopTemplateId: string | null = null
+
+// ensureRealLoopTemplate (idempotent): the same prompt with a loop on it.
+// `done` is a field fixture 06's report never carries, so every iteration
+// reads as "keep going" and the loop ends on its budget - state `exhausted`
+// at iteration 2 of 2 - rather than on a report that says it is finished.
+export async function ensureRealLoopTemplate(page: Page): Promise<string> {
+  if (realLoopTemplateId) return realLoopTemplateId
+  await ensureRealServiceToken(page)
+  realLoopTemplateId = await ensureRealTemplate(page, {
+    name: LOOP_TEMPLATE_NAME,
+    workspace_id: await ensureRealWorkspace(page),
+    profile_id: 'investigate',
+    title_template: 'Disk check until done',
+    prompt_template: FIXTURE_06_PROMPT,
+    system_prompt: 'You are checking a host read-only. Never change state.',
+    report_schema: FIXTURE_06_REPORT_SCHEMA,
+    loop_until: 'done',
+    loop_max: 2,
+    shared: true,
+  })
+  return realLoopTemplateId
+}

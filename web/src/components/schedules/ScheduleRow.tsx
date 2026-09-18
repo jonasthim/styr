@@ -7,13 +7,12 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import type { RunStartedResult, Schedule } from '../../api/types'
+import type { RunStartedResult, Schedule, ScheduleInput } from '../../api/types'
 import { useToast } from '../../hooks/useToast'
 import { relativeTime } from '../inbox/format'
 import { OutcomeGlyph } from '../runs/OutcomeGlyph'
-import { OUTCOME_LABEL } from '../runs/outcome'
 import { Button, Switch, Td, Tr } from '../ui'
-import { absoluteTime, untilTime } from './chips'
+import { absoluteTime, lastOutcomeGlyph, untilTime } from './chips'
 
 export function ScheduleRow({
   schedule,
@@ -34,20 +33,19 @@ export function ScheduleRow({
   const { toast } = useToast()
   const [pending, setPending] = useState(false)
   const [running, setRunning] = useState(false)
+  const lastOutcome = lastOutcomeGlyph(schedule.last_outcome)
 
   async function handleToggle(checked: boolean) {
     setPending(true)
     try {
-      const saved = await api<Schedule>(`/api/v1/schedules/${schedule.id}`, {
-        method: 'PATCH',
-        json: {
-          name: schedule.name,
-          template_id: schedule.template_id,
-          cron: schedule.cron,
-          vars: schedule.vars,
-          enabled: checked,
-        },
-      })
+      const body: ScheduleInput = {
+        name: schedule.name,
+        template_id: schedule.template_id,
+        cron: schedule.cron,
+        vars: schedule.vars,
+        enabled: checked,
+      }
+      const saved = await api<Schedule>(`/api/v1/schedules/${schedule.id}`, { method: 'PATCH', json: body })
       queryClient.setQueryData<Schedule[]>(['schedules'], (prev) =>
         prev?.map((s) => (s.id === schedule.id ? saved : s)),
       )
@@ -97,8 +95,12 @@ export function ScheduleRow({
         <span className="font-mono text-[12px] text-fg-primary">{schedule.cron}</span>
         {description && <span className="mt-0.5 block text-[11px] text-fg-muted">{description}</span>}
       </Td>
+      {/* A disabled schedule is never picked up by a tick, whatever
+          next_run_at still says: internal/schedules' ListDue filters on
+          `enabled` and Update leaves the stored timestamp alone, so the
+          switch - not the timestamp - is what decides there is a next run. */}
       <Td className="whitespace-nowrap font-mono text-[12px] tabular-nums text-fg-secondary">
-        {schedule.next_run_at ? (
+        {schedule.enabled && schedule.next_run_at ? (
           <span title={absoluteTime(schedule.next_run_at)}>{untilTime(schedule.next_run_at)}</span>
         ) : (
           <span className="text-fg-muted">paused</span>
@@ -107,11 +109,11 @@ export function ScheduleRow({
       <Td className="whitespace-nowrap">
         {schedule.last_run_at ? (
           <span className="flex items-center gap-2">
-            {schedule.last_outcome && <OutcomeGlyph outcome={schedule.last_outcome} />}
+            {lastOutcome && <OutcomeGlyph outcome={lastOutcome.outcome} />}
             <span className="font-mono text-[12px] tabular-nums text-fg-secondary" title={absoluteTime(schedule.last_run_at)}>
               {relativeTime(schedule.last_run_at)} ago
             </span>
-            <span className="sr-only">{schedule.last_outcome ? OUTCOME_LABEL[schedule.last_outcome] : ''}</span>
+            <span className="sr-only">{lastOutcome?.label ?? ''}</span>
           </span>
         ) : (
           <span className="font-mono text-[12px] text-fg-muted">never</span>

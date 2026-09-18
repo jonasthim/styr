@@ -34,20 +34,23 @@ describe('parseCron', () => {
 describe('previewCron', () => {
   const from = new Date(2026, 8, 19, 12, 0, 0) // 2026-09-19 12:00 local
 
-  it('describes a daily time the way the dialog shows it', () => {
-    expect(previewCron('30 7 * * *', from).description).toBe('At 07:30, every day')
+  // The phrasing is internal/schedules/cron.go's describeCron, word for
+  // word: the mock has to say what the scheduler would say.
+  it('describes a daily time the way the scheduler does', () => {
+    expect(previewCron('30 7 * * *', from)?.description).toBe('every day at 07:30')
   })
 
-  it('describes a weekday, a step and an hourly cron', () => {
-    expect(previewCron('0 9 * * 1', from).description).toBe('At 09:00, every Monday')
-    expect(previewCron('*/5 * * * *', from).description).toBe('Every 5 minutes')
-    expect(previewCron('0 * * * *', from).description).toBe('On the hour')
+  it('describes a weekday, a step, an hourly cron and a descriptor', () => {
+    expect(previewCron('0 9 * * 1', from)?.description).toBe('every Monday at 09:00')
+    expect(previewCron('*/5 * * * *', from)?.description).toBe('every 5 minutes')
+    expect(previewCron('* * * * *', from)?.description).toBe('every minute')
+    expect(previewCron('0 * * * *', from)?.description).toBe('every hour at :00')
+    expect(previewCron('@daily', from)?.description).toBe('every day at 00:00')
   })
 
   it('lists the next five firings in order', () => {
-    const preview = previewCron('30 7 * * *', from)
+    const preview = previewCron('30 7 * * *', from)!
     expect(preview.next).toHaveLength(5)
-    expect(preview.error).toBeUndefined()
     const times = preview.next.map((iso) => new Date(iso))
     expect(times[0]!.getHours()).toBe(7)
     expect(times[0]!.getMinutes()).toBe(30)
@@ -58,9 +61,8 @@ describe('previewCron', () => {
     }
   })
 
-  it('reports an error instead of guessing at a broken expression', () => {
-    const preview = previewCron('not a cron', from)
-    expect(preview.next).toEqual([])
-    expect(preview.error).toMatch(/5-field cron/)
+  it('answers nothing at all for a broken expression, so the handler 422s', () => {
+    expect(previewCron('not a cron', from)).toBeNull()
+    expect(previewCron('', from)).toBeNull()
   })
 })
