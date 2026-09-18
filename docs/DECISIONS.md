@@ -118,3 +118,30 @@ the schema itself — it trusts the CLI's own enforcement — so a malformed or 
 by callers (the run engine, per the v0.2 plan) as a report-less run rather than assumed present;
 `--append-system-prompt` has no observable effect in the wire protocol, so it is trusted
 uncritically and never asserted against transcript content.
+
+## ADR-010: One shared-secret scheme for every inbound trigger
+Date: 2026-09-18. Status: accepted.
+
+Context: `POST /hooks/{slug}` must authenticate senders that Styr does not control. The v0.2 plan
+sketched GitHub's own scheme — `X-Hub-Signature-256`, an HMAC-SHA256 of the raw body keyed with
+the shared secret — for `github` triggers. Verifying that HMAC needs the raw secret, but Styr
+deliberately stores only its sha256 (the secret is shown once at creation and at rotation, like
+an API token), so it cannot compute the MAC. The alternatives were to seal the secret with the
+`crypto.Box` in a new column (the 00003 migration is already merged, and a reversible webhook
+secret is a strictly weaker store than a hash), or to key the HMAC with the stored hash and tell
+operators to paste that hash into GitHub (correct, but confusing and non-standard).
+
+Decision: every trigger kind, `github` included, authenticates with the same bearer check —
+sha256 of the presented secret compared in constant time against the stored hash. The secret may
+arrive in any of three carriers: `X-Styr-Secret`, `Authorization: Bearer <secret>`, or a `secret`
+query parameter. The query parameter exists because GitHub webhooks (and some appliances) cannot
+add custom headers; for `github` triggers the documented setup is a payload URL of
+`https://<styr>/hooks/<slug>?secret=<secret>`, with GitHub's own secret field left empty.
+
+Consequences: Styr never verifies `X-Hub-Signature-256` and a GitHub webhook body is therefore
+not integrity-checked — the secret in the URL is the whole authentication, so a trigger's URL is
+as sensitive as its secret and rotation (`POST /triggers/{id}/rotate-secret`) is the remedy for a
+leaked one. Secrets in URLs can land in proxy and access logs, which is why the header carriers
+stay the documented default for everything that can send them. The scheme is uniform, so the
+router has one code path and the UI has one setup story; if a future kind genuinely needs
+signature verification, it gets a sealed secret column of its own rather than changing this one.

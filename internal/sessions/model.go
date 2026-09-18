@@ -62,7 +62,7 @@ func (s *Service) SwitchModel(ctx context.Context, actor Actor, id, model, effor
 
 	// startProcess publishes the session.state change (running) once the resumed process is
 	// tracked. With no first message the process simply waits for the next Send.
-	if err := s.startProcess(ctx, sess, *ws, *profile, true, ""); err != nil {
+	if err := s.startProcess(ctx, sess, *ws, *profile, true, "", startOptions{}); err != nil {
 		_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionFailed)
 		return err
 	}

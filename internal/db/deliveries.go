@@ -138,3 +138,18 @@ func (dr *Deliveries) SetRun(ctx context.Context, id, runID string) error {
 	}
 	return nil
 }
+
+// SetStatus replaces a delivery's status and reason, used by the trigger
+// router when the run it accepted could not be started after the delivery
+// row was already written (the run row references the delivery, so the
+// delivery must exist first).
+func (dr *Deliveries) SetStatus(ctx context.Context, id string, status domain.DeliveryStatus, reason string) error {
+	res, err := dr.d.ExecContext(ctx, `UPDATE deliveries SET status = ?, reason = ? WHERE id = ?`, string(status), reason, id)
+	if err != nil {
+		return fmt.Errorf("set delivery status: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("set delivery status: %w", domain.ErrNotFound)
+	}
+	return nil
+}

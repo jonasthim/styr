@@ -15,6 +15,7 @@ import (
 	"github.com/jonasthim/styr/internal/api"
 	"github.com/jonasthim/styr/internal/config"
 	"github.com/jonasthim/styr/internal/db"
+	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/sessions"
 	"github.com/jonasthim/styr/web"
@@ -66,7 +67,7 @@ func runServe(stdout io.Writer) int {
 	}
 
 	bus := events.New()
-	deps, sessionsSvc, err := wireServices(cfg, d, bus)
+	deps, sessionsSvc, bg, err := wireServices(cfg, d, bus)
 	if err != nil {
 		log.Error("wire services", "error", err)
 		return 1
@@ -76,12 +77,18 @@ func runServe(stdout io.Writer) int {
 		log.Warn("dev mode is active: auth auto-login and the dev token verifier are enabled")
 	}
 
+	seedTemplates(context.Background(), deps, bg, log)
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	maintCtx, maintCancel := context.WithCancel(context.Background())
 	defer maintCancel()
 	go runMaintenanceLoop(maintCtx, sessionsSvc)
+	// The run engine follows unattended sessions on the event bus and
+	// closes out runs that overrun their timeout; it lives as long as the
+	// server does.
+	go bg.Runs.Run(maintCtx)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
@@ -123,6 +130,30 @@ func runServe(stdout io.Writer) int {
 	}
 	log.Info("shutdown complete")
 	return 0
+}
+
+// seedTemplates creates the shipped trigger templates once, bound to the
+// first shared (owner-less) workspace. With no shared workspace there is
+// nothing sensible to bind them to, so seeding is skipped: an admin
+// registering one later can create the template from the UI.
+func seedTemplates(ctx context.Context, deps *api.Deps, bg *background, log *slog.Logger) {
+	// An empty user id with no admin flag lists exactly the shared
+	// workspaces.
+	shared, err := deps.WorkspacesRepo.ListVisible(ctx, "", false)
+	if err != nil {
+		log.Error("seed templates: list shared workspaces", "error", err)
+		return
+	}
+	for _, ws := range shared {
+		if ws.OwnerID != nil {
+			continue
+		}
+		if err := bg.Triggers.EnsureSeeded(ctx, ws.ID); err != nil && !errors.Is(err, domain.ErrNotFound) {
+			log.Error("seed templates", "workspace_id", ws.ID, "error", err)
+		}
+		return
+	}
+	log.Info("seed templates: no shared workspace to bind them to, skipping")
 }
 
 // runMaintenanceLoop calls svc.RunMaintenance once at each tick until ctx is
