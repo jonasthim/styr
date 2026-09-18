@@ -148,6 +148,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the current user's personal API tokens
+         * @description Never includes the raw secret, only for POST's response, once, at creation. Newest first.
+         */
+        get: operations["listMeAPITokens"];
+        put?: never;
+        /**
+         * Create a personal API token
+         * @description A personal API token authenticates as its owner via `Authorization: Bearer styr_pat_...`, in place of the styr_session cookie, and is exempt from the X-Requested-With CSRF header rule. The raw token is returned only in this response; only its sha256 hash is stored, so it cannot be retrieved again after this call.
+         */
+        post: operations["createMeAPIToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/me/api-tokens/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a personal API token
+         * @description Only the current user's own tokens; any other id is 404.
+         */
+        delete: operations["deleteMeAPIToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/users": {
         parameters: {
             query?: never;
@@ -321,7 +365,7 @@ export interface paths {
         head?: never;
         /**
          * Update a profile
-         * @description Builtin profiles only allow max_turns and approval_timeout to change. mode may never be the CLI's skip-all-permissions mode (422 on any profile; see internal/harness's validModes).
+         * @description Builtin profiles only allow max_turns, approval_timeout, model and effort to change. mode may never be the CLI's skip-all-permissions mode (422 on any profile; see internal/harness's validModes), and effort must be one of the valid levels.
          */
         patch: operations["patchProfile"];
         trace?: never;
@@ -406,6 +450,26 @@ export interface paths {
         put?: never;
         /** Close a session */
         post: operations["closeSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch a session's model and reasoning effort
+         * @description The CLI takes both as start-up flags only, so this ends the current process and resumes the same session id with the new flags; the CLI keeps the transcript. Refused while the session is waiting on an approval.
+         */
+        post: operations["switchSessionModel"];
         delete?: never;
         options?: never;
         head?: never;
@@ -517,6 +581,334 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List templates
+         * @description Every template visible to the current user (owned, shared, or — for an admin — all).
+         */
+        get: operations["listTemplates"];
+        put?: never;
+        /**
+         * Create a template
+         * @description shared marks the template as owned by nobody rather than the caller; only an admin may set it.
+         */
+        post: operations["createTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/templates/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a template */
+        get: operations["getTemplate"];
+        put?: never;
+        post?: never;
+        /** Delete a template */
+        delete: operations["deleteTemplate"];
+        options?: never;
+        head?: never;
+        /** Update a template */
+        patch: operations["patchTemplate"];
+        trace?: never;
+    };
+    "/api/v1/templates/{id}/render": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dry-run render a template
+         * @description Renders a title and prompt against payload without starting a session. kind selects how payload is normalized into template variables ("generic", "grafana" or "github"); it defaults to "grafana" when omitted. When title_template and/or prompt_template are given, they override the stored template's own text for this render only (e.g. a live preview while editing); the field left unset falls back to the stored template's text.
+         */
+        post: operations["renderTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triggers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List triggers
+         * @description Every trigger visible to the current user (owned, shared, or — for an admin — all).
+         */
+        get: operations["listTriggers"];
+        put?: never;
+        /**
+         * Create a trigger
+         * @description Styr generates the bearer secret; it is returned in this response only — GET/PATCH/list never include it again, only secret_hint. shared marks the trigger as owned by nobody; only an admin may set it.
+         */
+        post: operations["createTrigger"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triggers/samples/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a realistic sample payload for a trigger kind
+         * @description Used for "send test payload" and template dry-run preview in the UI. This literal path is matched before /triggers/{id}, so "samples" is never treated as a trigger id. An unrecognized kind is a 404.
+         */
+        get: operations["getTriggerSample"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triggers/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a trigger */
+        get: operations["getTrigger"];
+        put?: never;
+        post?: never;
+        /** Delete a trigger */
+        delete: operations["deleteTrigger"];
+        options?: never;
+        head?: never;
+        /** Update a trigger */
+        patch: operations["patchTrigger"];
+        trace?: never;
+    };
+    "/api/v1/triggers/{id}/rotate-secret": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate a trigger's secret
+         * @description Invalidates the previous secret; the new plaintext secret is returned only in this response.
+         */
+        post: operations["rotateTriggerSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triggers/{id}/deliveries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a trigger's deliveries */
+        get: operations["listTriggerDeliveries"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/triggers/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run the delivery pipeline against a test payload
+         * @description Runs the same pipeline as an inbound POST /hooks/{slug} call, as an authenticated request: dedupe, cooldown and the storm cap apply unless force is true. Responds with the same {delivery_id, status, run_id?} shape as POST /hooks/{slug}.
+         */
+        post: operations["testTrigger"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/deliveries/{id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay a delivery
+         * @description Re-renders the delivery's stored payload and starts a new run, bypassing dedupe.
+         */
+        post: operations["replayDelivery"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List runs
+         * @description Runs are visible to every signed-in user regardless of who owns the session or trigger they came from.
+         */
+        get: operations["listRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a run
+         * @description Includes the session, delivery and template it was started from, each null when unavailable.
+         */
+        get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List notification channels */
+        get: operations["listNotifications"];
+        put?: never;
+        /**
+         * Create a notification channel
+         * @description Admin only. token, when given, is sealed at rest and never returned again.
+         */
+        post: operations["createNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete a notification channel
+         * @description Admin only.
+         */
+        delete: operations["deleteNotification"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a notification channel
+         * @description Admin only. An omitted token leaves it unchanged; an explicit empty token clears it.
+         */
+        patch: operations["patchNotification"];
+        trace?: never;
+    };
+    "/api/v1/notifications/{id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send a test notification
+         * @description Admin only. Builds a synthetic "test" event and sends it through the channel using its decrypted token; the token never appears in this (or any) response.
+         */
+        post: operations["testNotification"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/hooks/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Inbound webhook delivery
+         * @description Unauthenticated by session cookie — the credential is the trigger's own secret, via header X-Styr-Secret or Authorization Bearer, or (for a "github" kind trigger) an X-Hub-Signature-256 HMAC over the raw body. Not part of /api/v1: no CSRF header required, no request timeout. Body is capped at 256 KiB.
+         */
+        post: operations["deliverHook"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -532,6 +924,25 @@ export interface components {
             label: string;
             /** Format: date-time */
             verified_at: string | null;
+        };
+        /** @description GET /me/api-tokens's element shape: never the raw secret or its hash, only enough to recognise a token in the list. */
+        APIToken: {
+            id: string;
+            name: string;
+            prefix: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** Format: date-time */
+            expires_at: string | null;
+        };
+        /** @description POST /me/api-tokens's response: id/name/prefix plus the raw secret, shown once and never returned by any other response. */
+        APITokenCreated: {
+            id: string;
+            name: string;
+            prefix: string;
+            token: string;
         };
         /** @description GET/PATCH /users/{id} (admin-only): every field the handler always serializes, but never a claude_token - see Me for the signed-in user's own record, which adds one. */
         User: {
@@ -593,6 +1004,13 @@ export interface components {
             /** @description Seconds. */
             approval_timeout: number;
             builtin: boolean;
+            /** @description Default model for sessions started under this profile: an alias (fable, opus, sonnet, haiku) or a full model name. Empty means the CLI's own default. */
+            model: string;
+            /**
+             * @description Default reasoning effort. Empty means the CLI's own default.
+             * @enum {string}
+             */
+            effort: "" | "low" | "medium" | "high" | "xhigh" | "max";
         };
         Session: {
             id: string;
@@ -616,7 +1034,12 @@ export interface components {
             tokens_in: number;
             tokens_out: number;
             now_line: string;
+            /** @description The model the session runs on: the alias it was started with until the CLI's init message replaces it with the full model name it resolved. */
             model: string;
+            /** @enum {string} */
+            effort: "" | "low" | "medium" | "high" | "xhigh" | "max";
+            /** @description The commands the CLI reported on its last init message, without the leading slash (custom commands, plugin skills and built-ins). Empty until a process has started. */
+            slash_commands: string[];
         };
         Event: {
             /** Format: int64 */
@@ -654,6 +1077,137 @@ export interface components {
             open_processes: number;
             slots: number;
             queue_depth: number;
+            /** @description The model aliases Styr offers, with their display labels. */
+            models: {
+                alias: string;
+                label: string;
+            }[];
+            /** @description The reasoning effort levels, in increasing order. */
+            efforts: ("low" | "medium" | "high" | "xhigh" | "max")[];
+            /** @description CLI built-ins the composer's slash menu must filter out of a session's slash_commands: they do not survive headless mode, are terminal-only, or are replaced by Styr's own controls. */
+            hidden_commands: string[];
+        };
+        /** @description The create/update request body for POST/PATCH /templates(/{id}). */
+        TemplateInput: {
+            name: string;
+            workspace_id: string;
+            profile_id: string;
+            title_template?: string;
+            prompt_template: string;
+            system_prompt?: string;
+            /** @description JSON schema text; empty means no structured report is expected. */
+            report_schema?: string;
+            /** @description Owned by nobody rather than the caller. Admin only. */
+            shared?: boolean;
+        };
+        Template: {
+            id: string;
+            owner_id: string | null;
+            name: string;
+            workspace_id: string;
+            profile_id: string;
+            title_template: string;
+            prompt_template: string;
+            system_prompt: string;
+            report_schema: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description The create/update request body for POST/PATCH /triggers(/{id}). */
+        TriggerInput: {
+            name: string;
+            /** @enum {string} */
+            kind: "generic" | "grafana" | "github";
+            template_id: string;
+            dedupe_key_template?: string;
+            cooldown_s?: number;
+            storm_cap_per_hour?: number;
+            run_on_resolved?: boolean;
+            /** @description Owned by nobody rather than the caller. Admin only. */
+            shared?: boolean;
+            /** @description Update only; omit to leave enabled state unchanged. */
+            enabled?: boolean;
+        };
+        /** @description Never includes the secret or its hash — see secret_hint. */
+        Trigger: {
+            id: string;
+            owner_id: string | null;
+            name: string;
+            slug: string;
+            /** @enum {string} */
+            kind: "generic" | "grafana" | "github";
+            secret_hint: string;
+            template_id: string;
+            enabled: boolean;
+            dedupe_key_template: string;
+            cooldown_s: number;
+            storm_cap_per_hour: number;
+            run_on_resolved: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            /** Format: date-time */
+            last_delivery_at: string | null;
+        };
+        Delivery: {
+            id: string;
+            trigger_id: string;
+            /** Format: date-time */
+            received_at: string;
+            /** @enum {string} */
+            status: "accepted" | "deduped" | "cooldown" | "storm" | "rejected" | "failed" | "skipped";
+            reason: string;
+            dedupe_key: string;
+            payload: Record<string, never>;
+            run_id: string | null;
+        };
+        /** @description The shape POST /hooks/{slug} and POST /triggers/{id}/test both respond with: enough to look the delivery up (or follow it to the run it started) without the full Delivery record. */
+        DeliveryResult: {
+            delivery_id: string;
+            /** @enum {string} */
+            status: "accepted" | "deduped" | "cooldown" | "storm" | "rejected" | "failed" | "skipped";
+            run_id?: string;
+        };
+        Run: {
+            id: string;
+            session_id: string;
+            template_id: string | null;
+            trigger_id: string | null;
+            delivery_id: string | null;
+            origin: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @enum {string} */
+            outcome: "running" | "success" | "failed" | "timeout" | "needs_human";
+            /** @description The structured report parsed from the session's result, when the template has a report_schema; null until the run finishes with one. */
+            report: Record<string, never> | null;
+            summary: string;
+            cost_usd: number;
+        };
+        /** @description A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted). */
+        RunView: {
+            run: components["schemas"]["Run"];
+            session: components["schemas"]["Session"] | null;
+            delivery: components["schemas"]["Delivery"] | null;
+            template: components["schemas"]["Template"] | null;
+        };
+        /** @description Never includes the token — see token_present. */
+        NotificationChannel: {
+            id: string;
+            /** @enum {string} */
+            kind: "ntfy" | "webhook";
+            name: string;
+            url: string;
+            token_present: boolean;
+            events: string[];
+            enabled: boolean;
+            /** Format: date-time */
+            created_at: string;
         };
     };
     responses: {
@@ -677,6 +1231,15 @@ export interface components {
         };
         /** @description Not found (or not visible to the current user) */
         NotFound: {
+            headers: {
+                [name: string]: unknown;
+            };
+            content: {
+                "application/json": components["schemas"]["ErrorBody"];
+            };
+        };
+        /** @description Validation failed */
+        UnprocessableEntity: {
             headers: {
                 [name: string]: unknown;
             };
@@ -908,6 +1471,85 @@ export interface operations {
                 };
                 content?: never;
             };
+        };
+    };
+    listMeAPITokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The current user's tokens */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIToken"][];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+        };
+    };
+    createMeAPIToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    name: string;
+                    /** @description Omit or 0 for a token that never expires. */
+                    expires_in_days?: number;
+                };
+            };
+        };
+        responses: {
+            /** @description Created; the token is only ever returned here */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APITokenCreated"];
+                };
+            };
+            /** @description name is required (or expires_in_days is out of range) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deleteMeAPIToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
         };
     };
     listUsers: {
@@ -1250,6 +1892,9 @@ export interface operations {
                     unattended?: boolean;
                     /** @description Seconds. */
                     approval_timeout?: number;
+                    model?: string;
+                    /** @enum {string} */
+                    effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
             };
         };
@@ -1293,6 +1938,9 @@ export interface operations {
                     max_turns?: number;
                     unattended?: boolean;
                     approval_timeout?: number;
+                    model?: string;
+                    /** @enum {string} */
+                    effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
             };
         };
@@ -1351,6 +1999,13 @@ export interface operations {
                     profile_id: string;
                     title?: string;
                     prompt: string;
+                    /** @description Overrides the profile's model default. Empty falls back to the profile's, then to the CLI's own default. */
+                    model?: string;
+                    /**
+                     * @description Overrides the profile's effort default.
+                     * @enum {string}
+                     */
+                    effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
                 };
             };
         };
@@ -1479,6 +2134,54 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    switchSessionModel: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description An alias (fable, opus, sonnet, haiku) or a full model name. Empty means the CLI's default. */
+                    model?: string;
+                    /** @enum {string} */
+                    effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted; the session is resuming under the new flags */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session is waiting on an approval */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description effort is not a valid level */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
             };
         };
     };
@@ -1621,6 +2324,665 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["StatusInfo"];
+                };
+            };
+        };
+    };
+    listTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every visible template */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"][];
+                };
+            };
+        };
+    };
+    createTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The template */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateInput"];
+            };
+        };
+        responses: {
+            /** @description The updated template */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Template"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    renderTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    payload: Record<string, never>;
+                    /** @enum {string} */
+                    kind?: "generic" | "grafana" | "github";
+                    title_template?: string;
+                    prompt_template?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The rendered title, prompt and any template-execution errors */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        title: string;
+                        prompt: string;
+                        errors: string[];
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listTriggers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every visible trigger (never includes a secret) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trigger"][];
+                };
+            };
+        };
+    };
+    createTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        trigger: components["schemas"]["Trigger"];
+                        secret: string;
+                    };
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    getTriggerSample: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: "generic" | "grafana" | "github";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A sample webhook body for kind */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": Record<string, never>;
+                };
+            };
+            /** @description Unrecognized kind */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The trigger (never includes a secret) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trigger"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TriggerInput"];
+            };
+        };
+        responses: {
+            /** @description The updated trigger */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Trigger"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    rotateTriggerSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The new secret */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        secret: string;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listTriggerDeliveries: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deliveries, most recent first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Delivery"][];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    testTrigger: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    payload: Record<string, never>;
+                    force?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The resulting delivery */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryResult"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    replayDelivery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        run_id?: string | null;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listRuns: {
+        parameters: {
+            query?: {
+                outcome?: "running" | "success" | "failed" | "timeout" | "needs_human";
+                /** @description Filter to runs started by this trigger id. */
+                trigger?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching runs, most recent first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"][];
+                };
+            };
+        };
+    };
+    getRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunView"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listNotifications: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every notification channel (never includes a token) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"][];
+                };
+            };
+        };
+    };
+    createNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind: "ntfy" | "webhook";
+                    name: string;
+                    url: string;
+                    token?: string;
+                    events?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    deleteNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    kind?: "ntfy" | "webhook";
+                    name?: string;
+                    url?: string;
+                    token?: string;
+                    events?: string[];
+                    enabled?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description The updated channel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationChannel"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    testNotification: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The test notification was sent */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ok: boolean;
+                    };
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description Sending the test notification failed (no detail leaked) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deliverHook: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                slug: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Delivery logged (a run may or may not have started, depending on status) */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeliveryResult"];
+                };
+            };
+            /** @description Bad secret */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Unknown or disabled trigger */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description Body exceeds the 256 KiB limit */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

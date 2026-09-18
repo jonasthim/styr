@@ -56,6 +56,15 @@ func TestRuns_CreateGetGetBySessionFinish(t *testing.T) {
 	if got.Outcome != domain.RunRunning || got.FinishedAt != nil || got.SessionID != sessID {
 		t.Fatalf("Get = %+v, want matching %+v", got, r)
 	}
+	// A run with no report yet must come back with a nil (not merely empty)
+	// RawMessage: an empty one is not valid JSON, and marshalling it fails,
+	// which would make every API response carrying a running run a 500.
+	if got.Report != nil {
+		t.Fatalf("Get report = %q, want nil for a run with no report yet", got.Report)
+	}
+	if _, err := json.Marshal(got); err != nil {
+		t.Fatalf("Marshal a run with no report: %v", err)
+	}
 
 	bySession, err := runs.GetBySession(ctx, sessID)
 	if err != nil {

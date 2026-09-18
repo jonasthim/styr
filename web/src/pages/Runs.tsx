@@ -88,7 +88,9 @@ export function Runs() {
 
       {!runs.isLoading && !isEmpty && (
         <div className="mt-4 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
-          {runs.data?.map((run) => <RunRow key={run.id} run={run} triggerName={triggerName(run.trigger_id)} />)}
+          {runs.data?.map((view) => (
+            <RunRow key={view.run.id} run={view.run} triggerName={triggerName(view.run.trigger_id)} />
+          ))}
         </div>
       )}
     </div>

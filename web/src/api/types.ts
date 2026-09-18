@@ -6,10 +6,17 @@
 // describe as a bare "object": those come back from openapi-typescript as
 // `Record<string, never>` (an empty object), which is unusable for the
 // actual free-form JSON these fields carry (session/user preferences, a
-// tool call's input, an event's decoded payload).
-import type { components } from './schema'
+// tool call's input, an event's decoded payload, a delivery's webhook body,
+// a run's structured report).
+import type { components, operations } from './schema'
 
 type Schemas = components['schemas']
+
+/** The JSON body of one operation's response, for the handful of endpoints
+ * whose response shape docs/openapi.yaml declares inline rather than as a
+ * named component (a create envelope, a dry-run result). */
+type JSONResponse<O extends keyof operations, S extends keyof operations[O]['responses']> =
+  operations[O]['responses'][S] extends { content: { 'application/json': infer T } } ? T : never
 
 export type Role = Schemas['User']['role']
 
@@ -19,59 +26,25 @@ export type Me = Omit<Schemas['Me'], 'prefs'> & { prefs: Record<string, unknown>
 
 export type User = Omit<Schemas['User'], 'prefs'> & { prefs: Record<string, unknown> }
 
-// Workspace overrides the generated schema outright rather than narrowing it:
-// the backend card implementing the per-user workspaces contract (T29) hasn't
-// regenerated schema.d.ts yet, so Schemas['Workspace'] still describes the
-// old admin-registered-path shape. Field names match the contract exactly so
-// this becomes a no-op once codegen catches up.
-export type WorkspaceSource = 'git' | 'path' | 'empty'
-export type WorkspaceState = 'cloning' | 'ready' | 'failed'
+export type WorkspaceSource = Schemas['Workspace']['source']
+export type WorkspaceState = Schemas['Workspace']['state']
 
-export type Workspace = Omit<Schemas['Workspace'], 'path' | 'error' | 'repo_url' | 'branch'> & {
-  owner_id: string | null
-  path: string
-  source: WorkspaceSource
-  repo_url: string | null
-  branch: string | null
-  managed: boolean
-  state: WorkspaceState
-  error: string | null
-  worktrees: boolean
-  created_at: string
-  updated_at: string
-}
+export type Workspace = Schemas['Workspace']
 
 export type ProfileMode = Schemas['Profile']['mode']
 
-// Effort, Profile, Session and StatusInfo below intersect the generated
-// schema with the model/effort/slash-command contract (docs/openapi.yaml, card
-// T38). schema.d.ts is regenerated in the integration wave; until then these
-// intersections carry the fields the backend already returns, the same way
-// Workspace above carries T29's. Field names match the spec exactly, so each
-// intersection becomes a no-op once codegen catches up.
-
 /** Reasoning effort levels; '' means the CLI's own default. */
-export type Effort = '' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+export type Effort = Schemas['Profile']['effort']
 
 /** One entry of GET /status's model list: the alias the CLI takes, and its label. */
-export interface ModelOption {
-  alias: string
-  label: string
-}
+export type ModelOption = Schemas['StatusInfo']['models'][number]
 
-export type Profile = Schemas['Profile'] & {
-  model: string
-  effort: Effort
-}
+export type Profile = Schemas['Profile']
 
 export type SessionState = Schemas['Session']['state']
 export type Origin = Schemas['Session']['origin']
 
-export type Session = Schemas['Session'] & {
-  effort: Effort
-  /** What the CLI reported on its last init message, without the leading slash. */
-  slash_commands: string[]
-}
+export type Session = Schemas['Session']
 
 export type SessionEvent = Omit<Schemas['Event'], 'payload'> & { payload: unknown }
 
@@ -83,149 +56,59 @@ export type Approval = Omit<Schemas['Approval'], 'input' | 'updated_input'> & {
   updated_input?: unknown
 }
 
-export type StatusInfo = Schemas['StatusInfo'] & {
-  models: ModelOption[]
-  efforts: Exclude<Effort, ''>[]
-  /** CLI built-ins the composer's slash menu must hide (internal/harness/claude/builtins.go). */
-  hidden_commands: string[]
-}
+export type StatusInfo = Schemas['StatusInfo']
 
 export type Provider = Schemas['Provider']
 
 export type ApiErrorBody = Schemas['ErrorBody']
 
-// ApiToken/ApiTokenCreated (T36, personal API tokens: GET/POST
-// /me/api-tokens, DELETE /me/api-tokens/{id}) are hand-written rather than
-// derived from Schemas, like Workspace above: schema.d.ts is regenerated
-// from docs/openapi.yaml by `npm run gen:api`, a step this card does not
-// run (schema.d.ts is a generated file owned by the codegen step, not this
-// card's allowed files), so Schemas['APIToken'] does not exist yet. Field
-// names match docs/openapi.yaml's APIToken/APITokenCreated schemas exactly,
-// so this becomes redundant rather than wrong once codegen catches up.
-export interface ApiToken {
-  id: string
-  name: string
-  prefix: string
-  created_at: string
-  last_used_at: string | null
-  expires_at: string | null
-}
+// --- personal API tokens (T36) ---------------------------------------------
 
-/** POST /me/api-tokens's response: the same shape as ApiToken (destructure
- * to build one) plus `token`, the raw secret shown once and never returned
- * by any other response. */
-export interface ApiTokenCreated {
-  id: string
-  name: string
-  prefix: string
-  token: string
-}
+export type ApiToken = Schemas['APIToken']
 
-// --- Triggers, templates, runs and notifications (T33) ---------------------
-// The backend for this contract (T34/T35) hasn't landed yet, so these are
-// hand-written rather than derived from schema.d.ts - a later card
-// regenerates from openapi.yaml and these become no-ops, so field names
-// match the plan's data model exactly (docs/superpowers/plans/2026-09-18-
-// styr-v0.2-triggers.md, "Data model" and "API contract").
+/** POST /me/api-tokens's response: id/name/prefix plus `token`, the raw
+ * secret shown once and never returned by any other response. */
+export type ApiTokenCreated = Schemas['APITokenCreated']
 
-export interface Template {
-  id: string
-  owner_user_id: string | null
-  name: string
-  workspace_id: string
-  profile_id: string
-  title_template: string
-  prompt_template: string
-  system_prompt: string
-  report_schema: string
-  created_at: string
-  updated_at: string
-}
+// --- triggers, templates, runs and notifications (T33/T34/T35) -------------
 
-export interface TemplateRenderResult {
-  title: string
-  prompt: string
-  errors: string[]
-}
+export type Template = Schemas['Template']
 
-export type TriggerKind = 'generic' | 'grafana' | 'github'
+export type TemplateRenderResult = JSONResponse<'renderTemplate', 200>
 
-export interface Trigger {
-  id: string
-  owner_user_id: string | null
-  name: string
-  slug: string
-  kind: TriggerKind
-  secret_hint: string
-  template_id: string
-  enabled: boolean
-  dedupe_key_template: string
-  cooldown_s: number
-  storm_cap_per_hour: number
-  run_on_resolved: boolean
-  created_at: string
-  updated_at: string
-  last_delivery_at: string | null
-}
+export type TriggerKind = Schemas['Trigger']['kind']
+
+export type Trigger = Schemas['Trigger']
 
 /** Only the POST /triggers response carries the plaintext secret - it is
  * never shown again after this. */
-export interface TriggerCreateResult {
-  trigger: Trigger
-  secret: string
-}
+export type TriggerCreateResult = JSONResponse<'createTrigger', 201>
 
-export interface RotateSecretResult {
-  secret: string
-}
+export type RotateSecretResult = JSONResponse<'rotateTriggerSecret', 200>
 
-export type DeliveryStatus = 'accepted' | 'deduped' | 'cooldown' | 'storm' | 'rejected' | 'failed' | 'skipped'
+export type DeliveryStatus = Schemas['Delivery']['status']
 
-export interface Delivery {
-  id: string
-  trigger_id: string
-  received_at: string
-  status: DeliveryStatus
-  reason: string
-  dedupe_key: string
-  payload: unknown
-  run_id: string | null
-}
+export type Delivery = Omit<Schemas['Delivery'], 'payload'> & { payload: unknown }
 
-export interface ReplayResult {
-  run_id?: string
-}
+export type ReplayResult = JSONResponse<'replayDelivery', 202>
 
-/** Response shape for POST /triggers/{id}/test - a contract addition (not
- * spelled out in the plan beyond "runs the full pipeline as if delivered");
- * mirrors the inbound POST /hooks/{slug} response shape it stands in for. */
-export interface TriggerTestResult {
-  delivery_id: string
-  status: DeliveryStatus
-  run_id?: string
-}
+/** POST /triggers/{id}/test answers with the same {delivery_id, status,
+ * run_id?} shape as the inbound POST /hooks/{slug} it stands in for. */
+export type TriggerTestResult = Schemas['DeliveryResult']
 
-export type RunOutcome = 'running' | 'success' | 'failed' | 'timeout' | 'needs_human'
-export type RunOrigin = 'webhook' | 'schedule' | 'replay' | 'test'
+export type RunOutcome = Schemas['Run']['outcome']
 
-export interface Run {
-  id: string
-  session_id: string
-  template_id: string | null
-  trigger_id: string | null
-  delivery_id: string | null
-  origin: RunOrigin
-  started_at: string
-  finished_at: string | null
-  outcome: RunOutcome
-  report: string
-  summary: string
-  cost_usd: number
+export type Run = Omit<Schemas['Run'], 'report'> & {
+  /** The structured report the CLI produced, parsed out of the session's
+   * result; null until the run finishes with one. Its shape is whatever the
+   * template's report_schema asked for - see StructuredReport for the one
+   * seeded for Grafana. */
+  report: unknown
 }
 
 /** The report_schema seeded for the Grafana template (plan, "Template
- * rendering"). Other templates may use a different shape; report.tsx parses
- * defensively and only renders fields it can find. */
+ * rendering"). Other templates may define a different shape, so
+ * ReportView.tsx reads defensively and renders only the fields it finds. */
 export interface StructuredReport {
   severity?: 'info' | 'warning' | 'critical'
   diagnosis?: string
@@ -235,27 +118,21 @@ export interface StructuredReport {
   resolved_itself?: boolean
 }
 
-/** GET /runs/{id} augments the run row with the session it started and the
- * delivery that triggered it, per the plan ("includes session summary,
- * report, delivery"); GET /runs (list) returns bare Run rows. */
-export interface RunDetail extends Run {
-  session: { id: string; title: string; state: SessionState; workspace_id: string } | null
+/** GET /runs and GET /runs/{id} both answer with runs in this shape: the run
+ * row plus the session it started and the delivery and template it came
+ * from, each null when that record is unavailable (e.g. the template was
+ * since deleted). */
+export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery'> & {
+  run: Run
   delivery: Delivery | null
-  trigger_name: string | null
-  template_name: string | null
 }
 
-export type NotificationChannelKind = 'ntfy' | 'webhook'
+export type NotificationChannelKind = Schemas['NotificationChannel']['kind']
+
+/** The events the UI offers a channel. Narrower than the schema on purpose:
+ * the backend stores (and a hand-written config could add) any string, but
+ * these three are the ones notify.Service publishes and the add-channel
+ * dialog lists. */
 export type NotificationEvent = 'run.finished' | 'run.needs_human' | 'run.failed'
 
-export interface NotificationChannel {
-  id: string
-  kind: NotificationChannelKind
-  name: string
-  url: string
-  events: NotificationEvent[]
-  enabled: boolean
-  /** Never the token itself - only whether one is set (ntfy channels only). */
-  token_present: boolean
-  created_at: string
-}
+export type NotificationChannel = Schemas['NotificationChannel']

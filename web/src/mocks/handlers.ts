@@ -131,8 +131,8 @@ const workspaces: Workspace[] = [
     name: 'notes',
     path: '/data/workspaces/w2',
     source: 'empty',
-    repo_url: null,
-    branch: null,
+    repo_url: '',
+    branch: '',
     managed: true,
     state: 'ready',
     error: '',
@@ -165,7 +165,7 @@ function scheduleCloneOutcome(workspace: Workspace) {
       workspace.error = 'fatal: repository not found'
     } else {
       workspace.state = 'ready'
-      workspace.error = null
+      workspace.error = ''
     }
     workspace.updated_at = iso(0)
     publishWorkspaceState(workspace)
@@ -505,8 +505,8 @@ export const handlers = [
       name: body.name,
       path: source === 'path' ? (body.path as string) : `/data/workspaces/${id}`,
       source: source ?? 'empty',
-      repo_url: source === 'git' ? (body.repo_url as string) : null,
-      branch: source === 'git' ? body.branch || null : null,
+      repo_url: source === 'git' ? (body.repo_url as string) : '',
+      branch: source === 'git' ? body.branch || '' : '',
       managed: source !== 'path',
       state: source === 'git' ? 'cloning' : 'ready',
       error: '',
@@ -553,7 +553,7 @@ export const handlers = [
     const workspace = workspaces.find((w) => w.id === params.id)
     if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
     workspace.state = 'cloning'
-    workspace.error = null
+    workspace.error = ''
     workspace.updated_at = iso(0)
     publishWorkspaceState(workspace)
     scheduleCloneOutcome(workspace)

@@ -28,7 +28,24 @@ export function TriggerRow({
   async function handleToggle(checked: boolean) {
     setPending(true)
     try {
-      await api(`/api/v1/triggers/${trigger.id}`, { method: 'PATCH', json: { enabled: checked } })
+      // PATCH /triggers/{id} replaces the trigger's mutable fields rather
+      // than merging (docs/openapi.yaml's TriggerInput requires name, kind
+      // and template_id; an omitted kind would silently fall back to
+      // "generic"), so the whole row is sent back with only `enabled`
+      // changed - the same full-body PATCH the template editor does.
+      await api(`/api/v1/triggers/${trigger.id}`, {
+        method: 'PATCH',
+        json: {
+          name: trigger.name,
+          kind: trigger.kind,
+          template_id: trigger.template_id,
+          dedupe_key_template: trigger.dedupe_key_template,
+          cooldown_s: trigger.cooldown_s,
+          storm_cap_per_hour: trigger.storm_cap_per_hour,
+          run_on_resolved: trigger.run_on_resolved,
+          enabled: checked,
+        },
+      })
       queryClient.setQueryData<Trigger[]>(['triggers'], (prev) =>
         prev?.map((t) => (t.id === trigger.id ? { ...t, enabled: checked } : t)),
       )

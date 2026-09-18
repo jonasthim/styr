@@ -68,8 +68,11 @@ test.describe('Profile - Claude token card', () => {
   })
 })
 
-/** Id of a profile whose mode select is editable, creating one if the backend
- * under test has none. Builtin rows lock their mode (docs/openapi.yaml), and a
+/** Id and name of a profile whose mode select is editable, creating one if
+ * the backend under test has none. Both are needed: the row is addressed by
+ * id (its data-testid) and the selects inside it by the profile's name (their
+ * accessible label), which are only the same string by coincidence in the
+ * mock's seed data. Builtin rows lock their mode (docs/openapi.yaml), and a
  * disabled Radix Select cannot be opened - so the allowed modes can only be
  * read off an editable row.
  *
@@ -79,13 +82,13 @@ test.describe('Profile - Claude token card', () => {
  * caller can reload once when a profile had to be added - only ever the case
  * against the real backend, whose state survives a reload (the mock seeds an
  * editable profile, and reloading it would re-seed everything else too). */
-async function editableProfile(page: Page): Promise<{ id: string; created: boolean }> {
+async function editableProfile(page: Page): Promise<{ id: string; name: string; created: boolean }> {
   return page.evaluate(async () => {
     const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'styr' }
     const list = await fetch('/api/v1/profiles', { headers })
     if (!list.ok) throw new Error(`list profiles failed: ${list.status}`)
-    const existing = ((await list.json()) as Array<{ id: string; builtin: boolean }>).find((p) => !p.builtin)
-    if (existing) return { id: existing.id, created: false }
+    const existing = ((await list.json()) as Array<{ id: string; name: string; builtin: boolean }>).find((p) => !p.builtin)
+    if (existing) return { id: existing.id, name: existing.name, created: false }
 
     const created = await fetch('/api/v1/profiles', {
       method: 'POST',
@@ -93,14 +96,15 @@ async function editableProfile(page: Page): Promise<{ id: string; created: boole
       body: JSON.stringify({ name: 'styr-e2e-modes', mode: 'default' }),
     })
     if (!created.ok) throw new Error(`create profile failed: ${created.status}`)
-    return { id: ((await created.json()) as { id: string }).id, created: true }
+    const profile = (await created.json()) as { id: string; name: string }
+    return { id: profile.id, name: profile.name, created: true }
   })
 }
 
 test('/settings lists three builtin profiles and a five-option mode select', async ({ page }) => {
   await page.goto('/settings')
   await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
-  const { id: editableId, created } = await editableProfile(page)
+  const { id: editableId, name: editableName, created } = await editableProfile(page)
   if (created) {
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
@@ -119,7 +123,7 @@ test('/settings lists three builtin profiles and a five-option mode select', asy
   // its accessible name.
   const modeSelect = page
     .getByTestId(`profile-row-${editableId}`)
-    .getByRole('combobox', { name: `Mode for ${editableId}` })
+    .getByRole('combobox', { name: `Mode for ${editableName}` })
   await expect(modeSelect).toHaveText('Default')
   await modeSelect.click()
 

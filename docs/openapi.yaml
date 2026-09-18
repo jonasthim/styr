@@ -2105,7 +2105,6 @@ components:
           items:
             type: string
       required: [version, claude_version, open_processes, slots, queue_depth, models, efforts, hidden_commands]
-      required: [version, claude_version, open_processes, slots, queue_depth]
 
     TemplateInput:
       description: The create/update request body for POST/PATCH /templates(/{id}).
@@ -2317,8 +2316,10 @@ components:
           type: string
           enum: [running, success, failed, timeout, needs_human]
         report:
-          type: object
-          description: The structured report parsed from the session's result, when the template has a report_schema.
+          type: [object, "null"]
+          description: >
+            The structured report parsed from the session's result, when the
+            template has a report_schema; null until the run finishes with one.
         summary:
           type: string
         cost_usd:

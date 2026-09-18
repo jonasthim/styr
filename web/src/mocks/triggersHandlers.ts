@@ -17,8 +17,8 @@ import type {
   DeliveryStatus,
   NotificationChannel,
   ReplayResult,
-  RunDetail,
   RunOutcome,
+  RunView,
   Session,
   StructuredReport,
   Template,
@@ -169,7 +169,7 @@ Use the workspace's runbooks and only read-only commands. Do not change anything
 const templates: Template[] = [
   {
     id: TEMPLATE_GRAFANA_ID,
-    owner_user_id: null,
+    owner_id: null,
     name: 'Grafana alert investigation',
     workspace_id: 'w1',
     profile_id: 'investigate',
@@ -190,7 +190,7 @@ const TRIGGER_GENERIC_ID = 'trig-generic'
 const triggers: Trigger[] = [
   {
     id: TRIGGER_GRAFANA_ID,
-    owner_user_id: null,
+    owner_id: null,
     name: 'Prod Grafana alerts',
     slug: 'prod-grafana',
     kind: 'grafana',
@@ -207,7 +207,7 @@ const triggers: Trigger[] = [
   },
   {
     id: TRIGGER_GENERIC_ID,
-    owner_user_id: DEV_USER_ID,
+    owner_id: DEV_USER_ID,
     name: 'Ad hoc webhook',
     slug: 'ad-hoc-webhook',
     kind: 'generic',
@@ -329,7 +329,7 @@ const runs: Run[] = [
     started_at: iso(50),
     finished_at: iso(46),
     outcome: 'success',
-    report: JSON.stringify(SUCCESS_REPORT),
+    report: SUCCESS_REPORT,
     summary: 'prod-01 memory usage climbed past 90%; styr-api looks like a slow leak, not load.',
     cost_usd: 0.34,
   },
@@ -343,7 +343,7 @@ const runs: Run[] = [
     started_at: iso(2),
     finished_at: null,
     outcome: 'running',
-    report: '',
+    report: null,
     summary: '',
     cost_usd: 0.06,
   },
@@ -357,7 +357,7 @@ const runs: Run[] = [
     started_at: iso(20),
     finished_at: null,
     outcome: 'needs_human',
-    report: '',
+    report: null,
     summary:
       "Investigation needs a decision only a human can make: the only fix available is restarting a service, which is outside the investigate profile's read-only tools.",
     cost_usd: 0.11,
@@ -521,7 +521,7 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
     started_at: now,
     finished_at: null,
     outcome: 'running',
-    report: '',
+    report: null,
     summary: '',
     cost_usd: 0,
   }
@@ -538,7 +538,7 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
     }
     run.outcome = 'success'
     run.finished_at = iso(0)
-    run.report = JSON.stringify(report)
+    run.report = report
     run.summary = report.diagnosis ?? ''
     run.cost_usd = 0.04
     session.state = 'closed'
@@ -548,6 +548,18 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
   }, 1200)
 
   return run
+}
+
+/** Both run routes answer with the run row plus the records it was started
+ * from, each null when unavailable - internal/api/runs_handlers.go's
+ * runViewDTO (docs/openapi.yaml's RunView). */
+function runView(run: Run): RunView {
+  return {
+    run,
+    session: sessions.find((s) => s.id === run.session_id) ?? null,
+    delivery: deliveries.find((d) => d.id === run.delivery_id) ?? null,
+    template: templates.find((t) => t.id === run.template_id) ?? null,
+  }
 }
 
 export const triggersHandlers = [
@@ -562,7 +574,7 @@ export const triggersHandlers = [
     const now = iso(0)
     const template: Template = {
       id: nextId('tmpl'),
-      owner_user_id: DEV_USER_ID,
+      owner_id: DEV_USER_ID,
       name: body.name,
       workspace_id: body.workspace_id ?? 'w1',
       profile_id: body.profile_id ?? 'investigate',
@@ -648,7 +660,7 @@ export const triggersHandlers = [
     const now = iso(0)
     const trigger: Trigger = {
       id: nextId('trig'),
-      owner_user_id: DEV_USER_ID,
+      owner_id: DEV_USER_ID,
       name: body.name,
       slug: uniqueSlug(body.name, triggers),
       kind: body.kind ?? 'generic',
@@ -803,24 +815,13 @@ export const triggersHandlers = [
     let list = [...runs].sort((a, b) => Date.parse(b.started_at) - Date.parse(a.started_at))
     if (outcome) list = list.filter((r) => r.outcome === outcome)
     if (triggerId) list = list.filter((r) => r.trigger_id === triggerId)
-    return HttpResponse.json(list.slice(0, limit))
+    return HttpResponse.json(list.slice(0, limit).map(runView))
   }),
 
   http.get('/api/v1/runs/:id', ({ params }) => {
     const run = runs.find((r) => r.id === params.id)
     if (!run) return HttpResponse.json(errorBody('not_found', 'run not found'), { status: 404 })
-    const session = sessions.find((s) => s.id === run.session_id)
-    const delivery = deliveries.find((d) => d.id === run.delivery_id) ?? null
-    const trigger = triggers.find((t) => t.id === run.trigger_id)
-    const template = templates.find((t) => t.id === run.template_id)
-    const detail: RunDetail = {
-      ...run,
-      session: session ? { id: session.id, title: session.title, state: session.state, workspace_id: session.workspace_id } : null,
-      delivery,
-      trigger_name: trigger?.name ?? null,
-      template_name: template?.name ?? null,
-    }
-    return HttpResponse.json(detail)
+    return HttpResponse.json(runView(run))
   }),
 
   // --- notification channels ------------------------------------------------
