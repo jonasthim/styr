@@ -2,7 +2,7 @@
 // Profile (Shell renders exactly one of Rail/TabBar, never both).
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, Clock, Inbox as InboxIcon, MessagesSquare, User, Zap } from 'lucide-react'
+import { Activity, Clock, Inbox as InboxIcon, MessagesSquare, User, Workflow, Zap } from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
 
@@ -12,6 +12,7 @@ const ITEMS = [
   { to: '/runs', label: 'Runs', icon: Activity },
   { to: '/triggers', label: 'Triggers', icon: Zap },
   { to: '/schedules', label: 'Schedules', icon: Clock },
+  { to: '/pipelines', label: 'Pipelines', icon: Workflow },
   { to: '/profile', label: 'Profile', icon: User },
 ] as const
 

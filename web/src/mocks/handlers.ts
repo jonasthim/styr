@@ -45,6 +45,9 @@ import { triggersHandlers } from './triggersHandlers'
 // spread after triggersHandlers because it seeds into that module's
 // `templates` and `runs` arrays.
 import { schedulesHandlers } from './schedulesHandlers'
+// T54 (pipelines): its own module for the same reason, spread last because
+// it seeds Run rows and sessions into triggersHandlers' arrays.
+import { pipelinesHandlers } from './pipelinesHandlers'
 // T43 (review): the seeded worktree diff, checkpoints, comment store and plan
 // approval live in their own module so this one only owns the routes.
 import {
@@ -976,4 +979,5 @@ export const handlers = [
 
   ...triggersHandlers,
   ...schedulesHandlers,
+  ...pipelinesHandlers,
 ]

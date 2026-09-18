@@ -8,6 +8,7 @@ import clsx from 'clsx'
 import { api, ApiError } from '../../api/client'
 import { q } from '../../api/queries'
 import type { Trigger, TriggerCreateResult, TriggerKind } from '../../api/types'
+import { TargetSelector, type RunTarget } from '../pipelines/TargetSelector'
 import { Button, Dialog, DialogContent, Field, Input, Select, Switch } from '../ui'
 import { WebhookReadyPanel } from './WebhookReadyPanel'
 
@@ -20,10 +21,13 @@ const KIND_OPTIONS: Array<{ value: TriggerKind; label: string }> = [
 export function CreateTriggerDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const queryClient = useQueryClient()
   const templates = useQuery({ ...q.templates(), enabled: open })
+  const pipelines = useQuery({ ...q.pipelines(), enabled: open })
 
   const [name, setName] = useState('')
   const [kind, setKind] = useState<TriggerKind>('grafana')
+  const [target, setTarget] = useState<RunTarget>('template')
   const [templateId, setTemplateId] = useState('')
+  const [pipelineId, setPipelineId] = useState('')
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [dedupeKeyTemplate, setDedupeKeyTemplate] = useState('')
   const [cooldownS, setCooldownS] = useState('600')
@@ -36,7 +40,9 @@ export function CreateTriggerDialog({ open, onOpenChange }: { open: boolean; onO
   function reset() {
     setName('')
     setKind('grafana')
+    setTarget('template')
     setTemplateId('')
+    setPipelineId('')
     setAdvancedOpen(false)
     setDedupeKeyTemplate('')
     setCooldownS('600')
@@ -61,7 +67,9 @@ export function CreateTriggerDialog({ open, onOpenChange }: { open: boolean; onO
         json: {
           name,
           kind,
-          template_id: templateId,
+          // A trigger starts a template or a pipeline, never both (T54).
+          template_id: target === 'template' ? templateId : '',
+          pipeline_id: target === 'pipeline' ? pipelineId : null,
           dedupe_key_template: dedupeKeyTemplate,
           cooldown_s: Number(cooldownS) || 0,
           storm_cap_per_hour: Number(stormCap) || 0,
@@ -103,18 +111,37 @@ export function CreateTriggerDialog({ open, onOpenChange }: { open: boolean; onO
               )}
             </Field>
 
-            <Field label="Template" hint={templates.data?.length === 0 ? 'Create a template first.' : undefined}>
-              {({ id, 'aria-describedby': describedBy }) => (
-                <Select
-                  id={id}
-                  aria-describedby={describedBy}
-                  value={templateId}
-                  onValueChange={setTemplateId}
-                  placeholder="Choose a template"
-                  options={(templates.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
-                />
-              )}
-            </Field>
+            <TargetSelector value={target} onChange={setTarget} />
+
+            {target === 'template' ? (
+              <Field label="Template" hint={templates.data?.length === 0 ? 'Create a template first.' : undefined}>
+                {({ id, 'aria-describedby': describedBy }) => (
+                  <Select
+                    id={id}
+                    aria-label="Template"
+                    aria-describedby={describedBy}
+                    value={templateId}
+                    onValueChange={setTemplateId}
+                    placeholder="Choose a template"
+                    options={(templates.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
+                  />
+                )}
+              </Field>
+            ) : (
+              <Field label="Pipeline" hint={pipelines.data?.length === 0 ? 'Create a pipeline first.' : undefined}>
+                {({ id, 'aria-describedby': describedBy }) => (
+                  <Select
+                    id={id}
+                    aria-label="Pipeline"
+                    aria-describedby={describedBy}
+                    value={pipelineId}
+                    onValueChange={setPipelineId}
+                    placeholder="Choose a pipeline"
+                    options={(pipelines.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
+                  />
+                )}
+              </Field>
+            )}
 
             <Button
               type="button"
@@ -160,7 +187,12 @@ export function CreateTriggerDialog({ open, onOpenChange }: { open: boolean; onO
               <Button variant="ghost" type="button" onClick={() => handleOpenChange(false)}>
                 Cancel
               </Button>
-              <Button variant="primary" type="submit" loading={submitting} disabled={!templateId}>
+              <Button
+                variant="primary"
+                type="submit"
+                loading={submitting}
+                disabled={target === 'template' ? !templateId : !pipelineId}
+              >
                 Create trigger
               </Button>
             </div>

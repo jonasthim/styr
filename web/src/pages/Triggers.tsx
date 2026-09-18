@@ -19,12 +19,17 @@ import { Badge, Button, EmptyState, PageHeader, TableFrame, Tabs, TabsList, Tabs
 function TriggersTab() {
   const triggers = useQuery(q.triggers())
   const templates = useQuery(q.templates())
+  const pipelines = useQuery(q.pipelines())
   const [createOpen, setCreateOpen] = useState(false)
   const [deliveriesTarget, setDeliveriesTarget] = useState<Trigger | null>(null)
   const [testTarget, setTestTarget] = useState<Trigger | null>(null)
 
-  function templateName(templateId: string): string {
-    return templates.data?.find((t) => t.id === templateId)?.name ?? templateId
+  /** What a trigger starts: a template, or - since T54 - a pipeline. */
+  function targetName(trigger: Trigger): string {
+    if (trigger.pipeline_id) {
+      return pipelines.data?.find((p) => p.id === trigger.pipeline_id)?.name ?? trigger.pipeline_id
+    }
+    return templates.data?.find((t) => t.id === trigger.template_id)?.name ?? trigger.template_id
   }
 
   const isEmpty = triggers.isSuccess && triggers.data.length === 0
@@ -56,7 +61,7 @@ function TriggersTab() {
             <tr>
               <Th>Name</Th>
               <Th>Kind</Th>
-              <Th>Template</Th>
+              <Th>Runs</Th>
               <Th>Last delivery</Th>
               <Th>Enabled</Th>
               <Th className="w-10">
@@ -69,7 +74,7 @@ function TriggersTab() {
               <TriggerRow
                 key={trigger.id}
                 trigger={trigger}
-                templateName={templateName(trigger.template_id)}
+                targetName={targetName(trigger)}
                 onOpenDeliveries={setDeliveriesTarget}
                 onOpenTest={setTestTarget}
               />

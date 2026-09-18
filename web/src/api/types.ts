@@ -89,11 +89,18 @@ export type TemplateRenderResult = JSONResponse<'renderTemplate', 200>
 
 export type TriggerKind = Schemas['Trigger']['kind']
 
-export type Trigger = Schemas['Trigger']
+/** Since T54 a trigger runs either a template or a pipeline: `pipeline_id`
+ * is the alternative to `template_id` (exactly one is set; the unused one is
+ * '' / null). Written as an intersection because docs/openapi.yaml only
+ * learns about the column in T57. */
+export type Trigger = Schemas['Trigger'] & {
+  pipeline_id: string | null
+}
 
 /** Only the POST /triggers response carries the plaintext secret - it is
- * never shown again after this. */
-export type TriggerCreateResult = JSONResponse<'createTrigger', 201>
+ * never shown again after this. `trigger` is re-stated so it carries T54's
+ * `pipeline_id`, which docs/openapi.yaml only learns about in T57. */
+export type TriggerCreateResult = Omit<JSONResponse<'createTrigger', 201>, 'trigger'> & { trigger: Trigger }
 
 export type RotateSecretResult = JSONResponse<'rotateTriggerSecret', 200>
 
@@ -119,6 +126,8 @@ export type Run = Omit<Schemas['Run'], 'report'> & {
   loop_id: string | null
   /** 1-based position in its loop; 0 for a run outside one. */
   iteration: number
+  /** Set on every run a pipeline step started (T54); null otherwise. */
+  step_run_id: string | null
 }
 
 /** The report_schema seeded for the Grafana template (plan, "Template
@@ -143,6 +152,10 @@ export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery' | 'template'> 
   template: Template | null
   /** The loop this run belongs to (T49), null for a one-shot run. */
   loop: Loop | null
+  /** The pipeline step this run is (T54), and the pipeline it belongs to;
+   * both null for a run outside a pipeline. */
+  step: StepRun | null
+  pipeline: Pipeline | null
 }
 
 export type NotificationChannelKind = Schemas['NotificationChannel']['kind']
@@ -211,7 +224,10 @@ export interface Schedule {
   id: string
   owner_id: string | null
   name: string
+  /** '' when this schedule runs a pipeline instead (T54). */
   template_id: string
+  /** The pipeline this schedule starts, or null when it runs a template. */
+  pipeline_id: string | null
   cron: string
   enabled: boolean
   vars: Record<string, unknown>
@@ -229,7 +245,9 @@ export interface Schedule {
  * than merging, so the UI always sends the whole row back. */
 export interface ScheduleInput {
   name: string
-  template_id: string
+  /** Exactly one of `template_id` / `pipeline_id` (T54). */
+  template_id?: string
+  pipeline_id?: string | null
   cron: string
   vars?: Record<string, unknown>
   enabled?: boolean
@@ -335,4 +353,123 @@ export interface CostStats {
   top_templates: CostBreakdown[]
   total_usd: number
   window: { from: string; to: string }
+}
+
+// --- pipelines (v0.5, T54) -------------------------------------------------
+// Hand-written like the T49 block above and for the same reason: the handlers
+// these describe land in T57 and docs/openapi.yaml only gains them then. They
+// are exactly the contract in
+// docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md ("API"), which the
+// msw mock implements verbatim, so T58's `npm run gen:api` can replace this
+// block with re-exports without moving a field.
+
+/** A YAML DAG of steps, each of which runs a template. `yaml` is the whole
+ * definition; the parsed shape only ever reaches the UI as a `PipelineGraph`
+ * from POST /pipelines/validate. */
+export interface Pipeline {
+  id: string
+  owner_id: string | null
+  name: string
+  workspace_id: string
+  yaml: string
+  created_at: string
+  updated_at: string
+}
+
+/** POST/PATCH /pipelines(/{id}). PATCH replaces the mutable fields rather
+ * than merging, so the UI always sends the whole row back. */
+export interface PipelineInput {
+  name: string
+  workspace_id: string
+  yaml: string
+}
+
+/** One node of the validated DAG: the step's id, the template it runs, its
+ * worktree mode, and the `foreach` expression when it fans out ('' when it
+ * does not). */
+export interface PipelineNode {
+  id: string
+  template: string
+  worktree: 'own' | 'shared'
+  foreach: string
+}
+
+export interface PipelineEdge {
+  from: string
+  to: string
+}
+
+export interface PipelineGraph {
+  nodes: PipelineNode[]
+  edges: PipelineEdge[]
+}
+
+/** One validation failure, pointing at the line of the definition it came
+ * from (1-based, so it can be shown in the editor's gutter). */
+export interface PipelineError {
+  line: number
+  message: string
+}
+
+/** POST /pipelines/validate. `graph` is whatever could be parsed even when
+ * `ok` is false, so the preview keeps showing the shape while it is edited. */
+export interface PipelineValidation {
+  ok: boolean
+  errors: PipelineError[]
+  graph: PipelineGraph
+}
+
+/** POST /pipelines/{id}/start. */
+export interface PipelineStartResult {
+  pipeline_run_id: string
+}
+
+export type PipelineRunState = 'running' | 'success' | 'failed' | 'cancelled' | 'timeout'
+
+export interface PipelineRun {
+  id: string
+  pipeline_id: string
+  origin: string
+  origin_ref: string
+  input: Record<string, unknown>
+  state: PipelineRunState
+  started_at: string
+  finished_at: string | null
+  cost_usd: number
+}
+
+export type StepRunState = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'cancelled'
+
+/** One execution of one node. A fan-out node has one step run per item
+ * (`index_in_fanout`, `item`); a retried node has one per attempt. */
+export interface StepRun {
+  id: string
+  pipeline_run_id: string
+  step_id: string
+  index_in_fanout: number
+  item: string
+  run_id: string | null
+  attempt: number
+  state: StepRunState
+  /** The run's structured report once the step succeeds; null before that. */
+  report: unknown
+  started_at: string | null
+  finished_at: string | null
+  worktree: string
+}
+
+/** GET /pipeline-runs/{id}. */
+export interface PipelineRunView {
+  run: PipelineRun
+  pipeline: Pipeline | null
+  steps: StepRun[]
+  graph: PipelineGraph
+}
+
+/** The SSE `pipeline.state` frame's payload: a pipeline run's own state, or
+ * one step run's when `step_run_id` is set. */
+export interface PipelineStatePayload {
+  pipeline_run_id: string
+  step_run_id?: string
+  state: PipelineRunState | StepRunState
 }

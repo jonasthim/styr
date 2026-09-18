@@ -30,6 +30,7 @@ import type {
 } from '../api/types'
 import { DEV_USER_ID, sessions } from './sessionsState'
 import { findLoop } from './loopsState'
+import { findStepContext, pipelines } from './pipelinesState'
 import { renderMiniTemplate } from './renderTemplate'
 
 function iso(minutesAgo: number): string {
@@ -200,6 +201,7 @@ const triggers: Trigger[] = [
     kind: 'grafana',
     secret_hint: '…9f2a71',
     template_id: TEMPLATE_GRAFANA_ID,
+    pipeline_id: null,
     enabled: true,
     dedupe_key_template: '{{ .status }}:{{ range .alerts }}{{ .fingerprint }},{{ end }}',
     cooldown_s: 600,
@@ -217,6 +219,7 @@ const triggers: Trigger[] = [
     kind: 'generic',
     secret_hint: '…c71ea0',
     template_id: TEMPLATE_GRAFANA_ID,
+    pipeline_id: null,
     enabled: false,
     dedupe_key_template: '',
     cooldown_s: 600,
@@ -350,6 +353,7 @@ export const runs: Run[] = [
     cost_usd: 0.34,
     loop_id: null,
     iteration: 0,
+    step_run_id: null,
   },
   {
     id: RUN_RUNNING_ID,
@@ -366,6 +370,7 @@ export const runs: Run[] = [
     cost_usd: 0.06,
     loop_id: null,
     iteration: 0,
+    step_run_id: null,
   },
   {
     id: RUN_NEEDS_HUMAN_ID,
@@ -383,6 +388,7 @@ export const runs: Run[] = [
     cost_usd: 0.11,
     loop_id: null,
     iteration: 0,
+    step_run_id: null,
   },
 ]
 
@@ -558,6 +564,7 @@ export function startRun(
     cost_usd: 0,
     loop_id: null,
     iteration: 0,
+    step_run_id: null,
   }
   runs.unshift(run)
 
@@ -594,6 +601,10 @@ export function runView(run: Run): RunView {
     delivery: deliveries.find((d) => d.id === run.delivery_id) ?? null,
     template: templates.find((t) => t.id === run.template_id) ?? null,
     loop: findLoop(run.loop_id),
+    // T54: the pipeline step this run is, when it is one. Resolved through
+    // ./pipelinesState (a leaf module) so this one does not have to import
+    // the handler module that imports it back.
+    ...findStepContext(run.id),
   }
 }
 
@@ -682,6 +693,7 @@ export const triggersHandlers = [
       name?: string
       kind?: TriggerKind
       template_id?: string
+      pipeline_id?: string | null
       dedupe_key_template?: string
       cooldown_s?: number
       storm_cap_per_hour?: number
@@ -690,7 +702,13 @@ export const triggersHandlers = [
     if (!body.name || !body.name.trim()) {
       return HttpResponse.json(errorBody('invalid', 'Name is required.'), { status: 422 })
     }
-    if (!body.template_id || !templates.some((t) => t.id === body.template_id)) {
+    // T54: a trigger runs a template or a pipeline, never both and never
+    // neither.
+    const wantsPipeline = !!body.pipeline_id
+    if (wantsPipeline && !pipelines.some((p) => p.id === body.pipeline_id)) {
+      return HttpResponse.json(errorBody('invalid', 'Choose a pipeline.'), { status: 422 })
+    }
+    if (!wantsPipeline && (!body.template_id || !templates.some((t) => t.id === body.template_id))) {
       return HttpResponse.json(errorBody('invalid', 'Choose a template.'), { status: 422 })
     }
     const secret = generateSecret()
@@ -702,7 +720,8 @@ export const triggersHandlers = [
       slug: uniqueSlug(body.name, triggers),
       kind: body.kind ?? 'generic',
       secret_hint: secretHint(secret),
-      template_id: body.template_id,
+      template_id: wantsPipeline ? '' : (body.template_id ?? ''),
+      pipeline_id: body.pipeline_id ?? null,
       enabled: true,
       dedupe_key_template: body.dedupe_key_template ?? '',
       cooldown_s: body.cooldown_s ?? 600,

@@ -16,6 +16,10 @@ import { TemplateEditor } from './pages/TemplateEditor'
 import { Schedules } from './pages/Schedules'
 import { Loops } from './pages/Loops'
 import { Costs } from './pages/Costs'
+import { Pipelines } from './pages/Pipelines'
+import { PipelineEditor } from './pages/PipelineEditor'
+import { PipelineRuns } from './pages/PipelineRuns'
+import { PipelineRunDetail } from './pages/PipelineRunDetail'
 import type { LoopState, RunOutcome } from './api/types'
 
 const rootRoute = createRootRoute({ component: Outlet })
@@ -132,9 +136,29 @@ const loopsRoute = createRoute({
   component: Loops,
 })
 const costsRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/runs/costs', component: Costs })
+const pipelineRunsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/runs/pipelines',
+  component: PipelineRuns,
+})
 const runDetailRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/runs/$id', component: RunDetail })
 
 const schedulesRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/schedules', component: Schedules })
+
+// v0.5 pipelines: the list, the YAML editor, and a pipeline run's own page.
+// /pipeline-runs is a top-level path rather than a child of /runs because a
+// pipeline run is not a run - it owns several of them.
+const pipelinesRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/pipelines', component: Pipelines })
+const pipelineEditorRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/pipelines/$id',
+  component: PipelineEditor,
+})
+const pipelineRunDetailRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/pipeline-runs/$id',
+  component: PipelineRunDetail,
+})
 
 interface TriggersSearch {
   // Which of the Triggers|Templates tabs is active (Triggers.tsx).
@@ -173,8 +197,12 @@ const routeTree = rootRoute.addChildren([
     runsRoute,
     loopsRoute,
     costsRoute,
+    pipelineRunsRoute,
     runDetailRoute,
     schedulesRoute,
+    pipelinesRoute,
+    pipelineEditorRoute,
+    pipelineRunDetailRoute,
     triggersRoute,
     templateEditorRoute,
   ]),
