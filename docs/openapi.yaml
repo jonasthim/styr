@@ -11,6 +11,7 @@ servers:
   - url: /
 security:
   - sessionCookie: []
+  - bearerToken: []
 paths:
   /healthz:
     get:
@@ -175,6 +176,80 @@ paths:
       responses:
         "204":
           description: Removed (idempotent)
+
+  /api/v1/me/api-tokens:
+    get:
+      summary: List the current user's personal API tokens
+      description: >
+        Never includes the raw secret, only for POST's response, once, at
+        creation. Newest first.
+      operationId: listMeAPITokens
+      tags: [me]
+      responses:
+        "200":
+          description: The current user's tokens
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/APIToken"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    post:
+      summary: Create a personal API token
+      description: >
+        A personal API token authenticates as its owner via `Authorization:
+        Bearer styr_pat_...`, in place of the styr_session cookie, and is
+        exempt from the X-Requested-With CSRF header rule. The raw token is
+        returned only in this response; only its sha256 hash is stored, so
+        it cannot be retrieved again after this call.
+      operationId: createMeAPIToken
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                expires_in_days:
+                  type: integer
+                  description: Omit or 0 for a token that never expires.
+              required: [name]
+      responses:
+        "201":
+          description: Created; the token is only ever returned here
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/APITokenCreated"
+        "422":
+          description: name is required (or expires_in_days is out of range)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/me/api-tokens/{id}:
+    delete:
+      summary: Revoke a personal API token
+      description: Only the current user's own tokens; any other id is 404.
+      operationId: deleteMeAPIToken
+      tags: [me]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Revoked
+        "404":
+          $ref: "#/components/responses/NotFound"
 
   /api/v1/users:
     get:
@@ -866,6 +941,14 @@ components:
       type: apiKey
       in: cookie
       name: styr_session
+    bearerToken:
+      type: http
+      scheme: bearer
+      description: >
+        A personal API token (POST /me/api-tokens), sent as `Authorization:
+        Bearer styr_pat_...`. Equivalent to sessionCookie for every route,
+        except that it is exempt from the X-Requested-With CSRF header
+        rule (internal/api/middleware.go's csrfGuard).
   responses:
     Unauthorized:
       description: Authentication required
@@ -911,6 +994,45 @@ components:
           type: [string, "null"]
           format: date-time
       required: [present, label, verified_at]
+
+    APIToken:
+      description: >
+        GET /me/api-tokens's element shape: never the raw secret or its
+        hash, only enough to recognise a token in the list.
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_used_at:
+          type: [string, "null"]
+          format: date-time
+        expires_at:
+          type: [string, "null"]
+          format: date-time
+      required: [id, name, prefix, created_at, last_used_at, expires_at]
+
+    APITokenCreated:
+      description: >
+        POST /me/api-tokens's response: id/name/prefix plus the raw secret,
+        shown once and never returned by any other response.
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        prefix:
+          type: string
+        token:
+          type: string
+      required: [id, name, prefix, token]
 
     User:
       description: >

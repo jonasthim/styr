@@ -24,6 +24,10 @@ import { MOCK_EVENT_SESSION_ID, emitFakeEvent } from './fakeEventSource'
 import { decodeFixtureEvents } from './decodeFixture'
 import fixture02Raw from './fixtures/02_tool_read.jsonl?raw'
 import type { HarnessEventPayload } from '../lib/blocks'
+// T36 (personal API tokens): kept as its own import line rather than folded
+// into the block above so this card's additive changes don't collide with
+// another card's edit to that same import statement.
+import type { ApiToken, ApiTokenCreated } from '../api/types'
 
 function iso(minutesAgo: number): string {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString()
@@ -403,6 +407,33 @@ let settings: MockSettings = {
   service_token: { present: false, label: '', verified_at: null },
 }
 
+// ---- T36: personal API tokens (additive; see the matching block appended
+// at the end of `handlers` below) ------------------------------------------
+// Starts empty: e2e/api-tokens.spec.ts creates its own tokens rather than
+// asserting against pre-seeded ones, so a fresh page load always starts
+// from "no tokens yet".
+let nextApiTokenSeq = 1
+const apiTokens: ApiToken[] = []
+
+function createApiToken(name: string, expiresInDays?: number): ApiTokenCreated {
+  const id = `apitok-${nextApiTokenSeq++}`
+  // Shaped like a real secret (auth.GenerateAPIToken's APITokenPrefix) so
+  // anything in the UI that only checks the prefix behaves the same in
+  // mock and real mode; not a real random secret since this never leaves
+  // the browser tab running the mock.
+  const secret = `styr_pat_mock${id}${Math.random().toString(36).slice(2, 10)}`
+  const token: ApiToken = {
+    id,
+    name,
+    prefix: secret.slice(0, 12),
+    created_at: iso(0),
+    last_used_at: null,
+    expires_at: expiresInDays ? new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString() : null,
+  }
+  apiTokens.unshift(token)
+  return { id: token.id, name: token.name, prefix: token.prefix, token: secret }
+}
+
 export const handlers = [
   http.get('/healthz', () => HttpResponse.json({ ok: true })),
 
@@ -759,5 +790,23 @@ export const handlers = [
       queue_depth: 0,
     }
     return HttpResponse.json(status)
+  }),
+
+  // ---- T36: personal API tokens (additive block; see the apiTokens seed
+  // and createApiToken helper above `handlers`) ----------------------------
+  http.get('/api/v1/me/api-tokens', () => HttpResponse.json(apiTokens)),
+
+  http.post('/api/v1/me/api-tokens', async ({ request }) => {
+    const body = (await request.json()) as { name?: string; expires_in_days?: number }
+    const name = body.name?.trim()
+    if (!name) return HttpResponse.json(errorBody('invalid', 'name is required'), { status: 422 })
+    return HttpResponse.json(createApiToken(name, body.expires_in_days), { status: 201 })
+  }),
+
+  http.delete('/api/v1/me/api-tokens/:id', ({ params }) => {
+    const idx = apiTokens.findIndex((t) => t.id === params.id)
+    if (idx === -1) return HttpResponse.json(errorBody('not_found', 'token not found'), { status: 404 })
+    apiTokens.splice(idx, 1)
+    return new HttpResponse(null, { status: 204 })
   }),
 ]

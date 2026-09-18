@@ -28,6 +28,14 @@ const devIssuer = "dev"
 type Principal struct {
 	User           domain.User
 	LoginSessionID string
+	// TokenAuth reports whether this request authenticated via a personal
+	// API token's Authorization: Bearer header rather than the styr_session
+	// cookie. csrfGuard (internal/api/middleware.go) skips the
+	// X-Requested-With check when this is true: a script sending its own
+	// bearer secret already proves it is not a browser tricked into
+	// carrying an ambient cookie, which is what the CSRF header rule
+	// defends against in the first place.
+	TokenAuth bool
 }
 
 // ProviderInfo describes one configured OIDC login option, as shown on the
@@ -45,6 +53,13 @@ type Service struct {
 	baseURL   string
 	secure    bool
 	devUser   string
+
+	// apiTokens resolves a personal API token's Authorization: Bearer
+	// header in Authenticate. It is nil until WithAPITokens is called
+	// (e.g. cmd/styr/wire.go, once T31's db.APITokens repo exists), in
+	// which case bearer requests are simply never authenticated — the same
+	// "no principal attached" outcome as a missing/invalid cookie.
+	apiTokens APITokenStore
 
 	mu       sync.Mutex
 	runtimes map[string]*providerRuntime // provider slug -> lazily discovered
@@ -236,14 +251,19 @@ func (s *Service) getOrCreateDevUser(ctx context.Context) (*domain.User, bool) {
 	return &created, true
 }
 
-// Authenticate resolves the styr_session cookie (or, in dev mode with no
-// cookie, the dev bypass user) and attaches a *Principal to the request
-// context. It never rejects a request itself: RequireUser and RequireAdmin
-// do that once a principal is actually required.
+// Authenticate resolves the styr_session cookie, then a personal API
+// token's Authorization: Bearer header (see principalFromBearer), then, in
+// dev mode with neither, the dev bypass user, and attaches a *Principal to
+// the request context. It never rejects a request itself: RequireUser and
+// RequireAdmin do that once a principal is actually required.
 func (s *Service) Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctx := r.Context()
 		if p, ok := s.principalFromCookie(ctx, r); ok {
+			next.ServeHTTP(w, r.WithContext(withPrincipal(ctx, p)))
+			return
+		}
+		if p, ok := s.principalFromBearer(ctx, r); ok {
 			next.ServeHTTP(w, r.WithContext(withPrincipal(ctx, p)))
 			return
 		}

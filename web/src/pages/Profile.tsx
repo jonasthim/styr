@@ -8,6 +8,7 @@ import { api } from '../api/client'
 import { useMe } from '../hooks/useMe'
 import { useTheme } from '../hooks/useTheme'
 import { useUiStore } from '../store/ui'
+import { ApiTokens } from '../components/profile/ApiTokens'
 import { ClaudeTokenCard } from '../components/profile/ClaudeTokenCard'
 import { Badge, Button, Card, Kbd, PageHeader } from '../components/ui'
 
@@ -148,6 +149,8 @@ export function Profile() {
           testId="claude-token-card"
         />
       </div>
+
+      <ApiTokens />
 
       <Card
         className="mt-4"

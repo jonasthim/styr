@@ -76,6 +76,20 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		return nil, nil, fmt.Errorf("wire: %w", err)
 	}
 
+	// internal/db/api_tokens.go (db.NewAPITokens(d) *db.APITokens,
+	// api_tokens table migration, in a parallel worktree — neither exists
+	// in this one, so the store stays nil for now. With it nil,
+	// auth.Service never matches a bearer token (falls through exactly
+	// like a missing cookie, see auth.Service.principalFromBearer) and
+	// GET/POST/DELETE /me/api-tokens answer 501 "not_implemented" rather
+	//
+	//
+	//
+	// db.NewAPITokens never returns nil, so no extra nil check is needed
+	// around those two lines; the nil-safety already lives entirely in
+	apiTokensRepo := db.NewAPITokens(d)
+	authSvc = authSvc.WithAPITokens(apiTokensRepo)
+
 	var verifier api.TokenVerifier
 	if cfg.Env == "dev" {
 		// The dev verifier never spawns a process, so the UI's token cards
@@ -90,6 +104,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	claudeVersion := probeClaudeVersion(cfg.ClaudeBin)
 
 	deps := &api.Deps{
+		TokenStore:     apiTokensRepo,
 		Auth:           authSvc,
 		Sessions:       svc,
 		Users:          users,

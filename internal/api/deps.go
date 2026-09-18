@@ -11,6 +11,7 @@ import (
 	"github.com/jonasthim/styr/internal/auth"
 	"github.com/jonasthim/styr/internal/crypto"
 	"github.com/jonasthim/styr/internal/db"
+	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/sessions"
 	"github.com/jonasthim/styr/internal/workspaces"
@@ -21,6 +22,18 @@ import (
 // use a stub.
 type TokenVerifier interface {
 	Verify(ctx context.Context, token string) error
+}
+
+// TokenStore is the subset of the api_tokens repository (T31's
+// db.APITokens) the /me/api-tokens handlers need. Defined here, alongside
+// auth.APITokenStore, rather than imported so this package does not depend
+// on internal/db's concrete repository type; a nil TokenStore (the
+// zero-value Deps, before T31's repository is wired in cmd/styr/wire.go)
+// makes every /me/api-tokens handler answer 501 rather than panic.
+type TokenStore interface {
+	Create(ctx context.Context, t domain.APIToken) error
+	ListByUser(ctx context.Context, userID string) ([]domain.APIToken, error)
+	Delete(ctx context.Context, id, userID string) error
 }
 
 // StatusInfo is the payload for GET /api/v1/status.
@@ -49,8 +62,13 @@ type Deps struct {
 	Bus            *events.Bus
 	Box            *crypto.Box
 	Verifier       TokenVerifier
-	Status         func() StatusInfo
-	Version        string
+	// TokenStore backs GET/POST /me/api-tokens and DELETE
+	// /me/api-tokens/{id} (T36). nil until T31's db.APITokens repository is
+	// wired in (cmd/styr/wire.go); the handlers answer 501 in that case
+	// rather than panicking.
+	TokenStore TokenStore
+	Status     func() StatusInfo
+	Version    string
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not
