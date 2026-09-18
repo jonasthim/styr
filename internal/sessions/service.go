@@ -42,6 +42,12 @@ type Repos struct {
 	Profiles   *db.Profiles
 	Tokens     *db.Tokens
 	Audit      *db.Audit
+	// ReviewComments and Checkpoints back the review surface of a worktree
+	// session (see review.go); Users resolves the git author a Commit is
+	// attributed to.
+	ReviewComments *db.ReviewComments
+	Checkpoints    *db.Checkpoints
+	Users          *db.Users
 }
 
 // Options configures the service: how many processes may run concurrently,
@@ -233,6 +239,17 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 	}
 	if err := s.repos.Sessions.Create(ctx, sess); err != nil {
 		return domain.Session{}, err
+	}
+
+	// A worktree-enabled workspace gets one git worktree per session, created before the
+	// process starts so the CLI's cwd is the worktree from its very first turn.
+	if ws.Worktrees {
+		withWorktree, err := s.createWorktree(ctx, sess, *ws)
+		if err != nil {
+			_ = s.repos.Sessions.UpdateState(ctx, sess.ID, domain.SessionFailed)
+			return domain.Session{}, err
+		}
+		sess = withWorktree
 	}
 
 	opts := startOptions{JSONSchema: in.JSONSchema, SystemPrompt: in.SystemPrompt}
@@ -502,7 +519,7 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 		SessionID: sess.ID,
 		Resume:    resume,
 		Title:     sess.Title,
-		Cwd:       ws.Path,
+		Cwd:       sessionCwd(sess, ws),
 		Home:      home,
 		Env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": token},
 		Profile: harness.Profile{
@@ -537,6 +554,15 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 	}
 	s.recordUserTurn(ctx, sess, firstMessage)
 	return p.Send(ctx, harness.UserMessage{Text: firstMessage})
+}
+
+// sessionCwd is the working directory a session's process runs in: its own git worktree when
+// it has one, the workspace checkout otherwise.
+func sessionCwd(sess domain.Session, ws domain.Workspace) string {
+	if sess.Worktree != "" {
+		return sess.Worktree
+	}
+	return ws.Path
 }
 
 // recordUserTurn persists the user's own message as a transcript event of

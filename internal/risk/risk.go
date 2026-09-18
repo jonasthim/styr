@@ -47,6 +47,9 @@ var readTools = map[string]bool{
 	"TodoWrite":       true,
 	"Task":            true,
 	"AskUserQuestion": true,
+	// ExitPlanMode only asks to leave plan mode with a finished plan; it writes nothing, and
+	// Styr routes it to the plan card rather than the ordinary tool-approval UI.
+	"ExitPlanMode": true,
 }
 
 // writeTools are always domain.RiskWrite regardless of input.

@@ -59,6 +59,7 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 			registerWorkspacesRoutes(g, d)
 			registerProfilesRoutes(g, d)
 			registerSessionsRoutes(g, d)
+			registerReviewRoutes(g, d)
 			registerApprovalsRoutes(g, d)
 			registerStatusRoutes(g, d)
 			registerTemplatesRoutes(g, d)

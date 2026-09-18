@@ -36,6 +36,8 @@ type sessionDTO struct {
 	Origin       string    `json:"origin"`
 	OriginRef    string    `json:"origin_ref"`
 	Worktree     string    `json:"worktree"`
+	Branch       string    `json:"branch"`
+	BaseRef      string    `json:"base_ref"`
 	CreatedAt    time.Time `json:"created_at"`
 	LastActiveAt time.Time `json:"last_active_at"`
 	NumTurns     int       `json:"num_turns"`
@@ -48,15 +50,20 @@ type sessionDTO struct {
 	// SlashCommands is what the CLI reported on its last init message, without the leading
 	// slash; the composer's slash menu is built from it.
 	SlashCommands []string `json:"slash_commands"`
+	// DiffAdd and DiffDel are the worktree's line counts as of the last turn, for the
+	// sessions list's diff badge.
+	DiffAdd int `json:"diff_add"`
+	DiffDel int `json:"diff_del"`
 }
 
 func sessionDTOFrom(s domain.Session) sessionDTO {
 	return sessionDTO{
 		ID: s.ID, OwnerID: s.OwnerID, Title: s.Title, WorkspaceID: s.WorkspaceID, ProfileID: s.ProfileID,
 		Harness: s.Harness, State: string(s.State), Origin: string(s.Origin), OriginRef: s.OriginRef,
-		Worktree: s.Worktree, CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, NumTurns: s.NumTurns,
+		Worktree: s.Worktree, Branch: s.Branch, BaseRef: s.BaseRef, CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, NumTurns: s.NumTurns,
 		CostUSD: s.CostUSD, TokensIn: s.TokensIn, TokensOut: s.TokensOut, NowLine: s.NowLine, Model: s.Model,
 		Effort: s.Effort, SlashCommands: commandList(s.SlashCommands),
+		DiffAdd: s.DiffAdd, DiffDel: s.DiffDel,
 	}
 }
 

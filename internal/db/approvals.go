@@ -18,16 +18,16 @@ type Approvals struct{ d *DB }
 func NewApprovals(d *DB) *Approvals { return &Approvals{d: d} }
 
 const approvalColumns = `id, session_id, request_id, tool, input, risk, state, created_at,
-	decided_by, decided_at, snoozed_until, updated_input, message`
+	decided_by, decided_at, snoozed_until, updated_input, message, plan`
 
 // Create inserts a new approval row. a.ID must already be set.
 func (a *Approvals) Create(ctx context.Context, ap domain.Approval) error {
 	_, err := a.d.ExecContext(ctx, `
 		INSERT INTO approvals (`+approvalColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ap.ID, ap.SessionID, ap.RequestID, ap.Tool, string(ap.Input), string(ap.Risk), string(ap.State),
 		nowString(ap.CreatedAt), ap.DecidedBy, optionalTime(ap.DecidedAt), optionalTime(ap.SnoozedUntil),
-		optionalJSON(ap.UpdatedInput), ap.Message)
+		optionalJSON(ap.UpdatedInput), ap.Message, ap.Plan)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create approval: %w", domain.ErrConflict)
@@ -62,7 +62,7 @@ func scanApproval(row interface{ Scan(dest ...any) error }) (*domain.Approval, e
 		updatedInput            sql.NullString
 	)
 	if err := row.Scan(&ap.ID, &ap.SessionID, &ap.RequestID, &ap.Tool, &input, &risk, &state, &createdAt,
-		&decidedBy, &decidedAt, &snoozedUntil, &updatedInput, &ap.Message); err != nil {
+		&decidedBy, &decidedAt, &snoozedUntil, &updatedInput, &ap.Message, &ap.Plan); err != nil {
 		return nil, err
 	}
 	ap.Input = json.RawMessage(input)
@@ -94,7 +94,7 @@ func (a *Approvals) Get(ctx context.Context, id string) (*domain.Approval, error
 // approvalColumnsQualified is approvalColumns qualified with the "a" alias,
 // for the ListPendingVisible query that joins sessions.
 const approvalColumnsQualified = `a.id, a.session_id, a.request_id, a.tool, a.input, a.risk, a.state, a.created_at,
-	a.decided_by, a.decided_at, a.snoozed_until, a.updated_input, a.message`
+	a.decided_by, a.decided_at, a.snoozed_until, a.updated_input, a.message, a.plan`
 
 // ListPendingVisible returns pending approvals whose session is visible to
 // userID: owned by them, owner-less, or every session when isAdmin.

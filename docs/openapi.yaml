@@ -407,6 +407,16 @@ paths:
                   type: string
                 worktrees:
                   type: boolean
+                base_branch:
+                  type: string
+                  description: >
+                    The branch session worktrees are created from. Empty (the
+                    default) means the checkout's current branch.
+                auto_checkpoint:
+                  type: boolean
+                  description: >
+                    Commit the session worktree after every turn. Omitted
+                    means on.
               required: [name, source]
       responses:
         "201":
@@ -472,6 +482,10 @@ paths:
                 default_profile_id:
                   type: string
                 worktrees:
+                  type: boolean
+                base_branch:
+                  type: string
+                auto_checkpoint:
                   type: boolean
       responses:
         "200":
@@ -893,6 +907,443 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Event"
+
+  /api/v1/sessions/{id}/diff:
+    get:
+      summary: The session worktree's diff against the commit it started from
+      description: >
+        Covers committed and uncommitted changes alike. Only for a session
+        that runs in a git worktree (its workspace has worktrees turned on);
+        any other session answers 422.
+      operationId: getSessionDiff
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The diff summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewDiff"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/diff/file:
+    get:
+      summary: One file's unified diff
+      operationId: getSessionFileDiff
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The file's path, relative to the worktree root.
+      responses:
+        "200":
+          description: The file's hunks
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileDiff"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: path is missing, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/comments:
+    get:
+      summary: List the review comments on a session's diff
+      operationId: listReviewComments
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Every comment, oldest first, sent ones included
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ReviewComment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    post:
+      summary: Add one inline comment to a session's diff
+      description: >
+        The comment is queued, not sent; POST /sessions/{id}/review sends
+        every unsent comment as one message.
+      operationId: createReviewComment
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path:
+                  type: string
+                line:
+                  type: integer
+                side:
+                  type: string
+                  enum: [old, new]
+                  description: Defaults to "new".
+                body:
+                  type: string
+              required: [path, line, body]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReviewComment"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: path or body is empty, side is not old/new, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/comments/{cid}:
+    delete:
+      summary: Delete one review comment
+      operationId: deleteReviewComment
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: cid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/review:
+    post:
+      summary: Send every unsent review comment to the session
+      description: >
+        The comments are composed into one user message
+        ("Review comments on your changes ...", one "- path:line (side):
+        body" bullet each), sent like an ordinary turn, and marked sent.
+      operationId: sendSessionReview
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted; the review was sent
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The session is waiting on an approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: There are no unsent comments, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/commit:
+    post:
+      summary: Fold the session's work into one commit
+      description: >
+        Any checkpoint commits since the base are squashed and the working
+        tree is committed on top, authored by the calling user.
+      operationId: commitSession
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                message:
+                  type: string
+              required: [message]
+      responses:
+        "200":
+          description: The new commit
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sha:
+                    type: string
+                required: [sha]
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: There is nothing to commit, or the session is still working
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: message is empty, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/pr:
+    post:
+      summary: Push the session's branch and open a pull request
+      description: >
+        Pushes with `git push -u origin <branch>` (never forced) and opens
+        the PR with the gh CLI. base defaults to the workspace's base
+        branch, and failing that the checkout's current branch.
+      operationId: createSessionPR
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:
+                  type: string
+                body:
+                  type: string
+                base:
+                  type: string
+              required: [title]
+      responses:
+        "200":
+          description: The pull request
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                required: [url]
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            code "gh_unavailable" (gh is not installed or not
+            authenticated) or "no_remote" (the checkout has no remote)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: title is empty, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/checkpoints:
+    get:
+      summary: List the session's checkpoints
+      operationId: listSessionCheckpoints
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Checkpoints, newest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Checkpoint"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/rewind:
+    post:
+      summary: Reset the session's worktree to a checkpoint
+      operationId: rewindSession
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                checkpoint_id:
+                  type: string
+              required: [checkpoint_id]
+      responses:
+        "202":
+          description: Accepted; the worktree was reset
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: >
+            The session is running or waiting on an approval, or the
+            checkpoint is no longer on this branch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: checkpoint_id is missing, or the session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/discard:
+    post:
+      summary: Discard the session's worktree and branch
+      description: >
+        Closes the session's process, removes the worktree directory and
+        its branch, clears the session's worktree fields and closes the
+        session. The work is gone.
+      operationId: discardSession
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Discarded
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The session is running or waiting on an approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}/patch:
+    get:
+      summary: Download the session's whole diff as a patch
+      operationId: getSessionPatch
+      tags: [review]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The patch
+          content:
+            text/x-diff:
+              schema:
+                type: string
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The session has no worktree
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 
   /api/v1/approvals:
     get:
@@ -1870,6 +2321,16 @@ components:
           type: string
         worktrees:
           type: boolean
+        base_branch:
+          type: string
+          description: >
+            The branch new session worktrees are created from. Empty means
+            "whatever the checkout's current branch is at that moment".
+        auto_checkpoint:
+          type: boolean
+          description: >
+            Whether Styr commits the session's worktree after every turn, so
+            the work can be rewound turn by turn. On by default.
         created_at:
           type: string
           format: date-time
@@ -1889,6 +2350,8 @@ components:
         - error
         - default_profile_id
         - worktrees
+        - base_branch
+        - auto_checkpoint
         - created_at
         - updated_at
 
@@ -1956,6 +2419,15 @@ components:
           type: string
         worktree:
           type: string
+          description: >
+            Absolute path of the git worktree the session runs in; empty for
+            a session that runs directly in the workspace checkout.
+        branch:
+          type: string
+          description: The worktree's branch (styr/<short id>-<slug>); empty without a worktree.
+        base_ref:
+          type: string
+          description: The commit the worktree started from; empty without a worktree.
         created_at:
           type: string
           format: date-time
@@ -1989,6 +2461,12 @@ components:
             The commands the CLI reported on its last init message, without
             the leading slash (custom commands, plugin skills and
             built-ins). Empty until a process has started.
+        diff_add:
+          type: integer
+          description: Lines added in the worktree since base_ref, as of the last turn.
+        diff_del:
+          type: integer
+          description: Lines removed in the worktree since base_ref, as of the last turn.
       required:
         - id
         - owner_id
@@ -2000,6 +2478,8 @@ components:
         - origin
         - origin_ref
         - worktree
+        - branch
+        - base_ref
         - created_at
         - last_active_at
         - num_turns
@@ -2010,6 +2490,150 @@ components:
         - model
         - effort
         - slash_commands
+        - diff_add
+        - diff_del
+
+    ReviewFileChange:
+      type: object
+      properties:
+        path:
+          type: string
+        old_path:
+          type: string
+          description: The previous path, for a rename.
+        status:
+          type: string
+          enum: [A, M, D, R]
+        add:
+          type: integer
+        del:
+          type: integer
+        binary:
+          type: boolean
+          description: True when git has no line-by-line diff for the file.
+      required: [path, old_path, status, add, del, binary]
+
+    ReviewDiff:
+      type: object
+      properties:
+        base_ref:
+          type: string
+        branch:
+          type: string
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReviewFileChange"
+        total_add:
+          type: integer
+        total_del:
+          type: integer
+        dirty:
+          type: boolean
+          description: Whether the worktree has uncommitted changes right now.
+      required: [base_ref, branch, files, total_add, total_del, dirty]
+
+    DiffLine:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [ctx, add, del]
+        old_no:
+          type: integer
+          description: 1-based line number on the old side; 0 for an added line.
+        new_no:
+          type: integer
+          description: 1-based line number on the new side; 0 for a removed line.
+        text:
+          type: string
+      required: [type, old_no, new_no, text]
+
+    DiffHunk:
+      type: object
+      properties:
+        old_start:
+          type: integer
+        old_lines:
+          type: integer
+        new_start:
+          type: integer
+        new_lines:
+          type: integer
+        lines:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiffLine"
+      required: [old_start, old_lines, new_start, new_lines, lines]
+
+    FileDiff:
+      type: object
+      properties:
+        path:
+          type: string
+        old_path:
+          type: string
+        status:
+          type: string
+          enum: [A, M, D, R]
+        binary:
+          type: boolean
+        truncated:
+          type: boolean
+          description: True when the diff exceeded 2 MiB and was cut off.
+        hunks:
+          type: array
+          items:
+            $ref: "#/components/schemas/DiffHunk"
+      required: [path, old_path, status, binary, truncated, hunks]
+
+    ReviewComment:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        path:
+          type: string
+        line:
+          type: integer
+        side:
+          type: string
+          enum: [old, new]
+        body:
+          type: string
+        author_id:
+          type: string
+        author_name:
+          type: string
+          description: The author's display name, falling back to their email.
+        created_at:
+          type: string
+          format: date-time
+        sent_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the comment was sent to the session; null while unsent.
+      required: [id, session_id, path, line, side, body, author_id, author_name, created_at, sent_at]
+
+    Checkpoint:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        commit_sha:
+          type: string
+        turn:
+          type: integer
+        summary:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+      required: [id, session_id, commit_sha, turn, summary, created_at]
 
     Event:
       type: object
@@ -2064,6 +2688,13 @@ components:
           type: object
         message:
           type: string
+        plan:
+          type: string
+          description: >
+            The plan markdown an ExitPlanMode request carries. Present only
+            for tool "ExitPlanMode", which the UI renders as a plan card
+            (approve = allow, request changes = deny with a message) rather
+            than the ordinary tool-approval card.
       required: [id, session_id, session_title, now_line, request_id, tool, input, risk, state, created_at, snoozed_until]
 
     StatusInfo:

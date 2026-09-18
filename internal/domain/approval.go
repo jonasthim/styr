@@ -40,4 +40,7 @@ type Approval struct {
 	SnoozedUntil *time.Time
 	UpdatedInput json.RawMessage
 	Message      string
+	// Plan is the plan markdown an ExitPlanMode request carries (see
+	// harness.PermissionRequest.Plan); empty for every other tool.
+	Plan string
 }

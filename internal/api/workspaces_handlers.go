@@ -37,6 +37,8 @@ type workspaceDTO struct {
 	Error            string    `json:"error"`
 	DefaultProfileID string    `json:"default_profile_id"`
 	Worktrees        bool      `json:"worktrees"`
+	BaseBranch       string    `json:"base_branch"`
+	AutoCheckpoint   bool      `json:"auto_checkpoint"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 }
@@ -46,7 +48,8 @@ func workspaceDTOFrom(ws domain.Workspace) workspaceDTO {
 		ID: ws.ID, OwnerID: ws.OwnerID, Name: ws.Name, Path: ws.Path,
 		Source: string(ws.Source), RepoURL: ws.RepoURL, Branch: ws.Branch, Managed: ws.Managed,
 		State: string(ws.State), Error: ws.Error, DefaultProfileID: ws.DefaultProfileID,
-		Worktrees: ws.Worktrees, CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
+		Worktrees: ws.Worktrees, BaseBranch: ws.BaseBranch, AutoCheckpoint: ws.AutoCheckpoint,
+		CreatedAt: ws.CreatedAt, UpdatedAt: ws.UpdatedAt,
 	}
 }
 
@@ -75,6 +78,10 @@ type workspaceCreateInput struct {
 	Path             string `json:"path"`
 	DefaultProfileID string `json:"default_profile_id"`
 	Worktrees        bool   `json:"worktrees"`
+	BaseBranch       string `json:"base_branch"`
+	// AutoCheckpoint is a pointer so an omitted field keeps the default
+	// (on) rather than turning checkpoints off.
+	AutoCheckpoint *bool `json:"auto_checkpoint"`
 }
 
 // handleWorkspacesCreate is POST /api/v1/workspaces. A "git" source
@@ -90,6 +97,7 @@ func handleWorkspacesCreate(d *Deps) http.HandlerFunc {
 		ws, err := d.Workspaces.Create(r.Context(), actorFrom(r), workspaces.CreateInput{
 			Name: in.Name, Source: in.Source, RepoURL: in.RepoURL, Branch: in.Branch,
 			Path: in.Path, DefaultProfileID: in.DefaultProfileID, Worktrees: in.Worktrees,
+			BaseBranch: in.BaseBranch, AutoCheckpoint: in.AutoCheckpoint,
 		})
 		if err != nil {
 			writeWorkspaceError(w, err)
@@ -115,6 +123,8 @@ func handleWorkspacesGet(d *Deps) http.HandlerFunc {
 type workspacePatchInput struct {
 	DefaultProfileID *string `json:"default_profile_id"`
 	Worktrees        *bool   `json:"worktrees"`
+	BaseBranch       *string `json:"base_branch"`
+	AutoCheckpoint   *bool   `json:"auto_checkpoint"`
 }
 
 // handleWorkspacesPatch is PATCH /api/v1/workspaces/{id}: the owner or an
@@ -129,6 +139,7 @@ func handleWorkspacesPatch(d *Deps) http.HandlerFunc {
 		}
 		ws, err := d.Workspaces.Update(r.Context(), actorFrom(r), id, workspaces.UpdateInput{
 			DefaultProfileID: in.DefaultProfileID, Worktrees: in.Worktrees,
+			BaseBranch: in.BaseBranch, AutoCheckpoint: in.AutoCheckpoint,
 		})
 		if err != nil {
 			WriteError(w, err)

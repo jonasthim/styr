@@ -18,8 +18,8 @@ type Sessions struct{ d *DB }
 func NewSessions(d *DB) *Sessions { return &Sessions{d: d} }
 
 const sessionColumns = `id, owner_user_id, title, workspace_id, profile_id, harness, state, origin, origin_ref,
-	worktree, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model, effort,
-	slash_commands`
+	worktree, branch, base_ref, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model, effort,
+	slash_commands, diff_add, diff_del`
 
 // sessionStateOrder is the CASE expression used by ListVisible to sort
 // sessions by lifecycle priority before recency.
@@ -35,12 +35,12 @@ const sessionStateOrder = `CASE state
 func (s *Sessions) Create(ctx context.Context, sess domain.Session) error {
 	_, err := s.d.ExecContext(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.OwnerID, sess.Title, sess.WorkspaceID, sess.ProfileID, sess.Harness,
-		string(sess.State), string(sess.Origin), sess.OriginRef, sess.Worktree,
+		string(sess.State), string(sess.Origin), sess.OriginRef, sess.Worktree, sess.Branch, sess.BaseRef,
 		nowString(sess.CreatedAt), nowString(sess.LastActiveAt), sess.NumTurns, sess.CostUSD,
 		sess.TokensIn, sess.TokensOut, sess.NowLine, sess.Model, sess.Effort,
-		marshalToolList(sess.SlashCommands))
+		marshalToolList(sess.SlashCommands), sess.DiffAdd, sess.DiffDel)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create session: %w", domain.ErrConflict)
@@ -59,9 +59,9 @@ func scanSession(row interface{ Scan(dest ...any) error }) (*domain.Session, err
 		slashCommands         string
 	)
 	if err := row.Scan(&sess.ID, &ownerID, &sess.Title, &sess.WorkspaceID, &sess.ProfileID, &sess.Harness,
-		&state, &origin, &sess.OriginRef, &sess.Worktree, &createdAt, &lastActive, &sess.NumTurns,
-		&sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model, &sess.Effort,
-		&slashCommands); err != nil {
+		&state, &origin, &sess.OriginRef, &sess.Worktree, &sess.Branch, &sess.BaseRef, &createdAt, &lastActive,
+		&sess.NumTurns, &sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model, &sess.Effort,
+		&slashCommands, &sess.DiffAdd, &sess.DiffDel); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(slashCommands), &sess.SlashCommands)
@@ -139,6 +139,21 @@ func (s *Sessions) UpdateModel(ctx context.Context, id string, model string) err
 // UpdateEffort sets the reasoning effort the session's process runs with.
 func (s *Sessions) UpdateEffort(ctx context.Context, id string, effort string) error {
 	return s.exec1(ctx, `UPDATE sessions SET effort = ? WHERE id = ?`, effort, id)
+}
+
+// SetWorktree records the git worktree a session runs in: its absolute
+// path, the branch it is checked out on and the commit it started from.
+// All three are cleared together (empty strings) when the worktree is
+// discarded.
+func (s *Sessions) SetWorktree(ctx context.Context, id, path, branch, baseRef string) error {
+	return s.exec1(ctx, `UPDATE sessions SET worktree = ?, branch = ?, base_ref = ? WHERE id = ?`,
+		path, branch, baseRef, id)
+}
+
+// UpdateDiffStats sets the worktree's added/removed line counts against
+// base_ref, as of the last turn.
+func (s *Sessions) UpdateDiffStats(ctx context.Context, id string, add, del int) error {
+	return s.exec1(ctx, `UPDATE sessions SET diff_add = ?, diff_del = ? WHERE id = ?`, add, del, id)
 }
 
 // UpdateSlashCommands stores the command list the CLI reported on its init message.

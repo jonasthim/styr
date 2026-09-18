@@ -41,16 +41,19 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 	}
 	t.Cleanup(func() { _ = database.Close() })
 
-	repos := Repos{
-		Sessions:   db.NewSessions(database),
-		Events:     db.NewEvents(database),
-		Approvals:  db.NewApprovals(database),
-		Workspaces: db.NewWorkspaces(database),
-		Profiles:   db.NewProfiles(database),
-		Tokens:     db.NewTokens(database),
-		Audit:      db.NewAudit(database),
-	}
 	users := db.NewUsers(database)
+	repos := Repos{
+		Sessions:       db.NewSessions(database),
+		Events:         db.NewEvents(database),
+		Approvals:      db.NewApprovals(database),
+		Workspaces:     db.NewWorkspaces(database),
+		Profiles:       db.NewProfiles(database),
+		Tokens:         db.NewTokens(database),
+		Audit:          db.NewAudit(database),
+		ReviewComments: db.NewReviewComments(database),
+		Checkpoints:    db.NewCheckpoints(database),
+		Users:          users,
+	}
 
 	box, err := crypto.NewBox(testSecret)
 	if err != nil {

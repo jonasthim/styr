@@ -134,23 +134,25 @@ type testEnv struct {
 
 	ts *httptest.Server
 
-	users         *db.Users
-	tokens        *db.Tokens
-	workspaces    *db.Workspaces
-	workspaceSvc  *workspaces.Service
-	profiles      *db.Profiles
-	sessions      *db.Sessions
-	events        *db.Events
-	approvals     *db.Approvals
-	logins        *db.LoginSessions
-	box           *crypto.Box
-	bus           *events.Bus
-	harness       *fake.Harness
-	verifier      *stubVerifier
-	tokenStore    *fakeTokenStore
-	svc           *sessions.Service
-	usersDir      string
-	notifications *db.NotificationChannels
+	users          *db.Users
+	tokens         *db.Tokens
+	workspaces     *db.Workspaces
+	workspaceSvc   *workspaces.Service
+	profiles       *db.Profiles
+	sessions       *db.Sessions
+	events         *db.Events
+	approvals      *db.Approvals
+	reviewComments *db.ReviewComments
+	checkpoints    *db.Checkpoints
+	logins         *db.LoginSessions
+	box            *crypto.Box
+	bus            *events.Bus
+	harness        *fake.Harness
+	verifier       *stubVerifier
+	tokenStore     *fakeTokenStore
+	svc            *sessions.Service
+	usersDir       string
+	notifications  *db.NotificationChannels
 
 	triggers *fakeTriggersService
 	runs     *fakeRunsEngine
@@ -215,14 +217,19 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	}
 	e.box = box
 
+	e.reviewComments = db.NewReviewComments(database)
+	e.checkpoints = db.NewCheckpoints(database)
 	e.svc = sessions.New(sessions.Repos{
-		Sessions:   e.sessions,
-		Events:     e.events,
-		Approvals:  e.approvals,
-		Workspaces: e.workspaces,
-		Profiles:   e.profiles,
-		Tokens:     e.tokens,
-		Audit:      db.NewAudit(database),
+		Sessions:       e.sessions,
+		Events:         e.events,
+		Approvals:      e.approvals,
+		Workspaces:     e.workspaces,
+		Profiles:       e.profiles,
+		Tokens:         e.tokens,
+		Audit:          db.NewAudit(database),
+		ReviewComments: e.reviewComments,
+		Checkpoints:    e.checkpoints,
+		Users:          e.users,
 	}, e.harness, e.bus, box, sessions.Options{
 		MaxOpen:     4,
 		IdleTimeout: time.Hour,

@@ -221,3 +221,34 @@ func TestApprovals_ListPendingVisibleAndPendingForSession(t *testing.T) {
 		t.Fatalf("PendingForSession = %+v", forSession)
 	}
 }
+
+// An ExitPlanMode approval round-trips its plan markdown, which the plan
+// card renders without a live process.
+func TestApprovals_PlanRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	s := eventsTestFixture(t, ctx, d)
+	approvals := NewApprovals(d)
+
+	a := newTestApproval(s.ID, time.Now())
+	a.Tool = "ExitPlanMode"
+	a.Plan = "# Plan\n\n- [ ] step one\n"
+	if err := approvals.Create(ctx, a); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := approvals.Get(ctx, a.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Plan != a.Plan {
+		t.Fatalf("plan = %q, want %q", got.Plan, a.Plan)
+	}
+
+	pending, err := approvals.PendingForSession(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("PendingForSession: %v", err)
+	}
+	if len(pending) != 1 || pending[0].Plan != a.Plan {
+		t.Fatalf("pending = %+v, want the plan carried through", pending)
+	}
+}
