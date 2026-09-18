@@ -91,9 +91,6 @@ export interface ApiTokenCreated {
   name: string
   prefix: string
   token: string
-  created_at: string
-  last_used_at: string | null
-  expires_at: string | null
 }
 
 // --- Triggers, templates, runs and notifications (T33) ---------------------
