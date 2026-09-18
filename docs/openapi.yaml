@@ -43,13 +43,7 @@ paths:
               schema:
                 type: array
                 items:
-                  type: object
-                  properties:
-                    name:
-                      type: string
-                    slug:
-                      type: string
-                  required: [name, slug]
+                  $ref: "#/components/schemas/Provider"
 
   /api/v1/auth/login/{slug}:
     get:
@@ -110,6 +104,10 @@ paths:
   /api/v1/me:
     get:
       summary: Get the current user
+      description: >
+        Unlike GET/PATCH /users/{id} (admin-only, no claude_token), this is
+        the signed-in user's own record and always carries their
+        claude_token summary.
       operationId: getMe
       tags: [me]
       responses:
@@ -118,7 +116,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/Me"
         "401":
           $ref: "#/components/responses/Unauthorized"
     patch:
@@ -140,7 +138,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/User"
+                $ref: "#/components/schemas/Me"
 
   /api/v1/me/claude-token:
     put:
@@ -439,7 +437,8 @@ paths:
       summary: Update a profile
       description: >
         Builtin profiles only allow max_turns and approval_timeout to
-        change. mode may never be "bypassPermissions" (422 on any profile).
+        change. mode may never be the CLI's skip-all-permissions mode (422
+        on any profile; see internal/harness's validModes).
       operationId: patchProfile
       tags: [profiles]
       parameters:
@@ -802,9 +801,35 @@ components:
         verified_at:
           type: [string, "null"]
           format: date-time
-      required: [present, label]
+      required: [present, label, verified_at]
 
     User:
+      description: >
+        GET/PATCH /users/{id} (admin-only): every field the handler always
+        serializes, but never a claude_token - see Me for the signed-in
+        user's own record, which adds one.
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        role:
+          type: string
+          enum: [admin, member]
+        prefs:
+          type: object
+      required: [id, email, display_name, avatar_url, role, prefs]
+
+    Me:
+      description: >
+        GET/PATCH /me: the signed-in user's own record - every User field
+        plus their claude_token summary (internal/api/me_handlers.go's
+        meDTO), always present (the token itself never is).
       type: object
       properties:
         id:
@@ -822,7 +847,16 @@ components:
           type: object
         claude_token:
           $ref: "#/components/schemas/ClaudeToken"
-      required: [id, email, display_name, avatar_url, role]
+      required: [id, email, display_name, avatar_url, role, prefs, claude_token]
+
+    Provider:
+      type: object
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+      required: [name, slug]
 
     Workspace:
       type: object
@@ -866,7 +900,7 @@ components:
           description: Seconds.
         builtin:
           type: boolean
-      required: [id, name, mode, max_turns, unattended, approval_timeout, builtin]
+      required: [id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout, builtin]
 
     Session:
       type: object
@@ -913,14 +947,23 @@ components:
           type: string
       required:
         - id
+        - owner_id
         - title
         - workspace_id
         - profile_id
         - harness
         - state
         - origin
+        - origin_ref
+        - worktree
         - created_at
         - last_active_at
+        - num_turns
+        - cost_usd
+        - tokens_in
+        - tokens_out
+        - now_line
+        - model
 
     Event:
       type: object
@@ -975,7 +1018,7 @@ components:
           type: object
         message:
           type: string
-      required: [id, session_id, session_title, now_line, request_id, tool, input, risk, state, created_at]
+      required: [id, session_id, session_title, now_line, request_id, tool, input, risk, state, created_at, snoozed_until]
 
     StatusInfo:
       type: object

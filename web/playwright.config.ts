@@ -44,13 +44,28 @@ if (wants('mock')) {
   })
 }
 if (wants('real')) {
+  // `make dev-backend` serves the SPA from the embedded dist/ directory
+  // (web/embed.go), not from Vite, so the bundle has to be rebuilt before
+  // the backend starts or the real projects would exercise a stale UI.
+  // reuseExistingServer is always false (not just outside CI) and each run
+  // gets its own STYR_DATA_DIR so seeded state (workspaces, sessions,
+  // approvals, the e2e Claude token) never leaks between runs.
+  //
+  // STYR_MAX_OPEN_SESSIONS raises dev.config.yaml's default of 4: the shell
+  // fake (testdata/fake-claude/fake-claude.sh) never exits on its own after
+  // a turn (it loops waiting for more stdin), so every seeded session's
+  // harness process - and the scheduler slot it holds - stays alive for the
+  // rest of the run unless a test explicitly closes it. The suite seeds
+  // more than 4 sessions across its files, and internal/sessions/service.go's
+  // slots.acquire blocks (not errors) once slots run out, which otherwise
+  // hangs POST /sessions until Playwright's own test timeout.
   webServer.push({
-    command: 'make dev-backend',
+    command: 'npm --prefix web run build && make dev-backend',
     cwd: '..',
-    env: { STYR_CONFIG: 'dev.config.yaml' },
+    env: { STYR_CONFIG: 'dev.config.yaml', STYR_DATA_DIR: `data/e2e-${process.pid}`, STYR_MAX_OPEN_SESSIONS: '100' },
     url: 'http://127.0.0.1:8080/healthz',
-    reuseExistingServer: !process.env.CI,
-    timeout: 30_000,
+    reuseExistingServer: false,
+    timeout: 120_000,
   })
 }
 
@@ -60,6 +75,13 @@ const phoneViewport = { width: 390, height: 844 }
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
+  // The real projects share one backend process and one SQLite database
+  // (there is no per-test reset, unlike the mock's per-page module state -
+  // see e2e/helpers/seed.ts), so every real-mode test has to run one at a
+  // time against that shared, mutable state: workers: 1 serializes the
+  // whole run whenever a real project is requested (including a plain
+  // `npx playwright test` with no --project filter, which starts both).
+  workers: wants('real') ? 1 : undefined,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',
