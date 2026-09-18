@@ -211,6 +211,12 @@ func (s *Service) upsertUser(ctx context.Context, issuer, subject string, claims
 		return domain.User{}, fmt.Errorf("look up user: %w", err)
 	}
 
+	// firstUserMu serializes count-then-create: without it, two concurrent
+	// first logins (distinct subjects, both seeing count == 0) could both
+	// decide to become admin.
+	s.firstUserMu.Lock()
+	defer s.firstUserMu.Unlock()
+
 	role := domain.RoleMember
 	count, err := s.users.Count(ctx)
 	if err != nil {

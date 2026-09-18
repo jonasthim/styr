@@ -5,13 +5,18 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/risk"
 )
+
+// approvalCreateFailedMessage is what the child sees denying its permission
+// request when styr could not persist the corresponding approval row: the
+// request cannot be left unanswered (the child would hang waiting for a
+// control_response), and it cannot be safely allowed either, so it is
+// denied.
+const approvalCreateFailedMessage = "styr could not record the approval"
 
 // pump drains p's event stream for the lifetime of the process, persisting
 // and publishing every event and applying the session-state side effects
@@ -50,7 +55,7 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 			}
 			_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning)
 		case harness.EventPermission:
-			s.handlePermission(ctx, sess, ev)
+			s.handlePermission(ctx, sess, ev, p)
 		case harness.EventResult:
 			if ev.Result != nil {
 				turns += ev.Result.NumTurns
@@ -70,12 +75,18 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 
 // handlePermission records a new approval for a permission request and
 // moves the session to waiting for a human decision.
-func (s *Service) handlePermission(ctx context.Context, sess domain.Session, ev harness.Event) {
+//
+// If Approvals.Create fails, the child is left blocked on a
+// control_request no one will ever answer unless we answer it here: log
+// the failure, deny the request (message approvalCreateFailedMessage) so
+// the child is unblocked, and fail the session — there is no pending
+// approval a human could later decide, so "waiting" would be a dead end.
+func (s *Service) handlePermission(ctx context.Context, sess domain.Session, ev harness.Event, p harness.Process) {
 	if ev.Permission == nil {
 		return
 	}
 	ap := domain.Approval{
-		ID:        uuid.NewString(),
+		ID:        s.newApprovalID(),
 		SessionID: sess.ID,
 		RequestID: ev.Permission.RequestID,
 		Tool:      ev.Permission.ToolName,
@@ -85,6 +96,11 @@ func (s *Service) handlePermission(ctx context.Context, sess domain.Session, ev 
 		CreatedAt: time.Now(),
 	}
 	if err := s.repos.Approvals.Create(ctx, ap); err != nil {
+		s.logger.Error("record approval failed", "session_id", sess.ID, "request_id", ev.Permission.RequestID, "error", err)
+		if dErr := p.Decide(ctx, harness.Decision{RequestID: ev.Permission.RequestID, Allow: false, Message: approvalCreateFailedMessage}); dErr != nil {
+			s.logger.Error("deny after approval create failure: notify process failed", "session_id", sess.ID, "request_id", ev.Permission.RequestID, "error", dErr)
+		}
+		_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionFailed)
 		return
 	}
 	_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionWaiting)

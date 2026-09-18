@@ -4,9 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/harness"
@@ -172,5 +175,83 @@ func TestRunMaintenance_ExpiresStaleApprovals(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected a system audit entry for the expired approval")
+	}
+}
+
+// Finding 1 regression test: expireApprovals must not discard the error
+// from notifying a live process's Decide call. On failure it must log the
+// error (via the service's *slog.Logger) and leave the approval and
+// session state alone — no DB decide, no audit entry, no state change — so
+// the pending approval is retried on the next maintenance tick instead of
+// being silently expired without ever telling the still-blocked child.
+func TestExpireApprovals_NotifyProcessFails_ApprovalStaysPendingAndIsLogged(t *testing.T) {
+	svc, repos, _ := newService(t)
+	logs := &recordingHandler{}
+	svc.logger = slog.New(logs)
+
+	profile := domain.Profile{ID: "test-unattended-notify-fail", Name: "test-unattended-notify-fail", Mode: "auto", Unattended: true, ApprovalTimeout: time.Millisecond}
+	if err := repos.Profiles.Create(context.Background(), profile); err != nil {
+		t.Fatalf("create profile: %v", err)
+	}
+
+	owner := testAdminID
+	sess := domain.Session{
+		ID: uuid.NewString(), OwnerID: &owner, Title: "t", WorkspaceID: testWorkspaceID,
+		ProfileID: profile.ID, Harness: "fake", State: domain.SessionWaiting, Origin: domain.OriginSchedule,
+		CreatedAt: time.Now(), LastActiveAt: time.Now(),
+	}
+	if err := repos.Sessions.Create(context.Background(), sess); err != nil {
+		t.Fatalf("create session: %v", err)
+	}
+
+	ap := domain.Approval{
+		ID: uuid.NewString(), SessionID: sess.ID, RequestID: "req-notify-fail", Tool: "Bash",
+		Input: json.RawMessage(`{"command":"rm -rf /tmp/x"}`), Risk: domain.RiskDestructive,
+		State: domain.ApprovalPending, CreatedAt: time.Now().Add(-time.Hour),
+	}
+	if err := repos.Approvals.Create(context.Background(), ap); err != nil {
+		t.Fatalf("create approval: %v", err)
+	}
+
+	proc := newControlledProcess()
+	proc.setDecideErr(errors.New("write to child: broken pipe"))
+	if err := svc.registerProcess(context.Background(), sess.ID, &owner, proc); err != nil {
+		t.Fatalf("register process: %v", err)
+	}
+
+	svc.expireApprovals(context.Background())
+
+	got, err := repos.Approvals.Get(context.Background(), ap.ID)
+	if err != nil {
+		t.Fatalf("get approval: %v", err)
+	}
+	if got.State != domain.ApprovalPending {
+		t.Fatalf("approval state = %s, want pending (untouched so the next tick retries)", got.State)
+	}
+
+	if n := len(proc.Decisions()); n != 0 {
+		t.Fatalf("expected no successfully recorded decision, got %d", n)
+	}
+
+	if logs.count() == 0 {
+		t.Fatal("expected the notify failure to be logged, got no log records")
+	}
+
+	audit, err := repos.Audit.List(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("list audit: %v", err)
+	}
+	for _, a := range audit {
+		if a.Target == ap.ID {
+			t.Fatalf("unexpected audit entry for an approval that was not actually expired: %+v", a)
+		}
+	}
+
+	final, err := repos.Sessions.Get(context.Background(), sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if final.State != domain.SessionWaiting {
+		t.Fatalf("session state = %s, want waiting (unchanged)", final.State)
 	}
 }

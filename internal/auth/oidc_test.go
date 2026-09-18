@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -366,5 +367,59 @@ func TestCompleteLogin_ExistingUser_TouchesLogin(t *testing.T) {
 	}
 	if reloaded.LastLoginAt.Before(first.CreatedAt) {
 		t.Errorf("LastLoginAt did not advance past creation: created=%v last_login=%v", first.CreatedAt, reloaded.LastLoginAt)
+	}
+}
+
+// Regression test for the count-then-create race in upsertUser: without
+// firstUserMu serializing "count users, then create with role admin iff
+// count == 0", 20 concurrent first logins with distinct subjects could each
+// observe count == 0 and each create an admin row. Exercises upsertUser
+// directly (rather than the full OIDC round trip) since the race is in that
+// one method, not in token exchange or verification.
+func TestUpsertUser_ConcurrentFirstLogins_ExactlyOneAdmin(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	errCh := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			claims := idClaims{Email: fmt.Sprintf("u%d@example.com", i), Name: fmt.Sprintf("User %d", i)}
+			_, err := svc.upsertUser(t.Context(), "concurrent-issuer", fmt.Sprintf("subject-%d", i), claims)
+			errCh <- err
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("upsertUser: %v", err)
+		}
+	}
+
+	all, err := users.List(t.Context())
+	if err != nil {
+		t.Fatalf("list users: %v", err)
+	}
+	if len(all) != n {
+		t.Fatalf("created %d users, want %d", len(all), n)
+	}
+	admins := 0
+	for _, u := range all {
+		if u.Role == domain.RoleAdmin {
+			admins++
+		}
+	}
+	if admins != 1 {
+		t.Fatalf("admin count = %d, want exactly 1", admins)
 	}
 }

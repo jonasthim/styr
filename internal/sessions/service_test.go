@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -429,6 +430,70 @@ func TestSend_OnClosedSession_ResumesProcess(t *testing.T) {
 	if h.Procs[1].Spec.SessionID != sess.ID {
 		t.Errorf("resumed process session id = %q, want %q", h.Procs[1].Spec.SessionID, sess.ID)
 	}
+}
+
+// Finding 3 regression test: two concurrent Sends to a closed session must
+// not race to start two separate processes for it. Without the starting
+// map guarding the procs[id]-absent-so-start-one TOCTOU, both goroutines
+// could see no tracked process and both call startProcess, leaking a
+// second harness process and sending Resume twice. Here exactly one
+// process is started; the other Send waits for it and sends through the
+// same process once it exists.
+func TestSend_ConcurrentOnClosedSession_StartsExactlyOneProcess(t *testing.T) {
+	svc, repos, h := newService(t, createResult(1))
+	actor := Actor{UserID: testAdminID, IsAdmin: true}
+	owner := testAdminID
+
+	sess, err := svc.Create(context.Background(), actor, CreateInput{
+		WorkspaceID: testWorkspaceID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &owner,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	if err := svc.Close(context.Background(), actor, sess.ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionClosed)
+
+	var wg sync.WaitGroup
+	errs := make([]error, 2)
+	start := make(chan struct{})
+	for i := range errs {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			<-start
+			errs[i] = svc.Send(context.Background(), actor, sess.ID, "again")
+		}(i)
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("Send[%d] = %v, want nil", i, err)
+		}
+	}
+
+	if len(h.Procs) != 2 {
+		t.Fatalf("expected 2 total processes started (1 from Create, 1 from the winning resume), got %d", len(h.Procs))
+	}
+
+	resumed := h.Procs[1]
+	if !resumed.Spec.Resume {
+		t.Error("resumed process did not set Resume: true")
+	}
+	if resumed.Spec.SessionID != sess.ID {
+		t.Errorf("resumed process session id = %q, want %q", resumed.Spec.SessionID, sess.ID)
+	}
+	if len(resumed.Sent) != 2 {
+		t.Fatalf("expected both concurrent Sends to reach the single resumed process, got %d messages: %+v", len(resumed.Sent), resumed.Sent)
+	}
+
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
 }
 
 // Rule 6 (conflict half): sending to a session waiting on an approval is

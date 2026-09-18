@@ -135,16 +135,26 @@ func (a *Approvals) queryList(ctx context.Context, query string, args ...any) ([
 	return out, rows.Err()
 }
 
-// Decide records a decision (allow/deny) on an approval.
+// Decide records a decision (allow/deny) on an approval that is still
+// pending. The UPDATE is guarded by "AND state = 'pending'" so a decision
+// can never silently overwrite an approval someone (or something, e.g. the
+// scheduler's expiry sweep) has already decided: when no row matches,
+// Decide distinguishes "no such approval" (domain.ErrNotFound) from
+// "approval exists but is no longer pending" (domain.ErrConflict), so
+// callers can tell a lost race from a bad id.
 func (a *Approvals) Decide(ctx context.Context, id string, state domain.ApprovalState, by string, updated json.RawMessage, msg string) error {
 	res, err := a.d.ExecContext(ctx, `
-		UPDATE approvals SET state = ?, decided_by = ?, decided_at = ?, updated_input = ?, message = ? WHERE id = ?`,
+		UPDATE approvals SET state = ?, decided_by = ?, decided_at = ?, updated_input = ?, message = ?
+		WHERE id = ? AND state = 'pending'`,
 		string(state), by, nowString(time.Now()), optionalJSON(updated), msg, id)
 	if err != nil {
 		return fmt.Errorf("decide approval: %w", err)
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("decide approval: %w", domain.ErrNotFound)
+		if _, getErr := a.Get(ctx, id); getErr != nil {
+			return getErr
+		}
+		return fmt.Errorf("decide approval: %w", domain.ErrConflict)
 	}
 	return nil
 }

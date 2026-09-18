@@ -48,6 +48,14 @@ type Service struct {
 
 	mu       sync.Mutex
 	runtimes map[string]*providerRuntime // provider slug -> lazily discovered
+
+	// firstUserMu serializes the get-then-create (and, in upsertUser,
+	// count-then-create) races around minting a new user row: two
+	// concurrent first logins must not both decide they are user #0 and
+	// both become admin, and two concurrent dev-mode requests must not
+	// both try to create the dev bypass user. It guards only that narrow
+	// section, never the OIDC discovery/runtime cache above.
+	firstUserMu sync.Mutex
 }
 
 // New constructs the auth service. providers is the configured OIDC login
@@ -186,16 +194,11 @@ func (s *Service) devPrincipal(ctx context.Context, w http.ResponseWriter, r *ht
 		if !errors.Is(err, domain.ErrNotFound) {
 			return nil, false
 		}
-		now := time.Now()
-		created := domain.User{
-			ID: uuid.NewString(), Issuer: devIssuer, Subject: s.devUser,
-			Email: s.devUser, DisplayName: "Dev User", Role: domain.RoleAdmin,
-			CreatedAt: now, LastLoginAt: now, Prefs: json.RawMessage(`{}`),
-		}
-		if err := s.users.Create(ctx, created); err != nil {
+		created, ok := s.getOrCreateDevUser(ctx)
+		if !ok {
 			return nil, false
 		}
-		usr = &created
+		usr = created
 	} else {
 		_ = s.users.TouchLogin(ctx, usr.ID)
 	}
@@ -204,6 +207,33 @@ func (s *Service) devPrincipal(ctx context.Context, w http.ResponseWriter, r *ht
 		return nil, false
 	}
 	return &Principal{User: *usr, LoginSessionID: id}, true
+}
+
+// getOrCreateDevUser loads or creates the dev-mode bypass user under
+// firstUserMu, so two concurrent requests racing to bootstrap it in dev mode
+// (no cookie yet on either) cannot both observe ErrNotFound and both insert
+// a row, which would otherwise fail with a unique-constraint error for one
+// of them.
+func (s *Service) getOrCreateDevUser(ctx context.Context) (*domain.User, bool) {
+	s.firstUserMu.Lock()
+	defer s.firstUserMu.Unlock()
+
+	if existing, err := s.users.GetBySubject(ctx, devIssuer, s.devUser); err == nil {
+		return existing, true
+	} else if !errors.Is(err, domain.ErrNotFound) {
+		return nil, false
+	}
+
+	now := time.Now()
+	created := domain.User{
+		ID: uuid.NewString(), Issuer: devIssuer, Subject: s.devUser,
+		Email: s.devUser, DisplayName: "Dev User", Role: domain.RoleAdmin,
+		CreatedAt: now, LastLoginAt: now, Prefs: json.RawMessage(`{}`),
+	}
+	if err := s.users.Create(ctx, created); err != nil {
+		return nil, false
+	}
+	return &created, true
 }
 
 // Authenticate resolves the styr_session cookie (or, in dev mode with no
