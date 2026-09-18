@@ -84,7 +84,7 @@ func runServe(stdout io.Writer) int {
 
 	maintCtx, maintCancel := context.WithCancel(context.Background())
 	defer maintCancel()
-	go runMaintenanceLoop(maintCtx, sessionsSvc)
+	go runMaintenanceLoop(maintCtx, sessionsSvc, func(ctx context.Context) { seedTemplates(ctx, deps, bg, log) })
 	// The run engine follows unattended sessions on the event bus and
 	// closes out runs that overrun their timeout; it lives as long as the
 	// server does.
@@ -153,12 +153,14 @@ func seedTemplates(ctx context.Context, deps *api.Deps, bg *background, log *slo
 		}
 		return
 	}
-	log.Info("seed templates: no shared workspace to bind them to, skipping")
+	log.Debug("seed templates: no shared workspace to bind them to, skipping")
 }
 
-// runMaintenanceLoop calls svc.RunMaintenance once at each tick until ctx is
-// cancelled.
-func runMaintenanceLoop(ctx context.Context, svc *sessions.Service) {
+// runMaintenanceLoop calls svc.RunMaintenance and every extra task once at
+// each tick until ctx is cancelled. Template seeding rides along because it
+// is idempotent and a fresh install registers its first shared workspace
+// long after boot; the seed then lands within a minute.
+func runMaintenanceLoop(ctx context.Context, svc *sessions.Service, extra ...func(context.Context)) {
 	ticker := time.NewTicker(maintenanceInterval)
 	defer ticker.Stop()
 	for {
@@ -167,6 +169,9 @@ func runMaintenanceLoop(ctx context.Context, svc *sessions.Service) {
 			return
 		case <-ticker.C:
 			svc.RunMaintenance(ctx)
+			for _, fn := range extra {
+				fn(ctx)
+			}
 		}
 	}
 }
