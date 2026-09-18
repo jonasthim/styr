@@ -19,6 +19,7 @@ missing config file is not an error: defaults plus environment variables are eno
 | `max_open_sessions` | `STYR_MAX_OPEN_SESSIONS` | `4` | Maximum number of concurrently open Claude sessions (a slot semaphore; further sessions queue). |
 | `idle_timeout` | `STYR_IDLE_TIMEOUT` | `15m` | How long an open session may sit idle before it is closed automatically. |
 | `approval_timeout` | `STYR_APPROVAL_TIMEOUT` | `30m` | How long an unattended profile waits for approval before the request expires (defaults to deny). |
+| *(none — fixed constant)* | *(none)* | `30m` | How long a trigger-started run may stay `running` before the run engine (`internal/runs`) interrupts and closes its session and records it as `timeout`. Set by `runTimeout` in `cmd/styr/wire.go` (matches `runs.DefaultTimeout`); there is no `config.yaml` key or env override for it yet. |
 | `oidc` | *(list, see below)* | *(none)* | One or more OpenID Connect providers shown on the login page. Required in `prod` (at least one). |
 | `dev_user` | `STYR_DEV_USER` | *(none)* | Email of the synthetic logged-in user used when `env` is `dev`. Ignored in `prod`. |
 
@@ -47,15 +48,49 @@ Styr uses two distinct kinds of Claude token:
   label. Sessions a user starts bill that user's own Claude plan, and each user's Claude CLI
   state lives under its own `HOME` (see below) so tokens and settings never cross between users.
 - **Service token.** An admin sets a separate token under Settings for unattended runs
-  (`owner_user_id` is null) — webhooks, schedules and pipelines in later releases. It is stored
-  and verified the same way as a per-user token, but is not tied to any one member.
+  (`owner_user_id` is null) — v0.2's trigger-started runs today, webhooks generically, schedules
+  and pipelines in later releases. It is stored and verified the same way as a per-user token,
+  but is not tied to any one member. Every run engine session (`internal/runs.Engine.Start`) uses
+  `Owner: nil`, so it always authenticates with this token and never a triggering user's own
+  credential — there isn't one to use; the caller is a webhook, not a logged-in person.
+- **Personal API tokens.** From v0.2, a user can mint their own token under Profile → API tokens
+  (`POST /me/api-tokens`, prefix `styr_pat_`, same generate/hash/shown-once scheme as a trigger
+  webhook secret) for scripting against the API without a browser session. Sent as
+  `Authorization: Bearer styr_pat_...`, it authenticates exactly like the `styr_session` cookie
+  (same user, same visibility rules) with one difference: a token-authenticated request is exempt
+  from the `X-Requested-With` CSRF header check that every cookie-authenticated write requires,
+  since a bearer token can't be replayed by an ambient browser session the way a cookie can
+  (`internal/auth/tokens.go`, `internal/api/middleware.go`'s `csrfGuard`). A token can carry an
+  expiry (`expires_in_days`, up to ~10 years; omitted means it never expires) and is revoked with
+  `DELETE /me/api-tokens/{id}`; only its hash is stored, so a lost token cannot be recovered, only
+  replaced.
 
 ## Profiles
 
 A profile bundles the settings a session starts with: workspace, permission mode and
-allow/deny tool lists, plus (from v0.2) worktree behaviour. Profiles are configured in the UI
-under Settings (admin) and picked per-session from the Sessions and Inbox screens; there is no
-`config.yaml` key for them in v0.1.
+allow/deny tool lists, plus (from v0.2) worktree behaviour, a default **model** and reasoning
+**effort**. Profiles are configured in the UI under Settings (admin) and picked per-session from
+the Sessions and Inbox screens; there is no `config.yaml` key for them.
+
+`model` is an alias (`fable`, `opus`, `sonnet`, `haiku`) or a full model name, passed to the CLI
+as `--model`; empty means the CLI's own default. `effort` is one of `low`, `medium`, `high`,
+`xhigh`, `max` (`--effort`); empty likewise defers to the CLI. Migration `00004_model_effort.sql`
+adds both columns and sets the built-in unattended profiles, `investigate` and `remediate`, to
+`sonnet`/`medium` by default, so an alert investigation doesn't silently run on whatever the CLI
+happens to default to; the built-in `interactive` profile keeps both empty. A session can
+override its profile's defaults at creation (`model`/`effort` on `POST /sessions`) or afterwards
+via `POST /sessions/{id}/model`, which closes the running process and resumes the same session id
+under the new flags — the CLI keeps the transcript, so nothing is lost.
+
+## Notification channel tokens
+
+A notification channel (Settings → Notifications; `ntfy` or a generic `webhook`, see
+`docs/TRIGGERS.md`) may carry an optional bearer token — an ntfy access token, or a shared
+secret a webhook receiver expects. Like a Claude token, it is sealed at rest with the same
+`secret_key`-derived `crypto.Box` (`token_ciphertext`/`token_nonce` on `notification_channels`,
+opened only in-process by `internal/runs.Engine.notify` right before it sends), and the API never
+returns it again once set: `PATCH /notifications/{id}` treats an omitted `token` field as "leave
+unchanged" and an explicit empty string as "clear it".
 
 ## Data directory layout
 

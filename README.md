@@ -21,8 +21,9 @@ matters from your phone, and keep every decision on your own box.
 
 ## Quick start
 
-Styr is early: v0.1.0 is the first release, and it covers login, sessions and approvals — see
-[Features](#features) below for what's in and what's still to come.
+Styr is early: v0.2.0 is the latest release, and it covers login, sessions, approvals, and now
+triggers, runs and unattended investigations — see [Features](#features) below for what's in and
+what's still to come.
 
 ### Install script (bare host, systemd)
 
@@ -52,6 +53,8 @@ setup (Authentik, Authelia, Pocket ID, Keycloak).
 
 ## Features
 
+![Styr runs view](docs/screenshots/runs.png)
+
 v0.1 "Cockpit":
 
 - OIDC login (PKCE) with per-user profiles; first user becomes admin
@@ -62,13 +65,27 @@ v0.1 "Cockpit":
 - Command palette (`Cmd+K`) and full keyboard shortcuts
 - Install script and Docker image, zero telemetry
 
+v0.2 "Triggers":
+
+- Triggers and inbound webhooks (generic, Grafana, GitHub), with dedupe, cooldown and a storm cap
+- Grafana alert investigation, seeded and ready to point a contact point at
+- Runs and reports: every unattended investigation, its structured report and its cost, on a
+  Runs page anyone can see
+- ntfy and generic-webhook notifications when a run finishes, needs a human or fails
+- Per-user managed workspaces, cloned or created on demand instead of only admin-registered paths
+- Personal API tokens for scripting against the API without a browser session
+- Per-session model and reasoning effort, switchable mid-session
+- Slash-command menu in the composer, fed by the CLI's own commands and skills
+
+See [docs/TRIGGERS.md](docs/TRIGGERS.md) for the full trigger, run and notification setup guide.
+
 ### Roadmap
 
 | Release | Contents |
 |---|---|
 | v0.1 Cockpit | OIDC login and profiles, sessions, session view with blocks and activity timeline, inbox with approvals, workspaces, profiles, palette and shortcuts, install script, Docker image, docs |
-| v0.2 Review | Worktree per session, diff view, inline comments as prompts, commit and PR, plan approval checklist |
-| v0.3 Triggers | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens |
+| v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
+| v0.3 Review | Worktree per session, diff view, inline comments as prompts, commit and PR, plan approval checklist |
 | v0.4 Schedules and loops | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
 | v1.0 | Second harness (Codex CLI), stable API |
