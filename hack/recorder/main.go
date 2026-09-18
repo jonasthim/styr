@@ -22,6 +22,8 @@ func main() {
 	prompts := flag.String("prompts", "", "prompts separated by ||")
 	interruptAfter := flag.Duration("interrupt-after", 0, "send interrupt after this delay (0 = never)")
 	mode := flag.String("mode", "default", "permission mode")
+	jsonSchema := flag.String("json-schema", "", "JSON schema string passed as --json-schema (empty = omit)")
+	systemPrompt := flag.String("system-prompt", "", "system prompt string passed as --append-system-prompt (empty = omit)")
 	flag.Parse()
 	if *out == "" || *prompts == "" {
 		fmt.Fprintln(os.Stderr, "usage: recorder -out FILE -prompts 'a||b' [-cwd DIR]")
@@ -34,12 +36,19 @@ func main() {
 	defer w.Flush()
 
 	sid := uuid.NewString()
-	cmd := exec.Command("claude", "-p", "--verbose",
+	args := []string{"-p", "--verbose",
 		"--input-format", "stream-json", "--output-format", "stream-json",
 		"--include-partial-messages", "--replay-user-messages",
 		"--session-id", sid, "--name", "styr-fixture",
 		"--permission-mode", *mode, "--permission-prompt-tool", "stdio",
-		"--max-turns", "6")
+		"--max-turns", "6"}
+	if *jsonSchema != "" {
+		args = append(args, "--json-schema", *jsonSchema)
+	}
+	if *systemPrompt != "" {
+		args = append(args, "--append-system-prompt", *systemPrompt)
+	}
+	cmd := exec.Command("claude", args...)
 	cmd.Dir = *cwd
 	cmd.Stderr = os.Stderr
 	stdin, err := cmd.StdinPipe()

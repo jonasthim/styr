@@ -34,7 +34,8 @@ type envelope struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`
 	} `json:"usage"`
-	ParentToolUseID string `json:"parent_tool_use_id"`
+	StructuredOutput json.RawMessage `json:"structured_output"`
+	ParentToolUseID  string          `json:"parent_tool_use_id"`
 }
 
 // apiMessage is the "message" object shared by assistant and user envelopes. Content is left
@@ -150,6 +151,7 @@ func DecodeLine(line []byte, now time.Time) []harness.Event {
 		r := &harness.Result{
 			Subtype: env.Subtype, IsError: env.IsError, NumTurns: env.NumTurns,
 			CostUSD: env.TotalCostUSD, DurationMS: env.DurationMS, Text: env.Result,
+			StructuredOutput: env.StructuredOutput,
 		}
 		if env.Usage != nil {
 			r.InputTokens, r.OutputTokens = env.Usage.InputTokens, env.Usage.OutputTokens

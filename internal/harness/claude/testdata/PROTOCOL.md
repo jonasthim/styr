@@ -205,6 +205,61 @@ emitted a `user` message whose content block has `type: text` (the interruption 
 `result` with `subtype: error_during_execution`, `is_error: true`, `total_cost_usd: 0`, an
 `errors` array and no `result` text. The process stayed alive and exited when stdin closed.
 
+## Fixture 06: `--json-schema` and `--append-system-prompt` (structured output)
+
+Recorded 2026-09-18 (card T30) against the same real, logged-in workstation CLI 2.1.276 (Max
+subscription, no `ANTHROPIC_API_KEY`), extending `hack/recorder/main.go` with `-json-schema` and
+`-system-prompt` flags that add `--json-schema <s>` and `--append-system-prompt <s>` to the
+invocation:
+
+```
+claude -p --verbose --input-format stream-json --output-format stream-json \
+  --include-partial-messages --replay-user-messages --session-id SID --name styr-fixture \
+  --permission-mode default --permission-prompt-tool stdio --max-turns 6 \
+  --json-schema '{"type":"object","required":["severity","diagnosis","confidence"], ...}' \
+  --append-system-prompt 'You are a terse SRE. Never run commands.'
+```
+
+with prompt `"The disk on host x is 91 percent full. Give your diagnosis."` run from
+`/tmp/styr-fixture-ws`.
+
+**Where the structured result appears:** the final `result` envelope carries a top-level
+`structured_output` field that is a JSON **object** (not a string), already conforming to the
+schema:
+
+```json
+"structured_output":{"severity":"warning","diagnosis":"Disk on host x at 91% is above the alert threshold ...","confidence":0.35}
+```
+
+The same `result` envelope's ordinary `result` field (string, used for `harness.Result.Text`)
+is *also* present but holds the JSON-encoded structured object as a string rather than free
+text — i.e. with `--json-schema` set, `result` and `structured_output` carry the same content in
+two encodings; the CLI does not additionally return a prose answer there. (Compare fixture 01,
+where `result` is prose like `"pong"`.)
+
+**How the CLI produces it:** rather than a hidden mode, the CLI gives the model a synthetic tool
+named `StructuredOutput` (visible as an ordinary `tool_use` content block with
+`name:"StructuredOutput"` and `input` equal to the schema-shaped object) as part of its final
+assistant turn; a synthetic `tool_result` user message `"Structured output provided
+successfully"` follows, then the `result` envelope with `structured_output` populated from that
+tool call's `input`. The model also emitted an ordinary `text` block first (a prose diagnosis)
+before calling `StructuredOutput` — Styr's codec does not need this, since it reads
+`structured_output` off the `result` envelope directly, but it means a schema-constrained
+session can still emit `EventText` before its `EventResult`. `num_turns` was `2` for this single
+prompt (the text turn plus the tool-call turn), unlike the `1` seen on non-schema fixtures.
+
+**`--append-system-prompt`:** not observable anywhere in the wire protocol (no field on `init`,
+`assistant`, or `result` reflects it) — the flag was simply accepted; the CLI exited 0 and
+produced a normal transcript. The terse, command-avoidant style of the diagnosis text (no tool
+calls other than the synthetic `StructuredOutput` one, despite the prompt inviting
+investigation) is consistent with the appended system prompt having taken effect, but this is
+not something the codec can verify mechanically.
+
+The fixture file as committed ends on the `result` line (its trailing async `SessionStart` hook
+`hook_response` line — the same recorder artifact noted above for fixture 01, caused by the
+recorder not isolating `HOME`/`XDG` for the child — was trimmed to match fixtures 01-05, all of
+which also end on `result`).
+
 ## Other observations
 
 - `assistant` messages can carry a `thinking` block before `text` or `tool_use`; the codec

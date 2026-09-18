@@ -100,3 +100,21 @@ specificity fights determine which one wins, unpredictably. Decision: the base r
 `@layer base` (`web/src/styles/base.css`) so Tailwind's utility classes — unlayered — always win
 regardless of source order. Consequences: any future hand-written CSS that should win over
 utilities must go in a layer declared after `utilities`, or stay unlayered deliberately.
+
+## ADR-009: Structured reports via --json-schema
+Date: 2026-09-18. Status: accepted.
+
+Context: v0.2 unattended runs (Grafana alert investigations and similar triggers) need a
+machine-parseable report — severity, diagnosis, confidence — rather than free-form prose, so the
+Runs page can render a consistent summary without an LLM-based extraction step. Decision: pass
+the template's report schema to the CLI as `--json-schema` and its extra instructions as
+`--append-system-prompt` (`harness.StartSpec.JSONSchema`/`SystemPrompt` → `claude.BuildArgs`);
+the CLI constrains the model's final turn to a synthetic `StructuredOutput` tool call and
+surfaces the result as a `structured_output` object on the `result` envelope, which
+`harness.Result.StructuredOutput` carries verbatim as `json.RawMessage` (see fixture
+`06_json_schema.jsonl` and `testdata/PROTOCOL.md`). Consequences: Styr never parses or validates
+the schema itself — it trusts the CLI's own enforcement — so a malformed or missing
+`structured_output` (e.g. schema unset, or the model failing to call the tool) must be handled
+by callers (the run engine, per the v0.2 plan) as a report-less run rather than assumed present;
+`--append-system-prompt` has no observable effect in the wire protocol, so it is trusted
+uncritically and never asserted against transcript content.
