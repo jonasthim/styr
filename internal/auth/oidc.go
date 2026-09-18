@@ -188,15 +188,20 @@ func (s *Service) CompleteLogin(w http.ResponseWriter, r *http.Request) (domain.
 // upsertUser maps a verified (issuer, subject) to a local user: the first
 // user ever created becomes admin, every user after that is a member.
 //
-// For an existing user this only calls db.Users.TouchLogin. The task card
-// also asks for email/display_name/avatar_url to be refreshed on every
-// login, but db.Users (already merged, out of scope for this task to
-// change) exposes no update method for those fields — only UpdateRole and
-// UpdatePrefs — so there is currently no way to persist that refresh; see
-// the implementation report for details.
+// For an existing user, this refreshes email/display_name/avatar_url via
+// db.Users.UpdateProfile whenever the identity provider's claims disagree
+// with the stored row, then always calls db.Users.TouchLogin.
 func (s *Service) upsertUser(ctx context.Context, issuer, subject string, claims idClaims) (domain.User, error) {
 	existing, err := s.users.GetBySubject(ctx, issuer, subject)
 	if err == nil {
+		if existing.Email != claims.Email || existing.DisplayName != claims.Name || existing.AvatarURL != claims.Picture {
+			if err := s.users.UpdateProfile(ctx, existing.ID, claims.Email, claims.Name, claims.Picture); err != nil {
+				return domain.User{}, fmt.Errorf("update profile: %w", err)
+			}
+			existing.Email = claims.Email
+			existing.DisplayName = claims.Name
+			existing.AvatarURL = claims.Picture
+		}
 		if err := s.users.TouchLogin(ctx, existing.ID); err != nil {
 			return domain.User{}, fmt.Errorf("touch login: %w", err)
 		}

@@ -105,6 +105,38 @@ func TestUsers_ListAndCount(t *testing.T) {
 	}
 }
 
+func TestUsers_UpdateProfile(t *testing.T) {
+	ctx := context.Background()
+	users := NewUsers(testOpenDB(t))
+
+	u := newTestUser("https://issuer", "sub-profile")
+	if err := users.Create(ctx, u); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	if err := users.UpdateProfile(ctx, u.ID, "new@example.com", "New Name", "https://example.com/avatar.png"); err != nil {
+		t.Fatalf("UpdateProfile: %v", err)
+	}
+
+	got, err := users.GetByID(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Email != "new@example.com" || got.DisplayName != "New Name" || got.AvatarURL != "https://example.com/avatar.png" {
+		t.Fatalf("GetByID after UpdateProfile = %+v, want refreshed profile fields", got)
+	}
+}
+
+func TestUsers_UpdateProfileNotFound(t *testing.T) {
+	ctx := context.Background()
+	users := NewUsers(testOpenDB(t))
+
+	err := users.UpdateProfile(ctx, "missing", "a@example.com", "A", "")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("UpdateProfile: err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestUsers_UpdateRoleTouchLoginUpdatePrefs(t *testing.T) {
 	ctx := context.Background()
 	users := NewUsers(testOpenDB(t))
