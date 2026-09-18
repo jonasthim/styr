@@ -75,10 +75,23 @@ test('/settings lists three builtin profiles and a five-option mode select', asy
   await expect(page.getByTestId('profile-row-remediate')).toBeVisible()
   await expect(page.locator('[data-testid^="profile-row-"]').filter({ hasText: 'builtin' })).toHaveCount(3)
 
-  const modeSelect = page.getByTestId('profile-row-interactive').getByRole('combobox')
-  const values = await modeSelect.locator('option').evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value))
-  expect(values).toHaveLength(5)
-  expect(values.sort()).toEqual(['acceptEdits', 'auto', 'default', 'dontAsk', 'plan'].sort())
+  // A builtin row's mode is locked, so the five allowed modes are read off
+  // the one editable profile's select. The mode select is a Radix Select
+  // (role=combobox opening a role=listbox of role=option items), not a
+  // native <select>, so the options only exist in the DOM while it is open.
+  const modeSelect = page.getByTestId('profile-row-custom').getByRole('combobox')
+  await expect(modeSelect).toHaveText('Default')
+  await modeSelect.click()
+
+  const options = page.getByRole('option')
+  await expect(options).toHaveCount(5)
+  expect((await options.allInnerTexts()).sort()).toEqual(
+    ['Accept edits', 'Auto', 'Default', "Don't ask", 'Plan'].sort(),
+  )
+
+  // A builtin's mode select is present and shows its value, but cannot be changed.
+  await page.keyboard.press('Escape')
+  await expect(page.getByTestId('profile-row-interactive').getByRole('combobox')).toBeDisabled()
 })
 
 test('/workspaces lists two workspaces', async ({ page }) => {

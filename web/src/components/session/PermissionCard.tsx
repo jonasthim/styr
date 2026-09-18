@@ -8,6 +8,7 @@ import { ShieldAlert } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api } from '../../api/client'
 import type { Approval } from '../../api/types'
+import { Button, Kbd } from '../ui'
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -74,29 +75,31 @@ function PermissionCardView({
   return (
     <div
       data-testid="permission-card"
-      className="mx-4! mb-2! flex items-center gap-3 rounded-[var(--radius-2)] border border-state-attention/40 bg-surface-2 px-3! py-2!"
+      className="mx-4! mb-2! flex flex-wrap items-center gap-x-3 gap-y-2 rounded-[var(--radius-2)] border border-state-attention/40 bg-surface-2 px-3! py-2! shadow-[var(--shadow-card)]"
     >
-      <ShieldAlert size={16} className="shrink-0 text-state-attention" />
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-control)] bg-state-attention/12 text-state-attention">
+        <ShieldAlert size={15} aria-hidden />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="text-[12px] font-medium text-fg-primary">{approval.tool} wants to run</div>
         <div className="truncate font-mono text-[12px] text-fg-secondary">{previewInput(approval.input)}</div>
       </div>
-      <button
-        type="button"
-        disabled={pending !== null}
-        onClick={() => onDecide('deny')}
-        className="rounded-[var(--radius-1)] border border-hairline px-3! py-1.5! text-[12px] font-medium text-fg-secondary transition-colors duration-150 hover:bg-surface-3 hover:text-fg-primary disabled:opacity-50"
-      >
-        Deny <span className="text-fg-muted">(d)</span>
-      </button>
-      <button
-        type="button"
-        disabled={pending !== null}
-        onClick={() => onDecide('allow')}
-        className="rounded-[var(--radius-1)] bg-accent px-3! py-1.5! text-[12px] font-medium text-[#0b0d10] transition-opacity duration-150 hover:opacity-90 disabled:opacity-50"
-      >
-        Allow <span className="opacity-70">(a)</span>
-      </button>
+      <div className="flex shrink-0 items-center gap-2">
+        <Button size="sm" disabled={pending !== null} loading={pending === 'deny'} onClick={() => onDecide('deny')}>
+          Deny
+          <Kbd className="ml-0.5">D</Kbd>
+        </Button>
+        <Button
+          size="sm"
+          variant="primary"
+          disabled={pending !== null}
+          loading={pending === 'allow'}
+          onClick={() => onDecide('allow')}
+        >
+          Allow
+          <Kbd className="ml-0.5 border-transparent bg-black/20 text-accent-fg/80">A</Kbd>
+        </Button>
+      </div>
     </div>
   )
 }

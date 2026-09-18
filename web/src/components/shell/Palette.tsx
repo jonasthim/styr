@@ -52,27 +52,27 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
       onOpenChange={onOpenChange}
       label="Command palette"
       shouldFilter
-      overlayClassName="fixed inset-0 z-50 bg-black/60"
-      contentClassName="fixed left-1/2 top-[18vh] z-50 w-full max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[var(--radius-2)] border border-hairline bg-surface-1 shadow-2xl"
+      overlayClassName="styr-overlay fixed inset-0 z-50 bg-[var(--overlay)] backdrop-blur-[3px]"
+      contentClassName="styr-panel fixed left-1/2 top-[14vh] z-50 w-[calc(100vw-2rem)] max-w-[560px] -translate-x-1/2 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-2 shadow-[var(--shadow-dialog)]"
     >
       <Command.Input
         autoFocus
-        placeholder="Go to a page, session or action..."
-        className="w-full border-b border-hairline bg-transparent px-4 py-3 text-[13px] text-fg-primary outline-none placeholder:text-fg-muted"
+        placeholder="Go to a page, session or action…"
+        className="w-full border-b border-hairline bg-transparent px-4 py-3.5 text-[14px] text-fg-primary outline-none placeholder:text-fg-muted"
       />
-      <Command.List className="max-h-[360px] overflow-y-auto p-2">
-        <Command.Empty className="px-3 py-6 text-center text-[13px] text-fg-muted">No results</Command.Empty>
+      <Command.List className="max-h-[min(400px,60vh)] overflow-y-auto p-2">
+        <Command.Empty className="px-3 py-8 text-center text-[13px] text-fg-secondary">No results</Command.Empty>
 
         <Command.Group
           heading="Go to"
-          className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-muted"
+          className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-secondary [&_[cmdk-group-heading]]:tracking-[-0.005em]"
         >
           {GO_TO_ITEMS.map((item) => (
             <Command.Item
               key={item.to}
               value={item.label}
               onSelect={() => goTo(item.to)}
-              className="flex h-8 cursor-pointer items-center rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-surface-2"
+              className="flex h-8 cursor-pointer items-center rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-accent-subtle"
             >
               {item.label}
             </Command.Item>
@@ -82,14 +82,14 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
         {sessions.data && sessions.data.length > 0 && (
           <Command.Group
             heading="Sessions"
-            className="mt-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-muted"
+            className="mt-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-secondary [&_[cmdk-group-heading]]:tracking-[-0.005em]"
           >
             {sessions.data.map((session) => (
               <Command.Item
                 key={session.id}
                 value={`${session.title} ${workspaceName(session.workspace_id)}`}
                 onSelect={() => goTo(`/sessions/${session.id}`)}
-                className="flex h-8 cursor-pointer items-center gap-2 rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-surface-2"
+                className="flex h-8 cursor-pointer items-center gap-2 rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-accent-subtle"
               >
                 <span className="text-fg-secondary" aria-hidden>
                   {STATE_GLYPH[session.state]}
@@ -105,7 +105,7 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
 
         <Command.Group
           heading="Actions"
-          className="mt-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-muted"
+          className="mt-1 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-fg-secondary [&_[cmdk-group-heading]]:tracking-[-0.005em]"
         >
           <Command.Item
             value="New session"
@@ -113,7 +113,7 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
               close()
               void navigate({ to: '/sessions', search: { new: 1 } })
             }}
-            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-surface-2"
+            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-accent-subtle"
           >
             New session
           </Command.Item>
@@ -123,7 +123,7 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
               toggleTheme()
               close()
             }}
-            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-surface-2"
+            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-accent-subtle"
           >
             Toggle theme
           </Command.Item>
@@ -133,7 +133,7 @@ export function Palette({ open, onOpenChange }: { open: boolean; onOpenChange: (
               close()
               setShortcutsOpen(true)
             }}
-            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-surface-2"
+            className="flex h-8 cursor-pointer items-center rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary data-[selected=true]:bg-accent-subtle"
           >
             Shortcuts
           </Command.Item>

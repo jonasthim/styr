@@ -16,6 +16,7 @@ import type {
   Session,
   SessionEvent,
   StatusInfo,
+  Role,
   User,
   Workspace,
 } from '../api/types'
@@ -151,6 +152,20 @@ const profiles: Profile[] = [
     unattended: true,
     approval_timeout: 1800,
     builtin: true,
+  },
+  {
+    // One editable profile alongside the three builtins. Builtin rows lock
+    // their name and mode, so without this there is no unlocked mode select
+    // for a spec to open and read the five allowed modes out of.
+    id: 'custom',
+    name: 'custom',
+    mode: 'default',
+    allowed_tools: [],
+    disallowed_tools: [],
+    max_turns: 0,
+    unattended: false,
+    approval_timeout: 0,
+    builtin: false,
   },
 ]
 
@@ -324,6 +339,10 @@ let loggedOut = false
 // POST /__mock/reset-claude-token for the absent-state test.
 let devClaudeToken: ClaudeTokenInfo = { present: true, label: '…a1b2c3', verified_at: iso(60 * 24) }
 
+// Flipped by POST /__mock/set-role so a spec can see a members-only view
+// (the first-run "ask an admin" copy) without a second seeded user.
+let devRole: Role = 'admin'
+
 // Mirrors GET /api/v1/settings's shape (docs/openapi.yaml): idle_timeout is
 // a Go duration string, not a number of seconds.
 interface MockSettings {
@@ -381,6 +400,20 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // Mock-only control routes for the first-run path: a server with nothing
+  // registered yet, seen once as an admin (who can fix it from here) and once
+  // as a member (who can only ask someone).
+  http.post('/__mock/clear-workspaces', () => {
+    workspaces.splice(0, workspaces.length)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.post('/__mock/set-role', async ({ request }) => {
+    const body = (await request.json()) as { role?: Role }
+    if (body.role === 'admin' || body.role === 'member') devRole = body.role
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   http.get('/api/v1/me', () => {
     if (loggedOut) return HttpResponse.json(errorBody('unauthorized', 'not logged in'), { status: 401 })
     const me: Me = {
@@ -388,7 +421,7 @@ export const handlers = [
       email: 'dev@styr.local',
       display_name: 'Dev Admin',
       avatar_url: '',
-      role: 'admin',
+      role: devRole,
       prefs: { theme: 'dark' },
       claude_token: devClaudeToken,
     }

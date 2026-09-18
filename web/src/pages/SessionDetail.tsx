@@ -12,6 +12,11 @@ import { PermissionCard } from '../components/session/PermissionCard'
 import { Composer } from '../components/session/Composer'
 import { SidePanel } from '../components/session/SidePanel'
 
+// The session view is the one screen that does not scroll as a page: the
+// transcript scrolls inside it. The shell reserves 56px for the tab bar below
+// 900px, so the definite height it can fill is the viewport minus that.
+const VIEW_HEIGHT = 'flex h-[calc(100dvh-3.5rem)] min-h-0 flex-col min-[900px]:h-dvh'
+
 /** Blocks whose tool input targets the given file path (?file=, set by ChangesList.tsx). */
 function touchesFile(block: Block, file: string): boolean {
   if (block.kind !== 'tool') return false
@@ -39,7 +44,7 @@ export function SessionDetail() {
   if (sessionQuery.isLoading) {
     return (
       <div
-        className="flex h-dvh items-center justify-center pb-14 text-[13px] text-fg-muted min-[900px]:pb-0"
+        className={`${VIEW_HEIGHT} items-center justify-center text-[13px] text-fg-secondary`}
         data-testid="session-loading"
       >
         Loading…
@@ -49,7 +54,7 @@ export function SessionDetail() {
 
   if (!sessionQuery.data) {
     return (
-      <div className="flex h-dvh items-center justify-center pb-14 text-[13px] text-fg-muted min-[900px]:pb-0">
+      <div className={`${VIEW_HEIGHT} items-center justify-center text-[13px] text-fg-secondary`}>
         Session not found.
       </div>
     )
@@ -61,10 +66,10 @@ export function SessionDetail() {
   const profileName = profile?.name ?? session.profile_id
 
   return (
-    <div
-      data-testid="session-view"
-      className="flex h-dvh min-h-0 flex-col pb-14 min-[900px]:pb-0 min-[900px]:pl-14"
-    >
+    // The shell's <main> already insets for the rail and the tab bar, so this
+    // only needs a definite height to fill: the viewport, less the tab bar
+    // below 900px where the shell reserves that space.
+    <div data-testid="session-view" className={VIEW_HEIGHT}>
       <SessionHeader session={session} workspaceName={workspaceName} profileName={profileName} />
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="flex min-h-0 flex-1 flex-col">

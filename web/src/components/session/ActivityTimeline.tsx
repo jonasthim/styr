@@ -126,7 +126,7 @@ export function ActivityTimeline({ blocks, running }: { blocks: Block[]; running
                 <Tooltip.Content
                   side="top"
                   sideOffset={6}
-                  className="z-50 max-w-[240px] rounded-[var(--radius-1)] border border-hairline bg-surface-3 px-2 py-1.5 text-[12px] text-fg-primary shadow-lg"
+                  className="z-50 max-w-[240px] rounded-[var(--radius-1)] border border-hairline bg-surface-3 px-2 py-1.5 text-[12px] text-fg-primary shadow-[var(--shadow-popover)]"
                 >
                   <div className="truncate font-mono">{s.summary}</div>
                   <div className="font-mono text-[11px] tabular-nums text-fg-muted">

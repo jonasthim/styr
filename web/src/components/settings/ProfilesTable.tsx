@@ -5,6 +5,7 @@
 import { useState } from 'react'
 import clsx from 'clsx'
 import type { Profile, ProfileMode } from '../../api/types'
+import { Badge, Input, Select, TableFrame, Td, Th, Tr } from '../ui'
 
 const MODE_OPTIONS: Array<{ value: ProfileMode; label: string }> = [
   { value: 'default', label: 'Default' },
@@ -21,6 +22,10 @@ interface ProfilesTableProps {
   onUpdate: (id: string, patch: ProfilePatch) => Promise<void>
 }
 
+// A locked field still has to read as the value it holds, not as a greyed-out
+// box: drop the control chrome instead of dimming the text.
+const LOCKED_INPUT = 'disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:opacity-100 disabled:shadow-none'
+
 function ProfileRow({ profile, onUpdate }: { profile: Profile; onUpdate: ProfilesTableProps['onUpdate'] }) {
   const [name, setName] = useState(profile.name)
   const [maxTurns, setMaxTurns] = useState(String(profile.max_turns))
@@ -36,82 +41,78 @@ function ProfileRow({ profile, onUpdate }: { profile: Profile; onUpdate: Profile
   }
 
   return (
-    <tr className="border-t border-hairline" data-testid={`profile-row-${profile.id}`}>
-      <td className="px-3 py-2">
-        <input
-          value={name}
-          disabled={locked}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => {
-            if (!locked && name !== profile.name && name.trim()) void onUpdate(profile.id, { name })
-          }}
-          className="h-8 w-full rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none disabled:border-transparent disabled:bg-transparent disabled:text-fg-secondary focus-visible:ring-2 focus-visible:ring-accent"
-        />
-        {locked && <span className="ml-1 align-middle text-[11px] text-fg-muted">builtin</span>}
-      </td>
-      <td className="px-3 py-2">
-        <select
+    <Tr data-testid={`profile-row-${profile.id}`}>
+      <Td>
+        <div className="flex items-center gap-2">
+          <Input
+            value={name}
+            disabled={locked}
+            aria-label={`Name for ${profile.name}`}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => {
+              if (!locked && name !== profile.name && name.trim()) void onUpdate(profile.id, { name })
+            }}
+            className={clsx('max-w-[180px] font-medium', LOCKED_INPUT)}
+          />
+          {locked && <Badge>builtin</Badge>}
+        </div>
+      </Td>
+      <Td>
+        <Select
           aria-label={`Mode for ${profile.name}`}
           value={profile.mode}
           disabled={locked}
-          onChange={(e) => void onUpdate(profile.id, { mode: e.target.value as ProfileMode })}
-          className="h-8 w-full rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none disabled:border-transparent disabled:bg-transparent disabled:text-fg-secondary"
-        >
-          {MODE_OPTIONS.map((opt) => (
-            <option key={opt.value} value={opt.value}>
-              {opt.label}
-            </option>
-          ))}
-        </select>
-      </td>
-      <td className="px-3 py-2">
-        <input
+          onValueChange={(value) => void onUpdate(profile.id, { mode: value as ProfileMode })}
+          options={MODE_OPTIONS}
+          className="max-w-[170px]"
+        />
+      </Td>
+      <Td>
+        <Input
           type="number"
           min={0}
+          mono
           aria-label={`Max turns for ${profile.name}`}
           value={maxTurns}
           onChange={(e) => setMaxTurns(e.target.value)}
           onBlur={() => commitNumber('max_turns', maxTurns)}
-          className="h-8 w-20 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-right font-mono text-[12px] tabular-nums text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="w-20! text-right tabular-nums"
         />
-      </td>
-      <td className="px-3 py-2">
-        <input
+      </Td>
+      <Td>
+        <Input
           type="number"
           min={0}
+          mono
           aria-label={`Approval timeout in seconds for ${profile.name}`}
           value={approvalTimeout}
           onChange={(e) => setApprovalTimeout(e.target.value)}
           onBlur={() => commitNumber('approval_timeout', approvalTimeout)}
-          className="h-8 w-24 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-right font-mono text-[12px] tabular-nums text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="w-24! text-right tabular-nums"
         />
-      </td>
-      <td className={clsx('px-3 py-2 text-[12px] text-fg-muted', saving && 'text-fg-secondary')}>
-        {saving ? 'Saving…' : ''}
-      </td>
-    </tr>
+      </Td>
+      <Td className={clsx('text-[12px] text-fg-muted', saving && 'text-fg-secondary')}>{saving ? 'Saving…' : ''}</Td>
+    </Tr>
   )
 }
 
 export function ProfilesTable({ profiles, onUpdate }: ProfilesTableProps) {
   return (
-    <div className="overflow-x-auto rounded-[var(--radius-2)] border border-hairline">
-      <table className="w-full min-w-[560px] border-collapse text-left">
-        <thead>
-          <tr className="text-[12px] font-medium text-fg-muted">
-            <th className="px-3 py-2 font-medium">Name</th>
-            <th className="px-3 py-2 font-medium">Mode</th>
-            <th className="px-3 py-2 font-medium">Max turns</th>
-            <th className="px-3 py-2 font-medium">Approval timeout (s)</th>
-            <th className="px-3 py-2 font-medium" />
-          </tr>
-        </thead>
-        <tbody>
-          {profiles.map((profile) => (
-            <ProfileRow key={profile.id} profile={profile} onUpdate={onUpdate} />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <TableFrame minWidth={640}>
+      <thead>
+        <tr>
+          <Th>Name</Th>
+          <Th>Mode</Th>
+          <Th>Max turns</Th>
+          <Th>Approval timeout (s)</Th>
+          <Th />
+        </tr>
+      </thead>
+      <tbody>
+        {profiles.map((profile) => (
+          <ProfileRow key={profile.id} profile={profile} onUpdate={onUpdate} />
+        ))}
+      </tbody>
+    </TableFrame>
   )
 }

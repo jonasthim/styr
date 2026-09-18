@@ -13,6 +13,7 @@ import { api, ApiError } from '../../api/client'
 import { q } from '../../api/queries'
 import { useMe } from '../../hooks/useMe'
 import { ClaudeTokenCard } from '../profile/ClaudeTokenCard'
+import { Button, Card, Field, Input, PageHeader, Textarea } from '../ui'
 
 const WELCOMED_KEY = 'styr.welcomed'
 const FIRST_PROMPT = 'Summarise this repository in five bullet points.'
@@ -35,23 +36,36 @@ const STEPS: Array<{ index: StepIndex; label: string }> = [
 
 function ProgressRail({ step }: { step: StepIndex }) {
   return (
-    <ol className="flex flex-col gap-1" aria-label="Onboarding steps">
+    <ol className="flex gap-4 sm:flex-col sm:gap-1" aria-label="Onboarding steps">
       {STEPS.map((s) => {
         const done = s.index < step
         const active = s.index === step
         return (
-          <li key={s.index} className="flex items-center gap-2.5 text-[13px]" data-testid={`onboarding-step-${s.index}`}>
+          <li
+            key={s.index}
+            className="flex min-w-0 items-center gap-2.5 text-[13px]"
+            data-testid={`onboarding-step-${s.index}`}
+          >
             <span
               className={clsx(
-                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium',
-                done && 'border-accent bg-accent text-[#0b0d10]',
+                'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[11px] font-medium tabular-nums',
+                done && 'border-transparent bg-accent text-accent-fg',
                 active && !done && 'border-accent text-accent',
                 !active && !done && 'border-hairline text-fg-muted',
               )}
             >
               {done ? <Check size={12} aria-hidden /> : s.index}
             </span>
-            <span className={clsx(active ? 'text-fg-primary' : 'text-fg-secondary')}>{s.label}</span>
+            {/* Laid out in a row on a phone, where three full labels would
+                run off the edge, so only the step being worked on is named. */}
+            <span
+              className={clsx(
+                'truncate',
+                active ? 'font-medium text-fg-primary' : 'hidden text-fg-secondary sm:inline',
+              )}
+            >
+              {s.label}
+            </span>
           </li>
         )
       })}
@@ -61,14 +75,10 @@ function ProgressRail({ step }: { step: StepIndex }) {
 
 function StepFooter({ onSkip, children }: { onSkip: () => void; children?: ReactNode }) {
   return (
-    <div className="mt-5 flex items-center justify-between">
-      <button
-        type="button"
-        onClick={onSkip}
-        className="text-[13px] text-fg-muted transition-colors duration-150 hover:text-fg-secondary"
-      >
+    <div className="mt-6 flex items-center justify-between gap-3 border-t border-hairline pt-4">
+      <Button variant="ghost" size="sm" onClick={onSkip}>
         Skip
-      </button>
+      </Button>
       <div className="flex gap-2">{children}</div>
     </div>
   )
@@ -87,12 +97,12 @@ function TokenStep({ onContinue, onSkip }: { onContinue: () => void; onSkip: () 
 
   return (
     <div>
+      {/* No subtitle here: the card below already explains why Styr wants a
+          token, and saying it twice in four lines reads as filler. */}
       <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">Add your Claude token</h2>
-      <p className="mt-1 text-[13px] text-fg-secondary">
-        Styr starts sessions with your own Claude Code login, not a shared key.
-      </p>
       <div className="mt-4">
         <ClaudeTokenCard
+          nested
           title="Your Claude token"
           inputLabel="Claude token"
           tokenInfo={me?.claude_token}
@@ -101,17 +111,9 @@ function TokenStep({ onContinue, onSkip }: { onContinue: () => void; onSkip: () 
         />
       </div>
       <StepFooter onSkip={onSkip}>
-        <button
-          type="button"
-          onClick={onContinue}
-          disabled={!present}
-          className={clsx(
-            'h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10]',
-            !present && 'opacity-60',
-          )}
-        >
+        <Button variant="primary" onClick={onContinue} disabled={!present}>
           Continue
-        </button>
+        </Button>
       </StepFooter>
     </div>
   )
@@ -157,54 +159,43 @@ function WorkspaceStep({ onContinue, onSkip }: { onContinue: () => void; onSkip:
       )}
 
       {isAdmin && !added && (
-        <form onSubmit={(e) => void handleSubmit(e)} className="mt-3 flex flex-col gap-2">
-          <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-            Name
-            <input
-              required
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-            Path
-            <input
-              required
-              value={path}
-              onChange={(e) => setPath(e.target.value)}
-              placeholder="/home/dev/project"
-              className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 font-mono text-[12px] text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            />
-          </label>
+        <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 flex flex-col gap-4">
+          <Field label="Name">
+            {({ id }) => <Input id={id} required value={name} onChange={(e) => setName(e.target.value)} />}
+          </Field>
+          <Field label="Path" hint="An absolute path on the machine running Styr.">
+            {({ id, 'aria-describedby': describedBy }) => (
+              <Input
+                id={id}
+                mono
+                required
+                aria-describedby={describedBy}
+                value={path}
+                onChange={(e) => setPath(e.target.value)}
+                placeholder="/home/dev/project"
+              />
+            )}
+          </Field>
           {errorMessage && (
-            <p role="alert" className="text-[12px] text-state-failed">
+            <p
+              role="alert"
+              className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
+            >
               {errorMessage}
             </p>
           )}
-          <button
-            type="submit"
-            disabled={submitting}
-            className={clsx(
-              'mt-1 h-8 self-start rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2',
-              submitting && 'opacity-60',
-            )}
-          >
+          <Button type="submit" className="self-start" loading={submitting}>
             Add workspace
-          </button>
+          </Button>
         </form>
       )}
 
       {isAdmin && added && <p className="mt-3 text-[13px] text-fg-secondary">Workspace added.</p>}
 
       <StepFooter onSkip={onSkip}>
-        <button
-          type="button"
-          onClick={onContinue}
-          className="h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10]"
-        >
+        <Button variant="primary" onClick={onContinue}>
           Continue
-        </button>
+        </Button>
       </StepFooter>
     </div>
   )
@@ -243,30 +234,25 @@ function FirstSessionStep({ onFinish, onSkip }: { onFinish: (sessionId: string |
       <p className="mt-1 text-[13px] text-fg-secondary">
         {workspace ? `Runs in ${workspace.name}.` : 'Add a workspace first, or skip for now.'}
       </p>
-      <textarea
+      <Textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={3}
         aria-label="First prompt"
-        className="mt-3 w-full resize-none rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2.5 py-2 text-[13px] text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
+        className="mt-4"
       />
       {errorMessage && (
-        <p role="alert" className="mt-2 text-[12px] text-state-failed">
+        <p
+          role="alert"
+          className="mt-3 rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
+        >
           {errorMessage}
         </p>
       )}
       <StepFooter onSkip={onSkip}>
-        <button
-          type="button"
-          onClick={() => void handleStart()}
-          disabled={!canStart || starting}
-          className={clsx(
-            'h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10]',
-            (!canStart || starting) && 'opacity-60',
-          )}
-        >
+        <Button variant="primary" onClick={() => void handleStart()} disabled={!canStart} loading={starting}>
           Start session
-        </button>
+        </Button>
       </StepFooter>
     </div>
   )
@@ -290,18 +276,17 @@ export function Onboarding() {
   }
 
   return (
-    <main className="mx-auto max-w-[720px] px-4 py-8 sm:px-6">
-      <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-fg-primary">Welcome to Styr</h1>
-      <p className="mt-1 text-[13px] text-fg-secondary">A few steps to get your first session running.</p>
+    <div className="mx-auto flex w-full max-w-[760px] flex-1 flex-col px-4 py-8 sm:px-6">
+      <PageHeader title="Welcome to Styr" description="Three steps to your first session." />
 
-      <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-[180px_1fr]">
+      <div className="mt-8 grid grid-cols-1 gap-6 sm:grid-cols-[190px_1fr]">
         <ProgressRail step={step} />
-        <div className="rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4">
+        <Card>
           {step === 1 && <TokenStep onContinue={() => setStep(2)} onSkip={skip} />}
           {step === 2 && <WorkspaceStep onContinue={() => setStep(3)} onSkip={skip} />}
           {step === 3 && <FirstSessionStep onFinish={finish} onSkip={skip} />}
-        </div>
+        </Card>
       </div>
-    </main>
+    </div>
   )
 }

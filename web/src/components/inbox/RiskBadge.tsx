@@ -2,29 +2,25 @@
 // failed-colour with a filled icon. Colours come from tokens only (see
 // docs/superpowers/plans/2026-09-18-styr-v0.1.md, "Frontend conventions").
 import { AlertTriangle, Eye, Pencil, Terminal, type LucideIcon } from 'lucide-react'
-import clsx from 'clsx'
 import type { RiskTier } from '../../api/types'
+import { Badge, type BadgeTone, type BadgeVariant } from '../ui'
 
-const RISK_META: Record<RiskTier, { icon: LucideIcon; className: string; filled: boolean }> = {
-  read: { icon: Eye, className: 'text-fg-muted', filled: false },
-  write: { icon: Pencil, className: 'text-accent', filled: false },
-  exec: { icon: Terminal, className: 'text-state-attention', filled: false },
-  destructive: { icon: AlertTriangle, className: 'text-state-failed bg-state-failed/10', filled: true },
+const RISK_META: Record<RiskTier, { icon: LucideIcon; tone: BadgeTone; variant: BadgeVariant; filled: boolean }> = {
+  read: { icon: Eye, tone: 'neutral', variant: 'outline', filled: false },
+  write: { icon: Pencil, tone: 'accent', variant: 'outline', filled: false },
+  exec: { icon: Terminal, tone: 'attention', variant: 'outline', filled: false },
+  // The one tier that gets a fill: a destructive command should be the first
+  // thing the eye lands on in a stack of cards.
+  destructive: { icon: AlertTriangle, tone: 'failed', variant: 'soft', filled: true },
 }
 
 export function RiskBadge({ tier }: { tier: RiskTier }) {
   const meta = RISK_META[tier]
   const Icon = meta.icon
   return (
-    <span
-      data-testid="risk-badge"
-      className={clsx(
-        'inline-flex items-center gap-1 rounded-full border border-hairline px-1.5 py-0.5 text-[11px] font-medium tabular-nums',
-        meta.className,
-      )}
-    >
+    <Badge data-testid="risk-badge" tone={meta.tone} variant={meta.variant}>
       <Icon size={11} aria-hidden fill={meta.filled ? 'currentColor' : 'none'} />
       {tier}
-    </span>
+    </Badge>
   )
 }

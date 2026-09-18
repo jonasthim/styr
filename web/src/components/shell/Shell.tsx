@@ -43,7 +43,9 @@ export function Shell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-canvas">
       {isDesktop ? <Rail /> : <TabBar />}
-      <main className={clsx('min-h-screen min-w-0', isDesktop ? 'pl-14' : 'pb-14')}>{children}</main>
+      {/* A flex column, so a page can hand its content area `flex-1` and
+          centre an empty state in it instead of boxing it at the top. */}
+      <main className={clsx('flex min-h-screen min-w-0 flex-col', isDesktop ? 'pl-14' : 'pb-14')}>{children}</main>
       <Palette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
     </div>

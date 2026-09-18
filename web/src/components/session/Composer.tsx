@@ -6,6 +6,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { CornerDownLeft } from 'lucide-react'
 import { api } from '../../api/client'
 import type { SessionState } from '../../api/types'
+import { Button, Kbd, MOD_KEY, Textarea } from '../ui'
 
 export function Composer({ sessionId, sessionState }: { sessionId: string; sessionState: SessionState }) {
   const [text, setText] = useState('')
@@ -62,30 +63,38 @@ export function Composer({ sessionId, sessionState }: { sessionId: string; sessi
         </div>
       )}
       <div className="flex items-end gap-2">
-        <textarea
+        <Textarea
           data-testid="composer-input"
+          aria-label="Message the session"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={onKeyDown}
           disabled={disabled}
           rows={2}
           placeholder={disabled ? '' : 'Message the session, or /interrupt, /close'}
-          className="min-h-[44px] flex-1 resize-none rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-3! py-2! text-[13px] text-fg-primary placeholder:text-fg-muted focus-visible:border-accent disabled:opacity-50"
+          className="min-h-[44px] flex-1"
         />
-        <button
-          type="button"
+        <Button
+          variant="primary"
           data-testid="composer-send"
           onClick={submit}
           disabled={disabled || !text.trim()}
-          className="flex h-9 shrink-0 items-center gap-1.5 rounded-[var(--radius-1)] bg-accent px-3! text-[13px] font-medium text-[#0b0d10] transition-opacity duration-150 hover:opacity-90 disabled:opacity-40"
+          loading={send.isPending && !reopening}
+          iconRight={<CornerDownLeft size={13} aria-hidden />}
+          className="h-9"
         >
           Send
-          <CornerDownLeft size={13} />
-        </button>
+        </Button>
       </div>
-      {disabled && (
-        <div data-testid="composer-hint" className="mt-1.5! text-[12px] text-state-attention">
+      {disabled ? (
+        <div data-testid="composer-hint" className="mt-2! text-[12px] text-state-attention">
           Answer the permission request first
+        </div>
+      ) : (
+        <div className="mt-2! flex items-center gap-1 text-[11px] text-fg-muted">
+          <Kbd>{MOD_KEY}</Kbd>
+          <Kbd>↵</Kbd>
+          <span className="ml-0.5">to send</span>
         </div>
       )}
     </div>

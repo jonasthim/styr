@@ -8,12 +8,15 @@ import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
 import type { Approval } from '../../api/types'
 import { ToolInput } from '../common/ToolInput'
+import { Button, buttonClasses, Textarea } from '../ui'
 import { RiskBadge } from './RiskBadge'
 import { SnoozeMenu, type SnoozeOption } from './SnoozeMenu'
 import { relativeTime, summarizeToolInput } from './format'
 
-const ACTION_BUTTON =
-  'flex h-11 min-[640px]:h-8 items-center justify-center rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium transition-colors duration-150 disabled:cursor-not-allowed disabled:opacity-50'
+// A phone thumb needs 44px; a desktop row wants the standard 32. `!` because
+// both rules set the same property and class order in the attribute is not
+// what decides the winner.
+const ACTION_HEIGHT = 'h-11! min-[640px]:h-8!'
 
 export interface ApprovalCardProps {
   approval: Approval
@@ -79,8 +82,9 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
       onClick={onFocus}
       onFocus={onFocus}
       className={clsx(
-        'flex flex-col gap-2 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-3 outline-none transition-[opacity,transform] duration-150 min-[640px]:p-4',
-        focused && 'ring-2 ring-accent ring-offset-2 ring-offset-canvas',
+        'flex flex-col gap-3 rounded-[var(--radius-panel)] border border-hairline bg-surface-1 p-3 shadow-[var(--shadow-card)] outline-none',
+        'transition-[opacity,transform] duration-[var(--duration-base)] min-[640px]:p-4',
+        focused && 'border-[var(--accent-border)] ring-2 ring-accent ring-offset-2 ring-offset-canvas',
         collapsing && 'pointer-events-none -translate-y-1 opacity-0',
       )}
     >
@@ -107,14 +111,16 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
 
       {editing ? (
         <div>
-          <textarea
+          <Textarea
+            mono
             aria-label={`Editable input for ${approval.tool}`}
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             rows={6}
-            className="w-full resize-y rounded-[var(--radius-1)] border border-hairline bg-surface-3 px-3 py-2 font-mono text-[12px] text-fg-primary outline-none focus-visible:border-accent"
+            aria-invalid={draftError ? true : undefined}
+            className="resize-y bg-surface-3"
           />
-          {draftError && <p className="mt-1 text-[12px] text-state-failed">{draftError}</p>}
+          {draftError && <p className="mt-1.5 text-[12px] text-fg-danger">{draftError}</p>}
         </div>
       ) : (
         <ToolInput tool={approval.tool} input={approval.input} />
@@ -123,45 +129,35 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
       <div className="grid grid-cols-2 gap-2 min-[640px]:flex min-[640px]:flex-wrap">
         {editing ? (
           <>
-            <button
-              type="button"
-              onClick={submit}
-              disabled={pending}
-              className={clsx(ACTION_BUTTON, 'border-accent bg-accent text-[#0b0d10]')}
-            >
+            <Button variant="primary" onClick={submit} disabled={pending} className={ACTION_HEIGHT}>
               Send
-            </button>
-            <button type="button" onClick={onCancelEdit} disabled={pending} className={ACTION_BUTTON}>
+            </Button>
+            <Button onClick={onCancelEdit} disabled={pending} className={ACTION_HEIGHT}>
               Cancel
-            </button>
+            </Button>
           </>
         ) : (
           <>
-            <button
-              type="button"
-              onClick={onAllow}
-              disabled={pending}
-              className={clsx(ACTION_BUTTON, 'border-accent bg-accent text-[#0b0d10]')}
-            >
+            <Button variant="primary" onClick={onAllow} disabled={pending} className={ACTION_HEIGHT}>
               Allow
-            </button>
-            <button type="button" onClick={onDeny} disabled={pending} className={ACTION_BUTTON}>
+            </Button>
+            <Button onClick={onDeny} disabled={pending} className={ACTION_HEIGHT}>
               Deny
-            </button>
-            <button type="button" onClick={startEdit} disabled={pending} className={ACTION_BUTTON}>
+            </Button>
+            <Button onClick={startEdit} disabled={pending} className={ACTION_HEIGHT}>
               Edit and allow
-            </button>
+            </Button>
             <SnoozeMenu
               open={snoozeMenuOpen}
               onOpenChange={onSnoozeOpenChange}
               onSelect={onSnoozeSelect}
               disabled={pending}
-              buttonClassName={ACTION_BUTTON}
+              buttonClassName={buttonClasses('secondary', 'md', ACTION_HEIGHT)}
             />
             <Link
               to="/sessions/$id"
               params={{ id: approval.session_id }}
-              className={clsx(ACTION_BUTTON, 'col-span-2 min-[640px]:col-span-1')}
+              className={buttonClasses('secondary', 'md', clsx(ACTION_HEIGHT, 'col-span-2 min-[640px]:col-span-1'))}
             >
               Open session
             </Link>
