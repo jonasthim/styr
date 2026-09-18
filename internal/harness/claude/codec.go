@@ -163,9 +163,13 @@ func DecodeLine(line []byte, now time.Time) []harness.Event {
 
 	case "control_request":
 		if env.Request != nil && env.Request.Subtype == "can_use_tool" {
-			return []harness.Event{{Type: harness.EventPermission, At: now, Permission: &harness.PermissionRequest{
+			perm := &harness.PermissionRequest{
 				RequestID: env.RequestID, ToolName: env.Request.ToolName, Input: env.Request.Input, ToolUseID: env.Request.ToolUseID,
-			}}}
+			}
+			if env.Request.ToolName == "ExitPlanMode" {
+				perm.Plan = planFromInput(env.Request.Input)
+			}
+			return []harness.Event{{Type: harness.EventPermission, At: now, Permission: perm}}
 		}
 		return nil
 

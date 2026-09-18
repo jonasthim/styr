@@ -187,3 +187,47 @@ behaviour for these commands changes) can safely update. A model or effort switc
 cost of a process restart (no first message is sent until the operator's next turn), which is
 accepted as the price of the CLI's start-up-flags-only design rather than attempting a live
 in-process reconfiguration the protocol doesn't support.
+
+## ADR-012: Plan approval over the permission channel
+
+Date: 2026-09-18. Status: accepted.
+
+Context: the v0.3 "Review" design left open whether a `plan`-mode session's finished plan arrives
+as some distinct message type, and — the harder question — whether approving it lets the CLI
+keep going in the same process or requires Styr to resume with `--permission-mode default`. Card
+T41 spiked both against the real CLI 2.1.276: one recorded session in `/tmp/styr-fixture-ws`
+(`hack/recorder/main.go -mode plan`, prompt asking for a plan to add a `--version` flag to a
+small Go CLI, then to exit plan mode), kept as
+`internal/harness/claude/testdata/08_plan_mode.jsonl`; full detail in `testdata/PROTOCOL.md`
+("Plan mode in `-p`").
+
+Findings: `ExitPlanMode` is not a distinct message type — the model calls it as an ordinary tool,
+so it surfaces as the same `control_request`/`can_use_tool` control message every other tool
+permission uses, with the plan markdown at `request.input.plan` and `request.tool_name ==
+"ExitPlanMode"`. Approving it (an ordinary `allow` `control_response`) does **not** end the
+process: the CLI switches its own `permissionMode` from `plan` to `default` (observed as a
+`system`/`status` line immediately after the response) and the model continues acting on the
+plan in the same process, under the same session id, asking permission for each subsequent tool
+call exactly as before — no `--resume`, no second `init`. A second spike (resuming a
+plan-mode-stopped session under `--permission-mode default`) was therefore unnecessary and not
+run, per the card's own fallback rule. A separate, one-off spike (not kept as a fixture; see
+`testdata/PROTOCOL.md` "Checkpoint safety between turns") confirmed that committing the
+workspace's git state between two turns of the same live session (`git add -A && git commit`,
+run via a new recorder `-between` flag) does not disturb the next turn — the CLI only reads
+files off disk per tool call, never git state.
+
+Decision: Styr treats `ExitPlanMode` as a permission request like any other, routed to a Plan
+card instead of the ordinary tool-approval UI (`claude.IsPlanExit(harness.PermissionRequest)
+bool` checks `ToolName == "ExitPlanMode"`; `harness.PermissionRequest` gains a `Plan string`
+field, populated by the codec from `request.input.plan` only for that tool). "Approve plan" is
+exactly `Process.Decide(Decision{RequestID: ..., Allow: true})` on that request — nothing else;
+the same running process carries on. "Request changes" is `Decide{Allow: false, Message: <the
+typed comment>}`. `internal/gitops`'s planned per-turn checkpoint commit needs no special-casing
+around a pending or just-approved plan: it is safe to checkpoint between any two turns of a live
+session regardless of what happened in between.
+
+Consequences: the sessions service (T42) does not need a resume-on-approve code path at all,
+simplifying the plan-approval flow to a single `Decide` call plus a UI re-render when the next
+event arrives. The tradeoff is that "approve" and "let it start editing" are the same action —
+Styr cannot approve a plan without also, in effect, un-pausing implementation, matching the real
+CLI's own coupling of the two rather than trying to add a pause point the protocol doesn't offer.

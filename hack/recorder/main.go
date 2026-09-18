@@ -26,6 +26,7 @@ func main() {
 	systemPrompt := flag.String("system-prompt", "", "system prompt string passed as --append-system-prompt (empty = omit)")
 	model := flag.String("model", "", "model alias or name passed as --model (empty = omit)")
 	effort := flag.String("effort", "", "reasoning effort passed as --effort (empty = omit)")
+	between := flag.String("between", "", "shell command run (via `sh -c`) in -cwd before each subsequent prompt is sent, i.e. between turns; empty = nothing")
 	flag.Parse()
 	if *out == "" || *prompts == "" {
 		fmt.Fprintln(os.Stderr, "usage: recorder -out FILE -prompts 'a||b' [-cwd DIR]")
@@ -76,6 +77,16 @@ func main() {
 	sendNext := func() bool {
 		if next >= len(list) {
 			return false
+		}
+		if next > 0 && *between != "" {
+			// Runs between turns, not before the first prompt: this is what Spike C uses to
+			// checkpoint (`git add -A && git commit`) the workspace mid-session and confirm the
+			// CLI does not complain about the git state changing under it.
+			c := exec.Command("sh", "-c", *between)
+			c.Dir = *cwd
+			if out, err := c.CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "recorder: -between command failed: %v\n%s", err, out)
+			}
 		}
 		write(map[string]any{
 			"type":               "user",

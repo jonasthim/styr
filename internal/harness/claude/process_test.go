@@ -4,6 +4,7 @@ package claude
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -40,6 +41,15 @@ func TestBuildArgsResume(t *testing.T) {
 	got := strings.Join(BuildArgs(s), " ")
 	if !strings.Contains(got, "--resume 0b4f9a2e-3f3e-4c0a-9d3a-3c5a4c1e2f10") || strings.Contains(got, "--session-id") {
 		t.Fatalf("resume args wrong: %q", got)
+	}
+}
+
+func TestBuildArgsPlanMode(t *testing.T) {
+	s := spec()
+	s.Profile.Mode = "plan"
+	got := strings.Join(BuildArgs(s), " ")
+	if !strings.Contains(got, "--permission-mode plan") {
+		t.Fatalf("args %q lack --permission-mode plan", got)
 	}
 }
 
@@ -125,6 +135,55 @@ func TestProcessReplaysFixtureAndAnswersPermission(t *testing.T) {
 		if ev.Type == harness.EventExit && ev.ExitCode != 0 {
 			t.Fatalf("exit code %d (%s)", ev.ExitCode, ev.Err)
 		}
+	}
+}
+
+// TestFakeClaudeWriteMarkerWritesFileBeforeReplay exercises the shell fake's "[write:...]"
+// marker (see testdata/fake-claude/fake-claude.sh): a user turn containing it must land the
+// file on disk, under Cwd, before the fake replays its fixture — this is the mechanism the
+// real-mode review e2e tests (T44) use to produce an actual diff for internal/gitops to see.
+func TestFakeClaudeWriteMarkerWritesFileBeforeReplay(t *testing.T) {
+	bin := fakeBinary(t)
+	fix, _ := filepath.Abs("testdata/01_simple_text.jsonl")
+	s := spec()
+	s.Cwd, s.Home = t.TempDir(), t.TempDir()
+	s.Env = map[string]string{"FAKE_CLAUDE_FIXTURE": fix, "FAKE_CLAUDE_DELAY": "0"}
+	h := New(bin)
+	p, err := h.Start(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The literal newline here (not a "\\n" escape) is what EncodeUser's JSON encoding turns
+	// into the on-wire two-character "\n" escape that fake-claude.sh's marker parsing expects
+	// and expands back into a real newline (see the marker's doc comment in fake-claude.sh).
+	msg := "please edit [write:sub/dir/out.txt:line one\nline two] and reply"
+	if err := p.Send(context.Background(), harness.UserMessage{Text: msg}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(10 * time.Second)
+loop:
+	for {
+		select {
+		case ev, ok := <-p.Events():
+			if !ok {
+				t.Fatal("events closed before result")
+			}
+			if ev.Type == harness.EventResult {
+				break loop
+			}
+		case <-deadline:
+			t.Fatal("timeout")
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(s.Cwd, "sub", "dir", "out.txt"))
+	if err != nil {
+		t.Fatalf("write marker did not create the file: %v", err)
+	}
+	if want := "line one\nline two"; string(got) != want {
+		t.Fatalf("written file = %q, want %q", got, want)
+	}
+	if err := p.Close(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 }
 

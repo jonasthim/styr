@@ -14,6 +14,14 @@
 # different recorded transcripts per turn (used by the web e2e suite's real-backend seeding to
 # put a session into a specific state, e.g. `waiting` via fixture 03's permission request).
 # FAKE_CLAUDE_FIXTURE_DIR overrides the fixture directory both marker lookups and the default use.
+#
+# A user message whose content contains a "[write:<relative path>:<text>]" marker (e.g.
+# "[write:src/auth.go:package auth\n\nfunc Foo() {}]") writes <text> to <relative path> inside
+# the fake's current working directory *before* replaying the fixture for that turn — creating
+# parent directories as needed, and expanding "\n" escape sequences in <text> into real
+# newlines. This is how the real-mode review e2e tests put an actual file change on disk (so
+# `internal/gitops` sees a real diff) without teaching the fake to execute Write tool calls
+# itself. <relative path> must not contain ":"; <text> must not contain "]".
 set -euo pipefail
 DIR="${FAKE_CLAUDE_FIXTURE_DIR:-$(dirname "$0")/../../internal/harness/claude/testdata}"
 FIX="${FAKE_CLAUDE_FIXTURE:-$DIR/01_simple_text.jsonl}"
@@ -23,6 +31,13 @@ while IFS= read -r input; do
   case "$input" in
     *'"type":"user"'*)
       turn_fix="$FIX"
+      if [[ "$input" =~ \[write:([^:]+):([^]]*)\] ]]; then
+        wpath="${BASH_REMATCH[1]}"
+        wtext="${BASH_REMATCH[2]}"
+        wtext="${wtext//\\n/$'\n'}"
+        mkdir -p "$(dirname "$wpath")"
+        printf '%s' "$wtext" > "$wpath"
+      fi
       if [[ "$input" =~ \[fixture:([0-9]+)\] ]]; then
         num="${BASH_REMATCH[1]}"
         match="$(ls "$DIR"/"$num"_*.jsonl 2>/dev/null | head -n1 || true)"

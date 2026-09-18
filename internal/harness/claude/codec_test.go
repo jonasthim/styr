@@ -233,6 +233,46 @@ func TestInitFixtureCarriesSlashCommands(t *testing.T) {
 	}
 }
 
+// Fixture 08 is the plan-mode spike: -mode plan should surface ExitPlanMode as a permission
+// request carrying the plan markdown, and (per PROTOCOL.md "Plan mode in -p") the CLI then
+// continues in the same process under permissionMode "default" without a fresh init or resume.
+func TestPlanModeFixtureExposesPlan(t *testing.T) {
+	evs := decodeFixture(t, "08_plan_mode.jsonl")
+	var planReq *harness.PermissionRequest
+	for i := range evs {
+		if evs[i].Type == harness.EventPermission && evs[i].Permission.ToolName == "ExitPlanMode" {
+			planReq = evs[i].Permission
+		}
+	}
+	if planReq == nil {
+		t.Fatal("no ExitPlanMode permission_request decoded")
+	}
+	if planReq.RequestID == "" {
+		t.Fatal("ExitPlanMode permission request has no RequestID")
+	}
+	if planReq.Plan == "" {
+		t.Fatal("ExitPlanMode permission request has an empty Plan")
+	}
+	if !strings.Contains(planReq.Plan, "--version") {
+		t.Fatalf("plan text = %q, want it to mention --version", planReq.Plan)
+	}
+	if !IsPlanExit(*planReq) {
+		t.Fatal("IsPlanExit(planReq) = false, want true")
+	}
+	// Every other decoded permission request in this fixture (the later Write calls, once the
+	// CLI resumed on its own) must not be misclassified as a plan exit.
+	for i := range evs {
+		if evs[i].Type == harness.EventPermission && evs[i].Permission.ToolName != "ExitPlanMode" {
+			if IsPlanExit(*evs[i].Permission) {
+				t.Fatalf("IsPlanExit misclassified a %s request as a plan exit", evs[i].Permission.ToolName)
+			}
+			if evs[i].Permission.Plan != "" {
+				t.Fatalf("non-ExitPlanMode request got a non-empty Plan: %q", evs[i].Permission.Plan)
+			}
+		}
+	}
+}
+
 // Fixture 07 is the /compact spike: the CLI answers a built-in itself with a synthetic
 // assistant text block and a zero-turn, zero-cost successful result.
 func TestSlashCompactFixtureAnswersAsText(t *testing.T) {

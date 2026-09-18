@@ -156,6 +156,11 @@ type PermissionRequest struct {
 	ToolName  string
 	Input     json.RawMessage
 	ToolUseID string
+	// Plan is the plan markdown the CLI is asking to exit plan mode with, filled in only when
+	// ToolName is "ExitPlanMode" (observed as the request's input.plan field; see
+	// internal/harness/claude/testdata/PROTOCOL.md "Plan mode in -p"). Empty for every other
+	// tool.
+	Plan string
 }
 
 // Result is the final summary emitted at the end of a turn or session.
