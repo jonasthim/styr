@@ -32,7 +32,7 @@ interface WebServerEntry {
 // project's --strictPort dev server that is always running, so the mock
 // webServer pins an alternate port here rather than changing the shared
 // default (`npm run dev`/`npm run dev:mock` run manually still use 5173).
-const MOCK_PORT = 5190
+const MOCK_PORT = Number(process.env.STYR_MOCK_PORT ?? '5190')
 
 const webServer: WebServerEntry[] = []
 if (wants('mock')) {
