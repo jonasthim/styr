@@ -589,6 +589,11 @@ paths:
                 approval_timeout:
                   type: integer
                   description: Seconds.
+                model:
+                  type: string
+                effort:
+                  type: string
+                  enum: ["", low, medium, high, xhigh, max]
               required: [name, mode]
       responses:
         "201":
@@ -608,9 +613,10 @@ paths:
     patch:
       summary: Update a profile
       description: >
-        Builtin profiles only allow max_turns and approval_timeout to
-        change. mode may never be the CLI's skip-all-permissions mode (422
-        on any profile; see internal/harness's validModes).
+        Builtin profiles only allow max_turns, approval_timeout, model and
+        effort to change. mode may never be the CLI's skip-all-permissions
+        mode (422 on any profile; see internal/harness's validModes), and
+        effort must be one of the valid levels.
       operationId: patchProfile
       tags: [profiles]
       parameters:
@@ -643,6 +649,11 @@ paths:
                   type: boolean
                 approval_timeout:
                   type: integer
+                model:
+                  type: string
+                effort:
+                  type: string
+                  enum: ["", low, medium, high, xhigh, max]
       responses:
         "200":
           description: The updated profile
@@ -690,6 +701,15 @@ paths:
                   type: string
                 prompt:
                   type: string
+                model:
+                  type: string
+                  description: >
+                    Overrides the profile's model default. Empty falls back
+                    to the profile's, then to the CLI's own default.
+                effort:
+                  type: string
+                  enum: ["", low, medium, high, xhigh, max]
+                  description: Overrides the profile's effort default.
               required: [workspace_id, profile_id, prompt]
       responses:
         "201":
@@ -794,6 +814,53 @@ paths:
       responses:
         "204":
           description: Closed
+
+  /api/v1/sessions/{id}/model:
+    post:
+      summary: Switch a session's model and reasoning effort
+      description: >
+        The CLI takes both as start-up flags only, so this ends the current
+        process and resumes the same session id with the new flags; the CLI
+        keeps the transcript. Refused while the session is waiting on an
+        approval.
+      operationId: switchSessionModel
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                model:
+                  type: string
+                  description: An alias (fable, opus, sonnet, haiku) or a full model name. Empty means the CLI's default.
+                effort:
+                  type: string
+                  enum: ["", low, medium, high, xhigh, max]
+      responses:
+        "202":
+          description: Accepted; the session is resuming under the new flags
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The session is waiting on an approval
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "422":
+          description: effort is not a valid level
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 
   /api/v1/sessions/{id}/events:
     get:
@@ -1170,7 +1237,17 @@ components:
           description: Seconds.
         builtin:
           type: boolean
-      required: [id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout, builtin]
+        model:
+          type: string
+          description: >
+            Default model for sessions started under this profile: an alias
+            (fable, opus, sonnet, haiku) or a full model name. Empty means
+            the CLI's own default.
+        effort:
+          type: string
+          enum: ["", low, medium, high, xhigh, max]
+          description: Default reasoning effort. Empty means the CLI's own default.
+      required: [id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout, builtin, model, effort]
 
     Session:
       type: object
@@ -1215,6 +1292,21 @@ components:
           type: string
         model:
           type: string
+          description: >
+            The model the session runs on: the alias it was started with
+            until the CLI's init message replaces it with the full model
+            name it resolved.
+        effort:
+          type: string
+          enum: ["", low, medium, high, xhigh, max]
+        slash_commands:
+          type: array
+          items:
+            type: string
+          description: >
+            The commands the CLI reported on its last init message, without
+            the leading slash (custom commands, plugin skills and
+            built-ins). Empty until a process has started.
       required:
         - id
         - owner_id
@@ -1234,6 +1326,8 @@ components:
         - tokens_out
         - now_line
         - model
+        - effort
+        - slash_commands
 
     Event:
       type: object
@@ -1303,4 +1397,29 @@ components:
           type: integer
         queue_depth:
           type: integer
-      required: [version, claude_version, open_processes, slots, queue_depth]
+        models:
+          type: array
+          description: The model aliases Styr offers, with their display labels.
+          items:
+            type: object
+            properties:
+              alias:
+                type: string
+              label:
+                type: string
+            required: [alias, label]
+        efforts:
+          type: array
+          description: The reasoning effort levels, in increasing order.
+          items:
+            type: string
+            enum: [low, medium, high, xhigh, max]
+        hidden_commands:
+          type: array
+          description: >
+            CLI built-ins the composer's slash menu must filter out of a
+            session's slash_commands: they do not survive headless mode,
+            are terminal-only, or are replaced by Styr's own controls.
+          items:
+            type: string
+      required: [version, claude_version, open_processes, slots, queue_depth, models, efforts, hidden_commands]

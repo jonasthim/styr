@@ -73,3 +73,54 @@ func TestProfilesCreate_RequiresAdmin(t *testing.T) {
 		t.Fatalf("POST /profiles as admin = %d, want 201", status)
 	}
 }
+
+// Builtin rows may have their model and effort changed: those are an operator preference,
+// not part of what makes a builtin profile safe.
+func TestProfilesPatch_BuiltinAcceptsModelAndEffort(t *testing.T) {
+	e := newEnv(t)
+	var out struct {
+		Model  string `json:"model"`
+		Effort string `json:"effort"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPatch, "/api/v1/profiles/investigate",
+		map[string]any{"model": "haiku", "effort": "low"}, &out)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH /profiles/investigate = %d, want 200", status)
+	}
+	if out.Model != "haiku" || out.Effort != "low" {
+		t.Errorf("model/effort = %q/%q, want haiku/low", out.Model, out.Effort)
+	}
+}
+
+func TestProfilesPatch_UnknownEffortIs422(t *testing.T) {
+	e := newEnv(t)
+	status := e.doJSON(e.adminClient, http.MethodPatch, "/api/v1/profiles/investigate",
+		map[string]any{"effort": "turbo"}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("PATCH /profiles/investigate with effort=turbo = %d, want 422", status)
+	}
+}
+
+func TestProfilesList_SeedsModelAndEffortOnUnattendedBuiltins(t *testing.T) {
+	e := newEnv(t)
+	var out []struct {
+		ID     string `json:"id"`
+		Model  string `json:"model"`
+		Effort string `json:"effort"`
+	}
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/profiles", nil, &out); status != http.StatusOK {
+		t.Fatalf("GET /profiles = %d, want 200", status)
+	}
+	for _, p := range out {
+		switch p.ID {
+		case "investigate", "remediate":
+			if p.Model != "sonnet" || p.Effort != "medium" {
+				t.Errorf("%s: model/effort = %q/%q, want sonnet/medium", p.ID, p.Model, p.Effort)
+			}
+		case "interactive":
+			if p.Model != "" || p.Effort != "" {
+				t.Errorf("interactive: model/effort = %q/%q, want the CLI defaults", p.Model, p.Effort)
+			}
+		}
+	}
+}

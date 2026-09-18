@@ -4,7 +4,7 @@
 // summary, without a circular import between the two handler modules.
 // handlers.ts still owns every /api/v1/sessions* route; this module only
 // owns the backing array and the ids other seed data needs to reference.
-import type { Session } from '../api/types'
+import type { Effort, ModelOption, Session } from '../api/types'
 import { MOCK_EVENT_SESSION_ID } from './fakeEventSource'
 
 function iso(minutesAgo: number): string {
@@ -17,6 +17,31 @@ export const DEV_USER_ID = '00000000-0000-4000-8000-000000000001'
 // "hello"). Hardcoded rather than exported for e2e: e2e specs run outside
 // Vite, so they can't import a module that pulls in a `?raw` fixture import.
 export const TOOL_FIXTURE_SESSION_ID = '00000000-0000-4000-8000-000000000005'
+
+// --- T38: model, effort and slash commands (additive) ----------------------
+// GET /status's static choices, mirroring internal/api/status_handlers.go and
+// internal/harness/claude/builtins.go, plus the command list the CLI reports
+// on init (a realistic mix: custom commands, a plugin skill, a headless-safe
+// built-in and two hidden ones, so a spec can prove the filter works).
+export const MOCK_MODELS: ModelOption[] = [
+  { alias: 'fable', label: 'Fable 5.1' },
+  { alias: 'opus', label: 'Opus 5' },
+  { alias: 'sonnet', label: 'Sonnet 5' },
+  { alias: 'haiku', label: 'Haiku 4.5' },
+]
+
+export const MOCK_EFFORTS: Exclude<Effort, ''>[] = ['low', 'medium', 'high', 'xhigh', 'max']
+
+export const MOCK_HIDDEN_COMMANDS = ['clear', 'doctor', 'color', 'reload-plugins', 'model', 'effort']
+
+export const MOCK_SLASH_COMMANDS = ['compact', 'commit-commands:commit', 'superpowers:brainstorming', 'clear', 'doctor']
+
+// How long the mock waits before the resumed process "reports in" with a new
+// init event, so the header's "Resuming with …" state is observable the way it
+// is against the real CLI.
+export const RESUME_DELAY_MS = 2000
+// --- end T38 block ---------------------------------------------------------
+
 
 export const sessions: Session[] = [
   {
@@ -38,6 +63,8 @@ export const sessions: Session[] = [
     tokens_out: 380,
     now_line: 'Waiting on your decision for Bash',
     model: 'claude-fable-5-1',
+    effort: 'medium',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: MOCK_EVENT_SESSION_ID,
@@ -58,6 +85,8 @@ export const sessions: Session[] = [
     tokens_out: 2100,
     now_line: 'Editing src/auth.ts',
     model: 'claude-fable-5-1',
+    effort: 'medium',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: '00000000-0000-4000-8000-000000000004',
@@ -78,6 +107,8 @@ export const sessions: Session[] = [
     tokens_out: 220,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     id: '00000000-0000-4000-8000-000000000006',
@@ -98,6 +129,8 @@ export const sessions: Session[] = [
     tokens_out: 640,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
   {
     // Fixed id (also hardcoded in e2e/session.spec.ts) so the Task 20 session
@@ -123,5 +156,7 @@ export const sessions: Session[] = [
     tokens_out: 111,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: MOCK_SLASH_COMMANDS,
   },
 ]

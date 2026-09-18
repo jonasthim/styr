@@ -66,6 +66,15 @@ func BuildArgs(spec harness.StartSpec) []string {
 	if spec.SystemPrompt != "" {
 		args = append(args, "--append-system-prompt", spec.SystemPrompt)
 	}
+	if spec.Model != "" {
+		args = append(args, "--model", spec.Model)
+	}
+	if spec.FallbackModel != "" {
+		args = append(args, "--fallback-model", spec.FallbackModel)
+	}
+	if spec.Effort != "" {
+		args = append(args, "--effort", spec.Effort)
+	}
 	return args
 }
 

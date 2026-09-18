@@ -43,4 +43,9 @@ type Session struct {
 	TokensOut    int
 	NowLine      string // latest "what it is doing" summary
 	Model        string
+	// Effort is the reasoning effort the process was started with ("" = the CLI default).
+	Effort string
+	// SlashCommands is the command list the CLI reported on its last init message, without
+	// the leading slash. Nil until a process has started.
+	SlashCommands []string
 }

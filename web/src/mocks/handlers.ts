@@ -10,6 +10,7 @@ import type {
   Approval,
   ApiErrorBody,
   ClaudeTokenInfo,
+  Effort,
   Me,
   Profile,
   Provider,
@@ -28,7 +29,16 @@ import type { HarnessEventPayload } from '../lib/blocks'
 // into the block above so this card's additive changes don't collide with
 // another card's edit to that same import statement.
 import type { ApiToken, ApiTokenCreated } from '../api/types'
-import { DEV_USER_ID, TOOL_FIXTURE_SESSION_ID, sessions } from './sessionsState'
+import {
+  DEV_USER_ID,
+  MOCK_EFFORTS,
+  MOCK_HIDDEN_COMMANDS,
+  MOCK_MODELS,
+  MOCK_SLASH_COMMANDS,
+  RESUME_DELAY_MS,
+  TOOL_FIXTURE_SESSION_ID,
+  sessions,
+} from './sessionsState'
 import { triggersHandlers } from './triggersHandlers'
 
 function iso(minutesAgo: number): string {
@@ -58,6 +68,7 @@ function verifyToken(token: string): ClaudeTokenInfo | null {
 // is re-exported here since nothing else changes about this module's own
 // exports.
 export { TOOL_FIXTURE_SESSION_ID }
+
 
 // Per-session transcript event log. Seeded once at module load for the
 // fixture session; POST /messages appends to whichever session it targets.
@@ -172,6 +183,8 @@ const profiles: Profile[] = [
     unattended: false,
     approval_timeout: 0,
     builtin: true,
+    model: '',
+    effort: '',
   },
   {
     id: 'investigate',
@@ -190,6 +203,8 @@ const profiles: Profile[] = [
     unattended: true,
     approval_timeout: 1800,
     builtin: true,
+    model: 'sonnet',
+    effort: 'medium',
   },
   {
     id: 'remediate',
@@ -210,6 +225,8 @@ const profiles: Profile[] = [
     unattended: true,
     approval_timeout: 1800,
     builtin: true,
+    model: 'sonnet',
+    effort: 'medium',
   },
   {
     // One editable profile alongside the three builtins. Builtin rows lock
@@ -224,8 +241,11 @@ const profiles: Profile[] = [
     unattended: false,
     approval_timeout: 0,
     builtin: false,
+    model: '',
+    effort: '',
   },
 ]
+
 
 const approvals: Approval[] = [
   {
@@ -553,6 +573,8 @@ export const handlers = [
       unattended: body.unattended ?? false,
       approval_timeout: body.approval_timeout ?? 0,
       builtin: false,
+      model: body.model ?? '',
+      effort: body.effort ?? '',
     }
     profiles.push(p)
     return HttpResponse.json(p, { status: 201 })
@@ -570,16 +592,19 @@ export const handlers = [
     const p = profiles.find((x) => x.id === params.id)
     if (!p) return HttpResponse.json(errorBody('not_found', 'profile not found'), { status: 404 })
     if (p.builtin) {
-      // "Builtin profiles only allow max_turns and approval_timeout to
-      // change" (docs/openapi.yaml) - reject any other field that would
-      // actually change the stored value.
-      const editableKeys = new Set(['max_turns', 'approval_timeout'])
+      // "Builtin profiles only allow max_turns, approval_timeout, model and
+      // effort to change" (docs/openapi.yaml) - reject any other field that
+      // would actually change the stored value.
+      const editableKeys = new Set(['max_turns', 'approval_timeout', 'model', 'effort'])
       const offending = (Object.keys(body) as Array<keyof Profile>).some(
         (key) => !editableKeys.has(key) && body[key] !== undefined && body[key] !== p[key],
       )
       if (offending) {
         return HttpResponse.json(
-          errorBody('immutable_field', 'Builtin profiles only allow max turns and approval timeout to change.'),
+          errorBody(
+            'immutable_field',
+            'Builtin profiles only allow max turns, approval timeout, model and effort to change.',
+          ),
           { status: 422 },
         )
       }
@@ -591,7 +616,14 @@ export const handlers = [
   http.get('/api/v1/sessions', () => HttpResponse.json(sessions)),
 
   http.post('/api/v1/sessions', async ({ request }) => {
-    const body = (await request.json()) as { workspace_id: string; profile_id: string; title: string; prompt: string }
+    const body = (await request.json()) as {
+      workspace_id: string
+      profile_id: string
+      title: string
+      prompt: string
+      model?: string
+      effort?: Effort
+    }
     const session: Session = {
       id: crypto.randomUUID(),
       owner_id: DEV_USER_ID,
@@ -610,7 +642,9 @@ export const handlers = [
       tokens_in: 0,
       tokens_out: 0,
       now_line: '',
-      model: 'claude-fable-5-1',
+      model: body.model || 'claude-fable-5-1',
+      effort: body.effort ?? '',
+      slash_commands: MOCK_SLASH_COMMANDS,
     }
     sessions.unshift(session)
     return HttpResponse.json(session, { status: 201 })
@@ -638,6 +672,42 @@ export const handlers = [
     session.last_active_at = iso(0)
     return new HttpResponse(null, { status: 202 })
   }),
+
+  // --- T38: switch a session's model and effort (additive) ------------------
+  // Mirrors sessions.Service.SwitchModel: refuse while waiting on an approval,
+  // otherwise accept and resume. The model only changes once the resumed
+  // process's init message lands, which is what clears the header's
+  // "Resuming with …" state.
+  http.post('/api/v1/sessions/:id/model', async ({ request, params }) => {
+    const body = (await request.json()) as { model?: string; effort?: Effort }
+    const session = sessions.find((s) => s.id === params.id)
+    if (!session) return HttpResponse.json(errorBody('not_found', 'session not found'), { status: 404 })
+    if (session.state === 'waiting') {
+      return HttpResponse.json(
+        errorBody('conflict', 'Answer the pending approval before switching model.'),
+        { status: 409 },
+      )
+    }
+    session.effort = body.effort ?? ''
+    setTimeout(() => {
+      session.model = body.model || session.model
+      session.last_active_at = iso(0)
+      const event = appendEvent(session.id, {
+        Type: 'init',
+        At: iso(0),
+        Init: { SessionID: session.id, Model: session.model, Tools: [] },
+      })
+      emitFakeEvent('session.event', {
+        kind: 'session.event',
+        session_id: session.id,
+        owner_id: DEV_USER_ID,
+        seq: event.seq,
+        payload: event.payload,
+      })
+    }, RESUME_DELAY_MS)
+    return new HttpResponse(null, { status: 202 })
+  }),
+  // --- end T38 block --------------------------------------------------------
   http.post('/api/v1/sessions/:id/interrupt', () => new HttpResponse(null, { status: 202 })),
   http.post('/api/v1/sessions/:id/close', ({ params }) => {
     const session = sessions.find((s) => s.id === params.id)
@@ -683,6 +753,9 @@ export const handlers = [
       open_processes: sessions.filter((s) => s.state === 'running' || s.state === 'waiting').length,
       slots: 4,
       queue_depth: 0,
+      models: MOCK_MODELS,
+      efforts: MOCK_EFFORTS,
+      hidden_commands: MOCK_HIDDEN_COMMANDS,
     }
     return HttpResponse.json(status)
   }),

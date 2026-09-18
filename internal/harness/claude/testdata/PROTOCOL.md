@@ -260,6 +260,73 @@ The fixture file as committed ends on the `result` line (its trailing async `Ses
 recorder not isolating `HOME`/`XDG` for the child — was trimmed to match fixtures 01-05, all of
 which also end on `result`).
 
+## Built-in slash commands in `-p` mode
+
+Recorded 2026-09-18 (card T38) against the same real, logged-in workstation CLI 2.1.276 (Max
+subscription, no `ANTHROPIC_API_KEY`), one short session per command in `/tmp/styr-fixture-ws`,
+each driven by `hack/recorder/main.go` with the command as the only prompt (`-prompts '/compact'`
+and so on). The question the spike answers: when a `/name` user turn goes down the pipe, does the
+CLI **execute** the command, **echo** it as plain text, or **answer it as model text**?
+
+The short answer: the CLI **executes** all three, locally and for free. The reply arrives as an
+ordinary `assistant` text block whose `message.model` is the sentinel `"<synthetic>"`, followed by
+a `result` envelope with `subtype: "success"`, `num_turns: 0` and `total_cost_usd: 0` — no model
+call happens. Nothing is echoed, and no error is raised for a built-in the headless mode cannot
+service.
+
+| command | what the CLI did | verdict |
+| --- | --- | --- |
+| `/compact` | Executed. One `assistant` text block, `"Not enough messages to compact."` (the run was a fresh session), then `result` success, `num_turns` 0, cost 0, `duration_ms` 18. Session id unchanged. | works over the pipe |
+| `/cost` | Executed. One `assistant` text block with the full usage report (subscription limits, per-window percentages and reset times, 1441 characters), then `result` success, `num_turns` 0, cost 0. Session id unchanged. | works over the pipe |
+| `/clear` | Executed, **and reset the session.** A new top-level message type `conversation_reset` appeared, then a *second* `system`/`init` — under a **different `session_id`** from the one Styr started with. | hidden |
+
+`/clear`'s reset line, verbatim:
+
+```json
+{"type":"conversation_reset","new_conversation_id":"14b43ce2-...","uuid":"545fbaa5-...","session_id":"e3a647fb-..."}
+```
+
+and the `init` that follows it carries `session_id: "fde5daff-..."` — neither the original id nor
+`new_conversation_id`. The final `result` (success, `num_turns` 0, empty `result` string) carries
+that new id too. This is why `/clear` is hidden rather than merely noted: Styr resumes a session
+with `--resume <its own id>` and stores the transcript under that id, so a `/clear` would orphan
+the CLI-side conversation while Styr's own event log kept every message — a silent divergence with
+no signal the UI could show. `conversation_reset` is not a type the codec models; it decodes to
+`EventRaw` like any other unknown top-level type.
+
+**Classification.** `internal/harness/claude` exports the result as two lists:
+
+- `HeadlessBuiltins()` — `compact`, `cost`: verified to work over the pipe.
+- `HiddenBuiltins()` — the ones the UI must not offer:
+  - `clear`, for the reason above;
+  - `doctor`, `color`, `reload-plugins`, which the CLI itself reports as terminal-only in the
+    init message's `terminal_slash_commands` array (all three init lines recorded here list
+    exactly those three);
+  - `model` and `effort`, which Styr owns through the session header's selects: those restart
+    the process with new `--model`/`--effort` flags and persist the choice, so letting the CLI
+    change them behind Styr's back would leave the stored values wrong.
+
+Every other entry of `slash_commands` (custom project and user commands, plugin skills, the
+remaining built-ins) is offered unchanged — the CLI executes custom commands and skills in `-p`
+mode, and the two verified built-ins show the mechanism is the same for its own.
+
+**Fixtures kept.** Only `07_slash_compact.jsonl` (trimmed to the stdin line, `init`, the
+`assistant` reply and the `result`, matching how fixture 06 was trimmed). The `/cost` transcript
+was **not** kept: its payload is the operator's real subscription-usage figures, which do not
+belong in the repository, and it demonstrates nothing `07` does not. The `/clear` transcript was
+**not** kept either: 24 lines of which 20 are the recorder's own `SessionStart` hook noise, and
+the two lines that matter are quoted above.
+
+## Init: `slash_commands`
+
+The `system`/`init` envelope's `slash_commands` is a flat array of command names **without** the
+leading slash (`"compact"`, `"superpowers:brainstorming"`, `"commit-commands:commit"`), mixing
+custom commands, plugin skills and the CLI's own built-ins in one list, with no field saying which
+is which. 124 entries in each of the three T38 recordings. `terminal_slash_commands` is a separate,
+much shorter array of the built-ins that only work in the interactive terminal. `harness.Init`
+decodes `slash_commands` into `Init.SlashCommands`; the sessions service stores it on the session
+row so the composer's `/` menu can offer it without a live process.
+
 ## Other observations
 
 - `assistant` messages can carry a `thinking` block before `text` or `tool_use`; the codec

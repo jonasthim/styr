@@ -254,6 +254,8 @@ sessions.push(
     tokens_out: 1100,
     now_line: '',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: [],
   },
   {
     id: SESSION_RUN_RUNNING_ID,
@@ -274,6 +276,8 @@ sessions.push(
     tokens_out: 240,
     now_line: 'Reading journalctl output',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: [],
   },
   {
     id: SESSION_RUN_NEEDS_HUMAN_ID,
@@ -294,6 +298,8 @@ sessions.push(
     tokens_out: 410,
     now_line: 'Waiting on your decision for Bash',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: [],
   },
 )
 
@@ -500,6 +506,8 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
     tokens_out: 0,
     now_line: 'Investigating…',
     model: 'claude-fable-5-1',
+    effort: '',
+    slash_commands: [],
   }
   sessions.push(session)
 

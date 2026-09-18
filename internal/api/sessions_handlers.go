@@ -21,6 +21,7 @@ func registerSessionsRoutes(r chi.Router, d *Deps) {
 	r.Post("/sessions/{id}/messages", handleSessionsMessage(d))
 	r.Post("/sessions/{id}/interrupt", handleSessionsInterrupt(d))
 	r.Post("/sessions/{id}/close", handleSessionsClose(d))
+	r.Post("/sessions/{id}/model", handleSessionsModel(d))
 	r.Get("/sessions/{id}/events", handleSessionsEvents(d))
 }
 
@@ -43,6 +44,10 @@ type sessionDTO struct {
 	TokensOut    int       `json:"tokens_out"`
 	NowLine      string    `json:"now_line"`
 	Model        string    `json:"model"`
+	Effort       string    `json:"effort"`
+	// SlashCommands is what the CLI reported on its last init message, without the leading
+	// slash; the composer's slash menu is built from it.
+	SlashCommands []string `json:"slash_commands"`
 }
 
 func sessionDTOFrom(s domain.Session) sessionDTO {
@@ -51,6 +56,7 @@ func sessionDTOFrom(s domain.Session) sessionDTO {
 		Harness: s.Harness, State: string(s.State), Origin: string(s.Origin), OriginRef: s.OriginRef,
 		Worktree: s.Worktree, CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, NumTurns: s.NumTurns,
 		CostUSD: s.CostUSD, TokensIn: s.TokensIn, TokensOut: s.TokensOut, NowLine: s.NowLine, Model: s.Model,
+		Effort: s.Effort, SlashCommands: commandList(s.SlashCommands),
 	}
 }
 
@@ -83,11 +89,22 @@ func handleSessionsList(d *Deps) http.HandlerFunc {
 	}
 }
 
+// commandList normalises a nil slash-command list to an empty array, so the JSON field is
+// always an array and the frontend never has to guard against null.
+func commandList(in []string) []string {
+	if in == nil {
+		return []string{}
+	}
+	return in
+}
+
 type sessionCreateInput struct {
 	WorkspaceID string `json:"workspace_id"`
 	ProfileID   string `json:"profile_id"`
 	Title       string `json:"title"`
 	Prompt      string `json:"prompt"`
+	Model       string `json:"model"`
+	Effort      string `json:"effort"`
 }
 
 // handleSessionsCreate is POST /api/v1/sessions: the session is owned by
@@ -108,6 +125,8 @@ func handleSessionsCreate(d *Deps) http.HandlerFunc {
 			Prompt:      in.Prompt,
 			Origin:      domain.OriginUI,
 			Owner:       &ownerID,
+			Model:       in.Model,
+			Effort:      in.Effort,
 		})
 		if err != nil {
 			WriteError(w, err)
@@ -172,6 +191,29 @@ func handleSessionsClose(d *Deps) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+type sessionModelInput struct {
+	Model  string `json:"model"`
+	Effort string `json:"effort"`
+}
+
+// handleSessionsModel is POST /api/v1/sessions/{id}/model: it restarts the session's process
+// under the new model and effort, resuming the same session id.
+func handleSessionsModel(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var in sessionModelInput
+		if err := decodeJSON(r, &in); err != nil {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "invalid request body")
+			return
+		}
+		if err := d.Sessions.SwitchModel(r.Context(), actorFrom(r), id, in.Model, in.Effort); err != nil {
+			WriteError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusAccepted)
 	}
 }
 

@@ -182,3 +182,50 @@ func TestSessions_ListVisibleOrdering(t *testing.T) {
 		}
 	}
 }
+
+func TestSessions_EffortAndSlashCommandsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	ws := sessionsTestFixture(t, ctx, d)
+	sessions := NewSessions(d)
+
+	sess := newTestSession(ws.ID, nil, domain.SessionRunning)
+	sess.Effort = "medium"
+	if err := sessions.Create(ctx, sess); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Effort != "medium" {
+		t.Errorf("effort = %q, want medium", got.Effort)
+	}
+	if len(got.SlashCommands) != 0 {
+		t.Errorf("slash commands = %v, want empty before the first init", got.SlashCommands)
+	}
+
+	if err := sessions.UpdateEffort(ctx, sess.ID, "high"); err != nil {
+		t.Fatalf("UpdateEffort: %v", err)
+	}
+	if err := sessions.UpdateSlashCommands(ctx, sess.ID, []string{"compact", "superpowers:brainstorming"}); err != nil {
+		t.Fatalf("UpdateSlashCommands: %v", err)
+	}
+	got, err = sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get after updates: %v", err)
+	}
+	if got.Effort != "high" {
+		t.Errorf("effort = %q, want high", got.Effort)
+	}
+	if len(got.SlashCommands) != 2 || got.SlashCommands[0] != "compact" || got.SlashCommands[1] != "superpowers:brainstorming" {
+		t.Errorf("slash commands = %v, want [compact superpowers:brainstorming]", got.SlashCommands)
+	}
+}
+
+func TestSessions_UpdateEffortNotFound(t *testing.T) {
+	sessions := NewSessions(testOpenDB(t))
+	if err := sessions.UpdateEffort(context.Background(), "missing", "low"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("UpdateEffort on a missing session = %v, want ErrNotFound", err)
+	}
+}

@@ -176,3 +176,69 @@ func TestCloseOnIdleProcessYieldsExitAndClosesChannel(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildArgsModelFallbackAndEffort(t *testing.T) {
+	s := spec()
+	s.Model, s.FallbackModel, s.Effort = "sonnet", "haiku", "high"
+	got := strings.Join(BuildArgs(s), " ")
+	for _, want := range []string{"--model sonnet", "--fallback-model haiku", "--effort high"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args %q lack %q", got, want)
+		}
+	}
+}
+
+func TestBuildArgsModelFallbackAndEffortAbsentWhenEmpty(t *testing.T) {
+	got := strings.Join(BuildArgs(spec()), " ")
+	for _, unwanted := range []string{"--model", "--fallback-model", "--effort"} {
+		if strings.Contains(got, unwanted) {
+			t.Errorf("args %q should not contain %q when unset", got, unwanted)
+		}
+	}
+}
+
+func TestStartRejectsUnknownEffort(t *testing.T) {
+	s := spec()
+	s.Cwd, s.Home = t.TempDir(), t.TempDir()
+	s.Effort = "turbo"
+	if _, err := New(fakeBinary(t)).Start(context.Background(), s); err == nil {
+		t.Fatal("Start accepted an unknown effort level")
+	}
+}
+
+func TestBuiltinListsAreDisjointAndNonEmpty(t *testing.T) {
+	headless, hidden := HeadlessBuiltins(), HiddenBuiltins()
+	if len(headless) == 0 || len(hidden) == 0 {
+		t.Fatalf("headless=%v hidden=%v, want both non-empty", headless, hidden)
+	}
+	in := map[string]bool{}
+	for _, c := range headless {
+		in[c] = true
+	}
+	for _, c := range hidden {
+		if in[c] {
+			t.Errorf("%q is both headless and hidden", c)
+		}
+	}
+	// The spike's two headline findings, so a future edit cannot quietly invert them.
+	if !in["compact"] {
+		t.Error("compact must be a headless builtin")
+	}
+	hiddenSet := map[string]bool{}
+	for _, c := range hidden {
+		hiddenSet[c] = true
+	}
+	if !hiddenSet["clear"] {
+		t.Error("clear must be hidden: it re-inits under a new session id")
+	}
+}
+
+// HeadlessBuiltins and HiddenBuiltins must hand out copies: a caller mutating the returned
+// slice must not corrupt the package's own lists.
+func TestBuiltinListsAreCopies(t *testing.T) {
+	first := HiddenBuiltins()
+	first[0] = "mutated"
+	if HiddenBuiltins()[0] == "mutated" {
+		t.Fatal("HiddenBuiltins returned its backing array")
+	}
+}

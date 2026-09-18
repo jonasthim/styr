@@ -14,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderPlus } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api, ApiError } from '../../api/client'
-import type { Session } from '../../api/types'
+import type { Effort, Session } from '../../api/types'
 import { workspaceOptionLabel } from '../workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, Field, Input, Kbd, MOD_KEY, Select, Textarea } from '../ui'
 
@@ -25,18 +25,45 @@ interface CreateSessionBody {
   profile_id: string
   title: string
   prompt: string
+  model: string
+  effort: Effort
 }
 
-export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+// The value the model and effort selects show for "whatever the CLI defaults
+// to" — Radix Select has no empty-string item value.
+const CLI_DEFAULT = '__default'
+
+const EFFORT_LABEL: Record<Exclude<Effort, ''>, string> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+  xhigh: 'Extra high',
+  max: 'Max',
+}
+
+export function NewSessionDialog({
+  open,
+  onOpenChange,
+  workspaceId: initialWorkspaceId,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  /** Preselects a workspace — the composer's `/new` starts the next session in
+   * the one the current session is already running in. */
+  workspaceId?: string
+}) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const workspacesQuery = useQuery({ ...q.workspaces(), enabled: open })
   const profiles = useQuery({ ...q.profiles(), enabled: open })
+  const status = useQuery({ ...q.status(), enabled: open })
 
-  const [workspaceId, setWorkspaceId] = useState('')
+  const [workspaceId, setWorkspaceId] = useState(initialWorkspaceId ?? '')
   const [profileId, setProfileId] = useState('')
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [model, setModel] = useState(CLI_DEFAULT)
+  const [effort, setEffort] = useState<string>(CLI_DEFAULT)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // A workspace still cloning (or one that failed) can't run a session yet -
@@ -58,6 +85,15 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
     if (workspace) setProfileId(workspace.default_profile_id)
   }, [workspaceId, readyWorkspaces])
 
+  // Model and effort default to the chosen profile's own defaults; an empty
+  // profile default means the CLI's.
+  useEffect(() => {
+    const profile = profiles.data?.find((p) => p.id === profileId)
+    if (!profile) return
+    setModel(profile.model || CLI_DEFAULT)
+    setEffort(profile.effort || CLI_DEFAULT)
+  }, [profileId, profiles.data])
+
   useEffect(() => {
     const el = textareaRef.current
     if (!el) return
@@ -76,7 +112,14 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
     mutationFn: () =>
       api<Session>('/api/v1/sessions', {
         method: 'POST',
-        json: { workspace_id: workspaceId, profile_id: profileId, title, prompt } satisfies CreateSessionBody,
+        json: {
+          workspace_id: workspaceId,
+          profile_id: profileId,
+          title,
+          prompt,
+          model: model === CLI_DEFAULT ? '' : model,
+          effort: effort === CLI_DEFAULT ? '' : (effort as Effort),
+        } satisfies CreateSessionBody,
       }),
     onSuccess: (session) => {
       queryClient.setQueryData<Session[]>(['sessions'], (prev) => (prev ? [session, ...prev] : [session]))
@@ -208,6 +251,35 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
                     onValueChange={setProfileId}
                     placeholder="Choose a profile"
                     options={(profiles.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
+                  />
+                )}
+              </Field>
+            </div>
+
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <Field label="Model" className="flex-1">
+                {({ id }) => (
+                  <Select
+                    id={id}
+                    value={model}
+                    onValueChange={setModel}
+                    options={[
+                      { value: CLI_DEFAULT, label: 'Default model' },
+                      ...(status.data?.models ?? []).map((m) => ({ value: m.alias, label: m.label })),
+                    ]}
+                  />
+                )}
+              </Field>
+              <Field label="Effort" className="flex-1">
+                {({ id }) => (
+                  <Select
+                    id={id}
+                    value={effort}
+                    onValueChange={setEffort}
+                    options={[
+                      { value: CLI_DEFAULT, label: 'Default effort' },
+                      ...(status.data?.efforts ?? []).map((e) => ({ value: e, label: EFFORT_LABEL[e] })),
+                    ]}
                   />
                 )}
               </Field>

@@ -19,7 +19,7 @@ type Profiles struct{ d *DB }
 // NewProfiles constructs a Profiles repository.
 func NewProfiles(d *DB) *Profiles { return &Profiles{d: d} }
 
-const profileColumns = `id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout_s, builtin`
+const profileColumns = `id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout_s, builtin, model, effort`
 
 func marshalToolList(tools []string) string {
 	if tools == nil {
@@ -33,9 +33,10 @@ func marshalToolList(tools []string) string {
 func (p *Profiles) Create(ctx context.Context, pr domain.Profile) error {
 	_, err := p.d.ExecContext(ctx, `
 		INSERT INTO profiles (`+profileColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		pr.ID, pr.Name, pr.Mode, marshalToolList(pr.AllowedTools), marshalToolList(pr.DisallowedTools),
-		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), boolToInt(pr.Builtin))
+		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), boolToInt(pr.Builtin),
+		pr.Model, pr.Effort)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create profile: %w", domain.ErrConflict)
@@ -53,7 +54,7 @@ func scanProfile(row interface{ Scan(dest ...any) error }) (*domain.Profile, err
 		approvalTimeoutS    int
 	)
 	if err := row.Scan(&pr.ID, &pr.Name, &pr.Mode, &allowed, &disallowed, &pr.MaxTurns,
-		&unattended, &approvalTimeoutS, &builtin); err != nil {
+		&unattended, &approvalTimeoutS, &builtin, &pr.Model, &pr.Effort); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(allowed), &pr.AllowedTools)
@@ -99,9 +100,9 @@ func (p *Profiles) List(ctx context.Context) ([]domain.Profile, error) {
 func (p *Profiles) Update(ctx context.Context, pr domain.Profile) error {
 	res, err := p.d.ExecContext(ctx, `
 		UPDATE profiles SET name = ?, mode = ?, allowed_tools = ?, disallowed_tools = ?,
-			max_turns = ?, unattended = ?, approval_timeout_s = ? WHERE id = ?`,
+			max_turns = ?, unattended = ?, approval_timeout_s = ?, model = ?, effort = ? WHERE id = ?`,
 		pr.Name, pr.Mode, marshalToolList(pr.AllowedTools), marshalToolList(pr.DisallowedTools),
-		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), pr.ID)
+		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), pr.Model, pr.Effort, pr.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("update profile: %w", domain.ErrConflict)

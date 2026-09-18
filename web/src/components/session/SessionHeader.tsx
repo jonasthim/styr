@@ -1,5 +1,6 @@
-// Session view header: title, workspace/profile chips, state, model, running
-// stats, and the Interrupt/Close/copy-id actions.
+// Session view header: title, workspace/profile chips, state, the model and
+// effort selects (ModelSwitcher.tsx), running stats, and the
+// Interrupt/Close/copy-id actions.
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -7,6 +8,7 @@ import { Copy, Check, Square, XCircle, Zap } from 'lucide-react'
 import { api } from '../../api/client'
 import type { Session, SessionState } from '../../api/types'
 import { Badge, Button, Tooltip } from '../ui'
+import { ModelSwitcher } from './ModelSwitcher'
 
 const STATE_LABEL: Record<SessionState, string> = {
   open: 'Open',
@@ -114,11 +116,9 @@ export function SessionHeader({
         </div>
       </div>
 
+      <ModelSwitcher session={session} />
+
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[12px] tabular-nums text-fg-secondary">
-        <span>{session.model}</span>
-        <span aria-hidden className="text-fg-muted">
-          ·
-        </span>
         <span>
           {session.num_turns} {session.num_turns === 1 ? 'turn' : 'turns'}
         </span>

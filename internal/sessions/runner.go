@@ -47,7 +47,12 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 		switch ev.Type {
 		case harness.EventInit:
 			if ev.Init != nil {
+				// The CLI reports the model it actually resolved (a full name such as
+				// "claude-fable-5-1", not the alias Styr asked for) and the commands it
+				// would accept as /name turns; both are stored on the session row so the
+				// UI can show them without a live process.
 				_ = s.repos.Sessions.UpdateModel(ctx, sess.ID, ev.Init.Model)
+				_ = s.repos.Sessions.UpdateSlashCommands(ctx, sess.ID, ev.Init.SlashCommands)
 			}
 		case harness.EventToolUse:
 			if ev.ToolUse != nil {
