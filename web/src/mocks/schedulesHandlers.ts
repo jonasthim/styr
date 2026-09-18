@@ -30,6 +30,7 @@ import type {
 } from '../api/types'
 import { DEV_USER_ID, sessions } from './sessionsState'
 import { LOOP_ID, LOOP_SESSION_ID, TEMPLATE_LOOP_ID, loops } from './loopsState'
+import { pipelines } from './pipelinesState'
 import { runs, startRun, templates } from './triggersHandlers'
 import { previewCron, parseCron, nextRuns } from './cron'
 
@@ -156,6 +157,7 @@ runs.unshift(
     cost_usd: 0.26,
     loop_id: LOOP_ID,
     iteration: 1,
+    step_run_id: null,
   },
   {
     id: LOOP_RUN_2_ID,
@@ -172,6 +174,7 @@ runs.unshift(
     cost_usd: 0.32,
     loop_id: LOOP_ID,
     iteration: 2,
+    step_run_id: null,
   },
 )
 
@@ -186,6 +189,7 @@ const schedules: Schedule[] = [
     owner_id: DEV_USER_ID,
     name: 'Nightly dependency sweep',
     template_id: TEMPLATE_LOOP_ID,
+    pipeline_id: null,
     cron: '0 3 * * *',
     enabled: true,
     vars: { branch: 'main', depth: 'full' },
@@ -200,6 +204,7 @@ const schedules: Schedule[] = [
     owner_id: DEV_USER_ID,
     name: 'Weekly changelog digest',
     template_id: templates[0]!.id,
+    pipeline_id: null,
     cron: '0 9 * * 1',
     enabled: false,
     vars: {},
@@ -416,7 +421,12 @@ export const schedulesHandlers = [
     if (!body.name?.trim()) {
       return HttpResponse.json(errorBody('invalid', 'Name is required.'), { status: 422 })
     }
-    if (!body.template_id || !templates.some((t) => t.id === body.template_id)) {
+    // T54: a schedule starts a template or a pipeline, never both.
+    const wantsPipeline = !!body.pipeline_id
+    if (wantsPipeline && !pipelines.some((p) => p.id === body.pipeline_id)) {
+      return HttpResponse.json(errorBody('invalid', 'Choose a pipeline.'), { status: 422 })
+    }
+    if (!wantsPipeline && (!body.template_id || !templates.some((t) => t.id === body.template_id))) {
       return HttpResponse.json(errorBody('invalid', 'Choose a template.'), { status: 422 })
     }
     if (!body.cron || !parseCron(body.cron)) {
@@ -428,7 +438,8 @@ export const schedulesHandlers = [
       id: nextId('sched'),
       owner_id: DEV_USER_ID,
       name: body.name,
-      template_id: body.template_id,
+      template_id: wantsPipeline ? '' : (body.template_id ?? ''),
+      pipeline_id: body.pipeline_id ?? null,
       cron: body.cron,
       enabled,
       vars: body.vars ?? {},

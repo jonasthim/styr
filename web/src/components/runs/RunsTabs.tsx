@@ -8,6 +8,7 @@ import clsx from 'clsx'
 const ITEMS = [
   { to: '/runs', label: 'Runs', exact: true },
   { to: '/runs/loops', label: 'Loops', exact: false },
+  { to: '/runs/pipelines', label: 'Pipelines', exact: false },
   { to: '/runs/costs', label: 'Cost', exact: false },
 ] as const
 

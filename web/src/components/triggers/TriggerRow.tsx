@@ -13,12 +13,13 @@ import { KindChip } from './chips'
 
 export function TriggerRow({
   trigger,
-  templateName,
+  targetName,
   onOpenDeliveries,
   onOpenTest,
 }: {
   trigger: Trigger
-  templateName: string
+  /** The template or pipeline this trigger starts, resolved by the page. */
+  targetName: string
   onOpenDeliveries: (trigger: Trigger) => void
   onOpenTest: (trigger: Trigger) => void
 }) {
@@ -39,6 +40,7 @@ export function TriggerRow({
           name: trigger.name,
           kind: trigger.kind,
           template_id: trigger.template_id,
+          pipeline_id: trigger.pipeline_id,
           dedupe_key_template: trigger.dedupe_key_template,
           cooldown_s: trigger.cooldown_s,
           storm_cap_per_hour: trigger.storm_cap_per_hour,
@@ -60,7 +62,7 @@ export function TriggerRow({
       <Td>
         <KindChip kind={trigger.kind} />
       </Td>
-      <Td className="min-w-0 truncate font-mono text-[12px] text-fg-secondary">{templateName}</Td>
+      <Td className="min-w-0 truncate font-mono text-[12px] text-fg-secondary">{targetName}</Td>
       <Td className="whitespace-nowrap font-mono text-[12px] tabular-nums text-fg-muted">
         {trigger.last_delivery_at ? `${relativeTime(trigger.last_delivery_at)} ago` : 'never'}
       </Td>

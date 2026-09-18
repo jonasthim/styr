@@ -5,7 +5,17 @@
 // (AuthGate, once the user is known) rather than per page.
 import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
-import type { Approval, Session, SessionEvent, Workspace, WorkspaceState } from '../api/types'
+import type {
+  Approval,
+  PipelineRunState,
+  PipelineRunView,
+  PipelineStatePayload,
+  Session,
+  SessionEvent,
+  StepRunState,
+  Workspace,
+  WorkspaceState,
+} from '../api/types'
 import { usePartialsStore } from '../store/partials'
 import { useLiveStatusStore } from '../store/live'
 
@@ -18,6 +28,7 @@ const LIVE_KINDS = [
   'approval.created',
   'approval.decided',
   'workspace.state',
+  'pipeline.state',
 ] as const
 type LiveKind = (typeof LIVE_KINDS)[number]
 
@@ -99,6 +110,30 @@ function applyWorkspaceState(client: QueryClient, message: BusMessage) {
   )
 }
 
+/** `pipeline.state` carries no session either: it names a pipeline run and,
+ * for a step's own move, the step run inside it. The run page reads
+ * ['pipeline-run', id], so the frame patches that view in place rather than
+ * refetching the whole graph on every step. */
+function applyPipelineState(client: QueryClient, message: BusMessage) {
+  const patch = message.payload as PipelineStatePayload
+  if (!patch?.pipeline_run_id) return
+  client.setQueryData<PipelineRunView>(['pipeline-run', patch.pipeline_run_id], (prev) => {
+    if (!prev) return prev
+    if (patch.step_run_id) {
+      return {
+        ...prev,
+        steps: prev.steps.map((step) =>
+          step.id === patch.step_run_id ? { ...step, state: patch.state as StepRunState } : step,
+        ),
+      }
+    }
+    return { ...prev, run: { ...prev.run, state: patch.state as PipelineRunState } }
+  })
+  // A step-level frame only moves one node; a run-level one changes which
+  // runs the list shows, so that cache is refetched rather than guessed at.
+  if (!patch.step_run_id) void client.invalidateQueries({ queryKey: ['pipeline-runs'] })
+}
+
 function applyMessage(client: QueryClient, kind: LiveKind, message: BusMessage) {
   switch (kind) {
     case 'session.event':
@@ -119,6 +154,9 @@ function applyMessage(client: QueryClient, kind: LiveKind, message: BusMessage) 
       return
     case 'workspace.state':
       applyWorkspaceState(client, message)
+      return
+    case 'pipeline.state':
+      applyPipelineState(client, message)
       return
   }
 }

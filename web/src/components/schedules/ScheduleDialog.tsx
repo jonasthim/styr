@@ -8,23 +8,36 @@ import { api, ApiError } from '../../api/client'
 import { q } from '../../api/queries'
 import type { Schedule } from '../../api/types'
 import { useToast } from '../../hooks/useToast'
+import { TargetSelector, type RunTarget } from '../pipelines/TargetSelector'
 import { Button, Dialog, DialogContent, Field, Input, Select, Switch, Textarea } from '../ui'
 import { CronPreview } from './CronPreview'
 
 interface Draft {
   name: string
+  target: RunTarget
   templateId: string
+  pipelineId: string
   cron: string
   vars: string
   enabled: boolean
 }
 
-const EMPTY: Draft = { name: '', templateId: '', cron: '0 9 * * *', vars: '{}', enabled: true }
+const EMPTY: Draft = {
+  name: '',
+  target: 'template',
+  templateId: '',
+  pipelineId: '',
+  cron: '0 9 * * *',
+  vars: '{}',
+  enabled: true,
+}
 
 function draftFrom(schedule: Schedule): Draft {
   return {
     name: schedule.name,
+    target: schedule.pipeline_id ? 'pipeline' : 'template',
     templateId: schedule.template_id,
+    pipelineId: schedule.pipeline_id ?? '',
     cron: schedule.cron,
     vars: JSON.stringify(schedule.vars ?? {}, null, 2),
     enabled: schedule.enabled,
@@ -43,6 +56,7 @@ export function ScheduleDialog({
   const queryClient = useQueryClient()
   const { toast } = useToast()
   const templates = useQuery({ ...q.templates(), enabled: open })
+  const pipelines = useQuery({ ...q.pipelines(), enabled: open })
   const [draft, setDraft] = useState<Draft>(EMPTY)
   const [saving, setSaving] = useState(false)
 
@@ -72,17 +86,22 @@ export function ScheduleDialog({
   }
 
   const templateOptions = (templates.data ?? []).map((t) => ({ value: t.id, label: t.name }))
-  // Falls back to the first template so the dialog is savable the moment a
-  // name is typed, rather than making the picker a required extra step.
+  const pipelineOptions = (pipelines.data ?? []).map((p) => ({ value: p.id, label: p.name }))
+  // Falls back to the first entry so the dialog is savable the moment a name
+  // is typed, rather than making the picker a required extra step.
   const templateId = draft.templateId || templateOptions[0]?.value || ''
-  const canSave = !!draft.name.trim() && !!templateId && !!draft.cron.trim() && !varsError
+  const pipelineId = draft.pipelineId || pipelineOptions[0]?.value || ''
+  const hasTarget = draft.target === 'template' ? !!templateId : !!pipelineId
+  const canSave = !!draft.name.trim() && hasTarget && !!draft.cron.trim() && !varsError
 
   async function handleSave() {
     if (!canSave) return
     setSaving(true)
     const body = {
       name: draft.name.trim(),
-      template_id: templateId,
+      // A schedule starts a template or a pipeline, never both (T54).
+      template_id: draft.target === 'template' ? templateId : '',
+      pipeline_id: draft.target === 'pipeline' ? pipelineId : null,
       cron: draft.cron.trim(),
       vars: parsedVars,
       enabled: draft.enabled,
@@ -128,18 +147,35 @@ export function ScheduleDialog({
             {({ id }) => <Input id={id} value={draft.name} onChange={(e) => set('name', e.target.value)} />}
           </Field>
 
-          <Field label="Template">
-            {({ id }) => (
-              <Select
-                id={id}
-                aria-label="Template"
-                value={templateId}
-                onValueChange={(v) => set('templateId', v)}
-                options={templateOptions}
-                placeholder="Pick a template"
-              />
-            )}
-          </Field>
+          <TargetSelector value={draft.target} onChange={(value) => set('target', value)} />
+
+          {draft.target === 'template' ? (
+            <Field label="Template">
+              {({ id }) => (
+                <Select
+                  id={id}
+                  aria-label="Template"
+                  value={templateId}
+                  onValueChange={(v) => set('templateId', v)}
+                  options={templateOptions}
+                  placeholder="Pick a template"
+                />
+              )}
+            </Field>
+          ) : (
+            <Field label="Pipeline">
+              {({ id }) => (
+                <Select
+                  id={id}
+                  aria-label="Pipeline"
+                  value={pipelineId}
+                  onValueChange={(v) => set('pipelineId', v)}
+                  options={pipelineOptions}
+                  placeholder="Pick a pipeline"
+                />
+              )}
+            </Field>
+          )}
 
           <Field label="Cron" hint="Runs in the server's timezone.">
             {({ id }) => <Input id={id} mono value={draft.cron} onChange={(e) => set('cron', e.target.value)} />}

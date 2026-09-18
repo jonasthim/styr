@@ -48,14 +48,19 @@ function SkeletonRow() {
 export function Schedules() {
   const schedules = useQuery(q.schedules())
   const templates = useQuery(q.templates())
+  const pipelines = useQuery(q.pipelines())
   const [editing, setEditing] = useState<Schedule | null>(null)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [firingsTarget, setFiringsTarget] = useState<Schedule | null>(null)
 
   const descriptions = useCronDescriptions((schedules.data ?? []).map((s) => s.cron))
 
-  function templateName(id: string): string {
-    return templates.data?.find((t) => t.id === id)?.name ?? id
+  /** What a schedule starts: a template, or - since T54 - a pipeline. */
+  function targetName(schedule: Schedule): string {
+    if (schedule.pipeline_id) {
+      return pipelines.data?.find((p) => p.id === schedule.pipeline_id)?.name ?? schedule.pipeline_id
+    }
+    return templates.data?.find((t) => t.id === schedule.template_id)?.name ?? schedule.template_id
   }
 
   function openNew() {
@@ -100,7 +105,7 @@ export function Schedules() {
           <thead>
             <tr>
               <Th>Name</Th>
-              <Th>Template</Th>
+              <Th>Runs</Th>
               <Th>Cron</Th>
               <Th>Next run</Th>
               <Th>Last run</Th>
@@ -121,7 +126,7 @@ export function Schedules() {
               <ScheduleRow
                 key={schedule.id}
                 schedule={schedule}
-                templateName={templateName(schedule.template_id)}
+                targetName={targetName(schedule)}
                 description={descriptions.get(schedule.cron) ?? ''}
                 onEdit={openEdit}
                 onOpenFirings={setFiringsTarget}

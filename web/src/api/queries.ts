@@ -16,6 +16,10 @@ import type {
   LoopView,
   Me,
   NotificationChannel,
+  Pipeline,
+  PipelineRun,
+  PipelineRunState,
+  PipelineRunView,
   Profile,
   Provider,
   ReviewComment,
@@ -175,6 +179,34 @@ export const q = {
 
   costs: (days: number) =>
     queryOptions({ queryKey: ['costs', days], queryFn: () => api<CostStats>(`/api/v1/stats/costs?days=${days}`) }),
+
+  // --- pipelines (T54) -----------------------------------------------------
+  pipelines: () => queryOptions({ queryKey: ['pipelines'], queryFn: () => api<Pipeline[]>('/api/v1/pipelines') }),
+
+  pipeline: (id: string) =>
+    queryOptions({ queryKey: ['pipeline', id], queryFn: () => api<Pipeline>(`/api/v1/pipelines/${id}`) }),
+
+  pipelineRuns: (filters: { pipeline?: string; state?: PipelineRunState | ''; limit?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (filters.pipeline) params.set('pipeline', filters.pipeline)
+    if (filters.state) params.set('state', filters.state)
+    params.set('limit', String(filters.limit ?? 100))
+    return queryOptions({
+      queryKey: ['pipeline-runs', filters.pipeline ?? '', filters.state ?? ''],
+      queryFn: () => api<PipelineRun[]>(`/api/v1/pipeline-runs?${params.toString()}`),
+    })
+  },
+
+  /** One pipeline run with its steps and the graph they belong to. SSE
+   * `pipeline.state` frames patch this cache (useLiveEvents.ts); the poll is
+   * the safety net for the elapsed clock and for a frame that went missing
+   * while the tab was asleep. */
+  pipelineRun: (id: string) =>
+    queryOptions({
+      queryKey: ['pipeline-run', id],
+      queryFn: () => api<PipelineRunView>(`/api/v1/pipeline-runs/${id}`),
+      refetchInterval: (query) => (query.state.data?.run.state === 'running' ? 4000 : false),
+    }),
 }
 
 /** Everything the review surface reads that a review action can change.

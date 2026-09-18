@@ -16,13 +16,14 @@ import { absoluteTime, lastOutcomeGlyph, untilTime } from './chips'
 
 export function ScheduleRow({
   schedule,
-  templateName,
+  targetName,
   description,
   onEdit,
   onOpenFirings,
 }: {
   schedule: Schedule
-  templateName: string
+  /** The template or pipeline this schedule starts, resolved by the page. */
+  targetName: string
   /** The human sentence for this row's cron, resolved by the page. */
   description: string
   onEdit: (schedule: Schedule) => void
@@ -41,6 +42,7 @@ export function ScheduleRow({
       const body: ScheduleInput = {
         name: schedule.name,
         template_id: schedule.template_id,
+        pipeline_id: schedule.pipeline_id,
         cron: schedule.cron,
         vars: schedule.vars,
         enabled: checked,
@@ -90,7 +92,7 @@ export function ScheduleRow({
           {schedule.name}
         </button>
       </Td>
-      <Td className="min-w-0 truncate font-mono text-[12px] text-fg-secondary">{templateName}</Td>
+      <Td className="min-w-0 truncate font-mono text-[12px] text-fg-secondary">{targetName}</Td>
       <Td>
         <span className="font-mono text-[12px] text-fg-primary">{schedule.cron}</span>
         {description && <span className="mt-0.5 block text-[11px] text-fg-muted">{description}</span>}

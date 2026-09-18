@@ -68,7 +68,7 @@ export function RunDetail() {
   // (internal/api/runs_handlers.go's runViewDTO); the trigger's name is not
   // one of them, so it is resolved from the triggers list the same way the
   // runs list does it.
-  const { run: detail, session, delivery, loop } = run.data
+  const { run: detail, session, delivery, loop, step, pipeline } = run.data
   const triggerName = detail.trigger_id ? (triggers.data?.find((t) => t.id === detail.trigger_id)?.name ?? null) : null
 
   return (
@@ -99,6 +99,21 @@ export function RunDetail() {
               >
                 <Badge tone="accent" variant="outline">
                   Iteration {detail.iteration} of {loop.max_iterations}
+                </Badge>
+              </Link>
+            )}
+            {/* A run a pipeline started is one step of something bigger;
+                the chip says which, and goes to the graph holding the rest. */}
+            {pipeline && step && (
+              <Link
+                to="/pipeline-runs/$id"
+                params={{ id: step.pipeline_run_id }}
+                data-testid="pipeline-step-chip"
+                className="no-underline"
+                title="Open the pipeline run this step belongs to"
+              >
+                <Badge tone="accent" variant="outline">
+                  Step of pipeline {pipeline.name}
                 </Badge>
               </Link>
             )}
