@@ -3,8 +3,11 @@
 // wants; the base branch starts as the ref the worktree was cut from.
 //
 // `gh` is optional (docs/superpowers/plans/2026-09-18-styr-v0.3-review.md,
-// "Constraints"), so the 409 is a first-class state here, not an error toast:
-// it tells the operator what is missing and where the setup is written down.
+// "Constraints") and a checkout need not have a remote at all, so both 409s
+// the handler can answer with - codes "gh_unavailable" and "no_remote"
+// (internal/api/review_handlers.go's writeReviewError) - are first-class
+// states here, not error toasts: they tell the operator what is missing and
+// where the setup is written down.
 import { useEffect, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { GitPullRequest } from 'lucide-react'
@@ -14,6 +17,10 @@ import { useToast } from '../../hooks/useToast'
 import { Button, Dialog, DialogContent, Field, Input, Textarea } from '../ui'
 
 const REVIEW_DOCS = 'https://github.com/jonasthim/styr/blob/main/docs/REVIEW.md'
+
+/** The two 409 codes that mean "your environment cannot publish this branch
+ * yet", which the dialog explains in place instead of failing the form. */
+const SETUP_CODES = ['gh_unavailable', 'no_remote']
 
 /** First line of the last assistant message, trimmed to a title's length. */
 function titleFrom(session: Session, summary: string): string {
@@ -54,7 +61,7 @@ export function PullRequestDialog({
       toast({ title: 'Pull request opened', description: result.url, tone: 'success' })
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.code === 'gh_unavailable') {
+      if (err instanceof ApiError && SETUP_CODES.includes(err.code)) {
         setUnavailable(err.message)
         return
       }
@@ -101,7 +108,7 @@ export function PullRequestDialog({
               <a href={REVIEW_DOCS} target="_blank" rel="noreferrer" className="text-accent underline">
                 docs/REVIEW.md
               </a>{' '}
-              covers installing and authenticating gh.
+              covers adding a remote and authenticating gh.
             </div>
           )}
         </div>

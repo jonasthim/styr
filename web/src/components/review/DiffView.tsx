@@ -86,12 +86,14 @@ function LineNo({
   type,
   onComment,
 }: {
-  no: number | null
+  no: number
   side: Side
   type: DiffLine['type']
   onComment: (anchor: Anchor) => void
 }) {
-  if (no === null) {
+  // 0 means "this line does not exist on this side" - git line numbers are
+  // 1-based, and the handler serves plain ints rather than nulls.
+  if (no === 0) {
     return <span aria-hidden className={clsx('block h-full w-10 shrink-0', GUTTER_BG[type])} />
   }
   return (
@@ -203,7 +205,10 @@ export function DiffView({ sessionId, path }: { sessionId: string; path: string 
   const [draft, setDraft] = useState<Anchor | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const file: FileDiff | undefined = fileQuery.data
+  // Not fileQuery.data: a failed refetch (the worktree was discarded while
+  // the file was open, so every review read answers 422) keeps the last
+  // successful diff in the cache, and showing it would be a lie.
+  const file: FileDiff | undefined = fileQuery.isError ? undefined : fileQuery.data
   const lang = useMemo(() => langFor(path), [path])
 
   const rows = useMemo<Array<UnifiedRow | SplitRow>>(() => {
@@ -273,8 +278,8 @@ export function DiffView({ sessionId, path }: { sessionId: string; path: string 
 
   function anchorsForLine(line: DiffLine): Anchor[] {
     const out: Anchor[] = []
-    if (line.old_no !== null) out.push({ side: 'old', line: line.old_no })
-    if (line.new_no !== null) out.push({ side: 'new', line: line.new_no })
+    if (line.old_no !== 0) out.push({ side: 'old', line: line.old_no })
+    if (line.new_no !== 0) out.push({ side: 'new', line: line.new_no })
     return out
   }
 
@@ -307,8 +312,8 @@ export function DiffView({ sessionId, path }: { sessionId: string; path: string 
     }
     const pair = row as PairRow
     const anchors: Anchor[] = []
-    if (pair.left?.old_no != null) anchors.push({ side: 'old', line: pair.left.old_no })
-    if (pair.right?.new_no != null) anchors.push({ side: 'new', line: pair.right.new_no })
+    if (pair.left && pair.left.old_no !== 0) anchors.push({ side: 'old', line: pair.left.old_no })
+    if (pair.right && pair.right.new_no !== 0) anchors.push({ side: 'new', line: pair.right.new_no })
     return (
       <div>
         <div className="grid grid-cols-2 items-stretch">

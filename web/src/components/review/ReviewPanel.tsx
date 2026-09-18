@@ -59,7 +59,12 @@ export function ReviewPanel({ session, blocks }: { session: Session; blocks: Blo
     })
   }
 
-  const files = diffQuery.data?.files ?? []
+  // A session with no worktree (never had one, or it was discarded) answers
+  // 422 here. TanStack Query keeps the last successful data on a failed
+  // refetch, so the error - not an empty file list - is what says there is
+  // nothing left to review.
+  const diff = diffQuery.isError ? undefined : diffQuery.data
+  const files = diff?.files ?? []
 
   return (
     <div className="flex flex-col">
@@ -68,14 +73,12 @@ export function ReviewPanel({ session, blocks }: { session: Session; blocks: Blo
           <h3 id="review-files-heading" className="text-[12px] font-medium text-fg-secondary">
             Changed files
           </h3>
-          {diffQuery.data && files.length > 0 && (
-            <DiffCount add={diffQuery.data.total_add} del={diffQuery.data.total_del} />
-          )}
+          {diff && files.length > 0 && <DiffCount add={diff.total_add} del={diff.total_del} />}
         </div>
 
         {files.length === 0 ? (
           <p className="px-3 pb-3 text-[12px] text-fg-muted">
-            {diffQuery.data?.branch ? 'Nothing changed on this branch yet.' : 'This session does not run in a worktree.'}
+            {diff?.branch ? 'Nothing changed on this branch yet.' : 'This session does not run in a worktree.'}
           </p>
         ) : (
           <ul data-testid="review-files" className="flex flex-col border-y border-hairline">

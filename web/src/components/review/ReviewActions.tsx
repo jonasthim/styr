@@ -11,7 +11,10 @@ import { DiscardDialog } from './DiscardDialog'
 
 export function ReviewActions({ session, summary }: { session: Session; summary: string }) {
   const diffQuery = useQuery(q.sessionDiff(session.id))
-  const diff = diffQuery.data
+  // isError, not just an empty branch: once the worktree is discarded the
+  // diff endpoint answers 422 forever, and the cache still holds the last
+  // successful summary - these actions have to go with the worktree.
+  const diff = diffQuery.isError ? undefined : diffQuery.data
   if (!diff?.branch) return null
 
   const busy = session.state === 'running' || session.state === 'waiting'
