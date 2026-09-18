@@ -10,7 +10,7 @@ stream-json` and speaks the documented protocol. Permission prompts are routed o
 fixtures when the CLI changes.
 
 ## ADR-002: Observed stream-json protocol, CLI 2.1.276
-Date: 2026-09-18. Status: accepted (permission-prompt fixture incomplete — see below).
+Date: 2026-09-18. Status: accepted.
 
 Fixtures in `internal/harness/claude/testdata` are the contract; full detail in that
 directory's `PROTOCOL.md`. Summary, one line per message type actually observed:

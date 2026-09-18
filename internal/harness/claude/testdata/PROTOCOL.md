@@ -167,63 +167,51 @@ In all three sessions, after the recorder called `stdin.Close()` (once `sendNext
 `cmd.Wait()` returned without needing to be killed. No hang was observed in any of the three
 sessions actually run.
 
-## Fixture 03: no `control_request` observed
+## Fixture 03 (re-recorded): permission prompt over stdio works
 
-`03_permission_bash.jsonl` was recorded twice, both attempts asking the model to run
-`echo styr-ok` via the Bash tool:
-
-1. `--permission-mode default` — the CLI ran the `Bash` tool_use immediately; the `result`
-   line's `permission_denials` field was `[]` and no `control_request` line of any subtype
-   appeared anywhere in the output.
-2. `--permission-mode manual` (the card's specified retry) — identical outcome: `Bash` ran
-   without any `control_request`/prompt, `permission_denials: []`.
-
-Full multiset of `type`/`subtype` values that appeared across both fixture-03 attempts (from
-the final, kept `manual`-mode recording — the plan's card asks for exactly this list):
+The first recording used `echo styr-ok`, which Claude Code auto-allows from its built-in list
+of harmless commands, so no prompt was ever needed. Re-recorded with a command that writes a
+file (`mkdir -p probe && date > probe/stamp.txt && cat probe/stamp.txt`); with
+`--permission-prompt-tool stdio` the CLI emitted:
 
 ```
-system/init            x1
-system/hook_started    x5
-system/hook_response   x5
-system/status          x2
-system/commands_changed (not present in this run; commands_changed only appeared in fixture 01/02)
-assistant               x2   (one "text" content block, one "tool_use" content block)
-stream_event            x19  (message_start, content_block_start, content_block_delta,
-                               content_block_stop, message_delta, message_stop)
-user                     x1   (echo of our stdin turn only — no tool_result line was emitted
-                               for the Bash call either; the model's final assistant text was
-                               derived without an intervening tool_result envelope appearing on
-                               stdout in this run)
-result                   x1   (subtype "success", is_error false, permission_denials: [])
+{"type":"control_request","request_id":"<uuid>","request":{"subtype":"can_use_tool","tool_name":"Bash","display_name":"Bash","input":{"command":"...","description":"..."},"description":"...","permission_suggestions":[{"type":"addRules","rules":[{"toolName":"Bash","ruleContent":"mkdir -p probe"}],"behavior":"allow","destination":"localSettings"}],"decision_reason_type":"...","tool_use_id":"toolu_..."}}
 ```
 
-No line anywhere in either attempt has `"type":"control_request"` or
-`"type":"control_response"`.
+Fields Styr uses: `request_id`, `request.subtype`, `request.tool_name`, `request.input`,
+`request.tool_use_id`. The host answers on stdin:
 
-**Most likely cause:** the recorder does not isolate `HOME` for the child `claude` process (the
-plan's recorder code as given does not set `cmd.Env`), so the spawned CLI inherits the
-operator's real `~/.claude` user settings — which, on this workstation, evidently already
-allow-list the `Bash` tool (or this specific command) well enough that `--permission-prompt-tool
-stdio` never needs to ask, regardless of `--permission-mode`. This is consistent with
-`permission_denials: []` (no denial *or* request was ever evaluated on the wire) and with
-fixture 02's `Read` tool also running with no prompt (expected — `Read` is not normally
-permission-gated). It is also possible that `--permission-mode manual` behaves the same as
-`default` for tools already covered by an allow rule, i.e. explicit allow rules short-circuit
-prompting entirely and no permission mode re-enables it.
+```
+{"type":"control_response","response":{"subtype":"success","request_id":"<uuid>","response":{"behavior":"allow"}}}
+```
 
-Per the card's instruction, no alternative flags (e.g. clearing/overriding the inherited
-settings, or `--dangerously-skip-permissions`, which is forbidden anyway) were attempted beyond
-the specified `-mode manual` retry. **This blocks fixture 03 and, in turn, `04_multi_turn.jsonl`
-and `05_interrupt.jsonl` were also not recorded** so as not to spend the remaining session
-budget before the human decides the fallback: either (a) re-run the recorder with an isolated
-`HOME`/settings directory that has no allow rules (risk: this workstation's `claude` login
-state also lives under `HOME`, so isolating it may require a copy of just the credential store
-into a scratch `HOME`, which this task was not authorized to inspect/construct), or (b) accept
-that Styr's runtime `HOME` isolation (per the design doc, `internal/harness` gives each spawned
-process its own `HOME` under the data dir with no operator-authored `settings.json` allow
-rules) already guarantees `control_request` fires as documented, and that this spike's failure
-to observe it is an artifact of running on the operator's own polluted `HOME`, not of the
-protocol itself — in which case Task 4 can still code the `control_request`/`control_response`
-shapes from the plan's card (they match the Agent SDK's own documented `canUseTool` wire
-format) without a fixture, and this task should be re-run in a follow-up spike once `HOME`
-isolation is available to produce a real fixture.
+The CLI echoes the same `control_response` line back on stdout (line 34 of the fixture); the
+codec ignores `control_response`. The tool then runs and a `user` message with a `tool_result`
+block follows. No `initialize` handshake was needed.
+
+## Fixture 04: multi-turn in one process
+
+Two user messages were written on stdin in one process. Each turn produced its own
+`system`/`init` line, `assistant` messages and a `result` (subtype `success`, `num_turns` 1
+each). The second answer was `41`, so context is kept across turns within the process. The
+process exited cleanly when stdin was closed after the second `result`.
+
+## Fixture 05: interrupt
+
+Host wrote `{"type":"control_request","request_id":"<uuid>","request":{"subtype":"interrupt"}}`
+4 s into a long generation. The CLI answered
+`{"type":"control_response","response":{"subtype":"success","request_id":"<uuid>","response":{"still_queued":[]}}}`,
+emitted a `user` message whose content block has `type: text` (the interruption notice), then a
+`result` with `subtype: error_during_execution`, `is_error: true`, `total_cost_usd: 0`, an
+`errors` array and no `result` text. The process stayed alive and exited when stdin closed.
+
+## Other observations
+
+- `assistant` messages can carry a `thinking` block before `text` or `tool_use`; the codec
+  ignores it.
+- `system` lines with subtypes `hook_started`, `hook_response`, `status`, `commands_changed`,
+  `messages_changed` appear; only `init` matters.
+- `rate_limit_event` lines appear occasionally; ignore.
+- `--verbose` is required together with `--output-format stream-json` in `-p` mode.
+- The `result` line carries `total_cost_usd`, `duration_ms`, `num_turns`, `is_error`,
+  `permission_denials`, `usage.input_tokens`, `usage.output_tokens`, `modelUsage`.
