@@ -17,6 +17,7 @@ type scheduleOut struct {
 	OwnerID     *string         `json:"owner_id"`
 	Name        string          `json:"name"`
 	TemplateID  string          `json:"template_id"`
+	PipelineID  *string         `json:"pipeline_id"`
 	Cron        string          `json:"cron"`
 	Enabled     bool            `json:"enabled"`
 	Vars        json.RawMessage `json:"vars"`
@@ -71,6 +72,64 @@ func TestSchedulesCreate_OK(t *testing.T) {
 	}
 	if out.ID != "sched-1" || out.Name != "nightly" || out.Cron != "0 2 * * *" {
 		t.Fatalf("out = %+v", out)
+	}
+}
+
+func TestSchedulesCreate_BothTemplateAndPipelineIs422(t *testing.T) {
+	e := newEnv(t)
+	e.schedules.CreateFn = func(context.Context, api.Actor, domain.ScheduleInput) (domain.Schedule, error) {
+		t.Fatal("Create must not be called when both template_id and pipeline_id are set")
+		return domain.Schedule{}, nil
+	}
+	var body errorOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "nightly", "template_id": "tmpl-1", "pipeline_id": "pipe-1", "cron": "0 2 * * *",
+	}, &body)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", status)
+	}
+	if body.Error.Code != "invalid" {
+		t.Fatalf("error code = %q, want invalid", body.Error.Code)
+	}
+}
+
+func TestSchedulesCreate_NeitherTemplateNorPipelineIs422(t *testing.T) {
+	e := newEnv(t)
+	e.schedules.CreateFn = func(context.Context, api.Actor, domain.ScheduleInput) (domain.Schedule, error) {
+		t.Fatal("Create must not be called when neither template_id nor pipeline_id is set")
+		return domain.Schedule{}, nil
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "nightly", "cron": "0 2 * * *",
+	}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", status)
+	}
+}
+
+func TestSchedulesCreate_PipelineIDOnly_OK(t *testing.T) {
+	e := newEnv(t)
+	e.schedules.CreateFn = func(_ context.Context, _ api.Actor, in domain.ScheduleInput) (domain.Schedule, error) {
+		if in.TemplateID != "" {
+			t.Fatalf("template_id = %q, want empty", in.TemplateID)
+		}
+		if in.PipelineID == nil || *in.PipelineID != "pipe-1" {
+			t.Fatalf("pipeline_id = %v, want pipe-1", in.PipelineID)
+		}
+		sc := sampleSchedule()
+		sc.TemplateID = ""
+		sc.PipelineID = in.PipelineID
+		return sc, nil
+	}
+	var out scheduleOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "nightly", "pipeline_id": "pipe-1", "cron": "0 2 * * *",
+	}, &out)
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", status)
+	}
+	if out.PipelineID == nil || *out.PipelineID != "pipe-1" {
+		t.Fatalf("pipeline_id = %v, want pipe-1", out.PipelineID)
 	}
 }
 
@@ -243,7 +302,7 @@ func TestSchedulesGet_JSONNeverExposesMoreThanDocumentedFields(t *testing.T) {
 		t.Fatalf("unmarshal: %v, body=%s", err, raw)
 	}
 	want := map[string]bool{
-		"id": true, "owner_id": true, "name": true, "template_id": true, "cron": true, "enabled": true,
+		"id": true, "owner_id": true, "name": true, "template_id": true, "pipeline_id": true, "cron": true, "enabled": true,
 		"vars": true, "last_run_at": true, "last_outcome": true, "next_run_at": true,
 		"created_at": true, "updated_at": true,
 	}

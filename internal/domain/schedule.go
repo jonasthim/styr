@@ -62,10 +62,13 @@ type ScheduleFiring struct {
 // pointer so update can distinguish "leave enabled as-is" (nil) from an
 // explicit true/false; create treats nil as enabled. Shared marks a
 // schedule as owned by nobody (OwnerID nil) rather than the acting user;
-// only an admin actor may set it.
+// only an admin actor may set it. PipelineID is the alternative to
+// TemplateID: exactly one of the two must be set, a rule enforced at the
+// API layer and (defensively) by the service.
 type ScheduleInput struct {
 	Name       string
 	TemplateID string
+	PipelineID *string
 	Cron       string
 	Vars       json.RawMessage
 	Enabled    *bool

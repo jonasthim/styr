@@ -70,6 +70,8 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 			registerSchedulesRoutes(g, d)
 			registerLoopsRoutes(g, d)
 			registerStatsRoutes(g, d)
+			registerPipelinesRoutes(g, d)
+			registerPipelineRunsRoutes(g, d)
 		})
 
 		// The SSE stream requires a signed-in user too, but must not be cut

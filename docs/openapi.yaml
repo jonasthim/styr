@@ -1982,6 +1982,293 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
 
+  /api/v1/pipelines:
+    get:
+      summary: List pipelines
+      description: Every pipeline visible to the current user (owned, shared, or — for an admin — all).
+      operationId: listPipelines
+      tags: [pipelines]
+      responses:
+        "200":
+          description: Every visible pipeline
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Pipeline"
+    post:
+      summary: Create a pipeline
+      description: >
+        The yaml is parsed and validated against workspace_id's templates
+        (unique step ids, acyclic needs, templates exist, limits — see
+        docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md); an
+        invalid definition is rejected with 422 invalid_pipeline and the
+        full problem list. shared marks the pipeline as owned by nobody;
+        only an admin may set it.
+      operationId: createPipeline
+      tags: [pipelines]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PipelineInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pipeline"
+        "422":
+          description: The pipeline's yaml failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineValidationErrorBody"
+
+  /api/v1/pipelines/validate:
+    post:
+      summary: Validate a pipeline definition without creating it
+      description: >
+        Always 200, even when the definition is invalid — ok is false and
+        errors lists every problem in that case. graph is rendered from
+        whatever steps parsed, regardless of validity, so the UI can draw a
+        broken pipeline while pointing at what's wrong with it. This
+        literal path is matched before /pipelines/{id}, so "validate" is
+        never treated as a pipeline id.
+      operationId: validatePipeline
+      tags: [pipelines]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                yaml:
+                  type: string
+                workspace_id:
+                  type: string
+              required: [yaml, workspace_id]
+      responses:
+        "200":
+          description: The validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidationResult"
+
+  /api/v1/pipelines/{id}:
+    get:
+      summary: Get a pipeline
+      operationId: getPipeline
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The pipeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pipeline"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update a pipeline
+      description: A full replace of the pipeline's name, workspace and yaml, re-validated the same way as create.
+      operationId: patchPipeline
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PipelineInput"
+      responses:
+        "200":
+          description: The updated pipeline
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Pipeline"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "422":
+          description: The pipeline's yaml failed validation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineValidationErrorBody"
+    delete:
+      summary: Delete a pipeline
+      operationId: deletePipeline
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/pipelines/{id}/start:
+    post:
+      summary: Start a pipeline run
+      description: Starts a run by hand (origin ui), same shape as POST /templates/{id}/run.
+      operationId: startPipeline
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                input:
+                  type: object
+      responses:
+        "202":
+          description: Accepted; the pipeline run has been started
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineRunID"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/pipeline-runs:
+    get:
+      summary: List pipeline runs
+      operationId: listPipelineRuns
+      tags: [pipelines]
+      parameters:
+        - name: pipeline
+          in: query
+          description: Filter to runs of this pipeline id.
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [running, success, failed, cancelled, timeout]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching pipeline runs, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PipelineRun"
+
+  /api/v1/pipeline-runs/{id}:
+    get:
+      summary: Get a pipeline run
+      description: >
+        Includes the pipeline it belongs to, every step-run (each with the
+        Run summary of its current attempt, null until one has started) and
+        the pipeline's graph.
+      operationId: getPipelineRun
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The pipeline run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PipelineRunView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/pipeline-runs/{id}/cancel:
+    post:
+      summary: Cancel a running pipeline run
+      description: >
+        Cancels every running step-run and closes their sessions. Cancelling
+        a pipeline run that is not running is a 409.
+      operationId: cancelPipelineRun
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The pipeline run is not running
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/pipeline-runs/{id}/retry-failed:
+    post:
+      summary: Retry a pipeline run's failed steps
+      description: >
+        Re-runs every failed step-run as a new attempt and continues the
+        pipeline. Retrying a pipeline run with no failed steps is a 409.
+      operationId: retryPipelineRunFailed
+      tags: [pipelines]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The pipeline run has no failed steps to retry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
   /api/v1/schedules:
     get:
       summary: List schedules
@@ -3206,7 +3493,11 @@ components:
         - updated_at
 
     TriggerInput:
-      description: The create/update request body for POST/PATCH /triggers(/{id}).
+      description: >
+        The create/update request body for POST/PATCH /triggers(/{id}).
+        Exactly one of template_id or pipeline_id must be set (422
+        otherwise); the trigger starts a template run or a pipeline run
+        accordingly.
       type: object
       properties:
         name:
@@ -3216,6 +3507,8 @@ components:
           enum: [generic, grafana, github]
         template_id:
           type: string
+        pipeline_id:
+          type: [string, "null"]
         dedupe_key_template:
           type: string
         cooldown_s:
@@ -3230,10 +3523,12 @@ components:
         enabled:
           type: boolean
           description: Update only; omit to leave enabled state unchanged.
-      required: [name, kind, template_id]
+      required: [name, kind]
 
     Trigger:
-      description: Never includes the secret or its hash — see secret_hint.
+      description: >
+        Never includes the secret or its hash — see secret_hint. Exactly
+        one of template_id (non-empty) and pipeline_id (non-null) is set.
       type: object
       properties:
         id:
@@ -3251,6 +3546,8 @@ components:
           type: string
         template_id:
           type: string
+        pipeline_id:
+          type: [string, "null"]
         enabled:
           type: boolean
         dedupe_key_template:
@@ -3278,6 +3575,7 @@ components:
         - kind
         - secret_hint
         - template_id
+        - pipeline_id
         - enabled
         - dedupe_key_template
         - cooldown_s
@@ -3341,6 +3639,9 @@ components:
           type: [string, "null"]
         origin:
           type: string
+        step_run_id:
+          type: [string, "null"]
+          description: Set when this run is one attempt of a pipeline step (origin "pipeline"); null for every other run.
         loop_id:
           type: string
           description: The loop this run is an iteration of; empty for an ordinary one-shot run.
@@ -3372,6 +3673,7 @@ components:
         - trigger_id
         - delivery_id
         - origin
+        - step_run_id
         - loop_id
         - iteration
         - started_at
@@ -3443,13 +3745,19 @@ components:
       required: [id, kind, name, url, token_present, events, enabled, created_at]
 
     ScheduleInput:
-      description: The create/update request body for POST/PATCH /schedules(/{id}).
+      description: >
+        The create/update request body for POST/PATCH /schedules(/{id}).
+        Exactly one of template_id or pipeline_id must be set (422
+        otherwise); the schedule starts a template run or a pipeline run
+        accordingly.
       type: object
       properties:
         name:
           type: string
         template_id:
           type: string
+        pipeline_id:
+          type: [string, "null"]
         cron:
           type: string
           description: A standard 5-field cron expression, or a descriptor (@hourly, @daily, @every 1h30m, ...).
@@ -3462,9 +3770,10 @@ components:
         shared:
           type: boolean
           description: Owned by nobody rather than the caller. Admin only.
-      required: [name, template_id, cron]
+      required: [name, cron]
 
     Schedule:
+      description: Exactly one of template_id (non-empty) and pipeline_id (non-null) is set.
       type: object
       properties:
         id:
@@ -3475,6 +3784,8 @@ components:
           type: string
         template_id:
           type: string
+        pipeline_id:
+          type: [string, "null"]
         cron:
           type: string
         enabled:
@@ -3500,6 +3811,7 @@ components:
         - owner_id
         - name
         - template_id
+        - pipeline_id
         - cron
         - enabled
         - vars
@@ -3690,3 +4002,242 @@ components:
           type: integer
           description: The trailing window size, in days, this dashboard was computed over.
       required: [days, by_user, by_origin, top_templates, total_usd, window]
+
+    PipelineInput:
+      description: The create/update request body for POST/PATCH /pipelines(/{id}).
+      type: object
+      properties:
+        name:
+          type: string
+        workspace_id:
+          type: string
+        yaml:
+          type: string
+          description: >
+            The pipeline's YAML definition — see
+            docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md for the
+            shape. Parsed and validated on every create/update.
+        shared:
+          type: boolean
+          description: Owned by nobody rather than the caller. Admin only.
+      required: [name, workspace_id, yaml]
+
+    Pipeline:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: [string, "null"]
+        name:
+          type: string
+        workspace_id:
+          type: string
+        yaml:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, owner_id, name, workspace_id, yaml, created_at, updated_at]
+
+    Problem:
+      description: One pipeline validation problem, with the yaml source line when it could be determined (0 otherwise).
+      type: object
+      properties:
+        line:
+          type: integer
+        message:
+          type: string
+      required: [line, message]
+
+    PipelineValidationErrorBody:
+      description: The 422 body for POST/PATCH /pipelines when the pipeline's yaml fails validation.
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              enum: [invalid_pipeline]
+            message:
+              type: string
+          required: [code, message]
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Problem"
+      required: [error, errors]
+
+    GraphNode:
+      type: object
+      properties:
+        id:
+          type: string
+        template:
+          type: string
+        worktree:
+          type: string
+        foreach:
+          type: boolean
+          description: True for a step with a `foreach` list (fanned out into N step-runs at run time).
+      required: [id, template, worktree, foreach]
+
+    GraphEdge:
+      description: A needs dependency — from must succeed before to starts.
+      type: object
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+      required: [from, to]
+
+    Graph:
+      description: A rendering-friendly view of a pipeline's step DAG, for the frontend's graph preview.
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/GraphEdge"
+      required: [nodes, edges]
+
+    ValidationResult:
+      description: >
+        POST /pipelines/validate's payload. ok is false and errors is
+        non-empty for an invalid definition, but the response is still 200
+        — graph is rendered from whatever steps parsed regardless.
+      type: object
+      properties:
+        ok:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Problem"
+        graph:
+          $ref: "#/components/schemas/Graph"
+      required: [ok, errors, graph]
+
+    PipelineRunID:
+      description: The {pipeline_run_id} shape POST /pipelines/{id}/start answers with.
+      type: object
+      properties:
+        pipeline_run_id:
+          type: string
+      required: [pipeline_run_id]
+
+    PipelineRun:
+      type: object
+      properties:
+        id:
+          type: string
+        pipeline_id:
+          type: string
+        origin:
+          type: string
+        origin_ref:
+          type: string
+        input:
+          type: object
+          description: The pipeline-level vars payload, available to every step's with/foreach as .payload.
+        state:
+          type: string
+          enum: [running, success, failed, cancelled, timeout]
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        cost_usd:
+          type: number
+          description: The sum of every step-run's cost.
+      required: [id, pipeline_id, origin, origin_ref, input, state, started_at, finished_at, cost_usd]
+
+    StepRun:
+      description: One node's execution within a PipelineRun. A foreach node gets one StepRun per fan-out item; a retried attempt gets a new StepRun (same step_id, incremented attempt).
+      type: object
+      properties:
+        id:
+          type: string
+        pipeline_run_id:
+          type: string
+        step_id:
+          type: string
+          description: The step id from the pipeline's yaml, e.g. "triage".
+        index_in_fanout:
+          type: integer
+          description: 0 for a non-foreach step; the item's position for a foreach one.
+        item:
+          type: string
+          description: The foreach item's JSON; empty for a non-foreach step.
+        run_id:
+          type: [string, "null"]
+          description: Null until the run.Engine session for this attempt is started.
+        attempt:
+          type: integer
+        state:
+          type: string
+          enum: [pending, running, success, failed, skipped, cancelled]
+        report:
+          type: [object, "null"]
+          description: The step's structured report; null until the step finishes with one.
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        worktree:
+          type: string
+          description: Absolute path of the worktree this step ran in; empty for none, or not yet started.
+      required:
+        - id
+        - pipeline_run_id
+        - step_id
+        - index_in_fanout
+        - item
+        - run_id
+        - attempt
+        - state
+        - report
+        - started_at
+        - finished_at
+        - worktree
+
+    PipelineRunStepView:
+      description: One entry of PipelineRunView.steps — a StepRun plus the Run summary of its current attempt, null until the executor has started one.
+      allOf:
+        - $ref: "#/components/schemas/StepRun"
+        - type: object
+          properties:
+            run:
+              oneOf:
+                - $ref: "#/components/schemas/Run"
+                - type: "null"
+          required: [run]
+
+    PipelineRunView:
+      description: A PipelineRun together with the records a UI needs to render it without further round trips.
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/PipelineRun"
+        pipeline:
+          $ref: "#/components/schemas/Pipeline"
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/PipelineRunStepView"
+        graph:
+          $ref: "#/components/schemas/Graph"
+      required: [run, pipeline, steps, graph]

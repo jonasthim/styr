@@ -20,12 +20,15 @@ func registerRunsRoutes(r chi.Router, d *Deps) {
 }
 
 type runDTO struct {
-	ID         string          `json:"id"`
-	SessionID  string          `json:"session_id"`
-	TemplateID *string         `json:"template_id"`
-	TriggerID  *string         `json:"trigger_id"`
-	DeliveryID *string         `json:"delivery_id"`
-	Origin     string          `json:"origin"`
+	ID         string  `json:"id"`
+	SessionID  string  `json:"session_id"`
+	TemplateID *string `json:"template_id"`
+	TriggerID  *string `json:"trigger_id"`
+	DeliveryID *string `json:"delivery_id"`
+	Origin     string  `json:"origin"`
+	// StepRunID is set when this run is one attempt of a pipeline step
+	// (origin "pipeline"), nil for every other run.
+	StepRunID  *string         `json:"step_run_id"`
 	LoopID     string          `json:"loop_id"`
 	Iteration  int             `json:"iteration"`
 	StartedAt  time.Time       `json:"started_at"`
@@ -39,7 +42,8 @@ type runDTO struct {
 func runDTOFrom(run domain.Run) runDTO {
 	return runDTO{
 		ID: run.ID, SessionID: run.SessionID, TemplateID: run.TemplateID, TriggerID: run.TriggerID,
-		DeliveryID: run.DeliveryID, Origin: run.Origin, LoopID: run.LoopID, Iteration: run.Iteration,
+		DeliveryID: run.DeliveryID, Origin: run.Origin, StepRunID: run.StepRunID,
+		LoopID: run.LoopID, Iteration: run.Iteration,
 		StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
 		Outcome: string(run.Outcome), Report: run.Report, Summary: run.Summary, CostUSD: run.CostUSD,
 	}
