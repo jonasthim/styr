@@ -70,6 +70,8 @@ export const sessions: Session[] = [
     id: MOCK_EVENT_SESSION_ID,
     owner_id: DEV_USER_ID,
     title: 'Refactor auth middleware',
+    diff_add: 7,
+    diff_del: 3,
     workspace_id: 'w1',
     profile_id: 'interactive',
     harness: 'claude',
@@ -141,6 +143,10 @@ export const sessions: Session[] = [
     id: TOOL_FIXTURE_SESSION_ID,
     owner_id: DEV_USER_ID,
     title: 'Read note.txt',
+    // Matches the seeded worktree diff in ./reviewState.ts; `session.stats`
+    // would move these live against the real backend (T42).
+    diff_add: 42,
+    diff_del: 18,
     workspace_id: 'w1',
     profile_id: 'interactive',
     harness: 'claude',

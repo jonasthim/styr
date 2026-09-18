@@ -8,6 +8,8 @@ import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
 import type { Approval } from '../../api/types'
 import { ToolInput } from '../common/ToolInput'
+import { PlanBody } from '../session/PlanCard'
+import { planText, PLAN_TOOL } from '../session/planMarkdown'
 import { Button, buttonClasses, Textarea } from '../ui'
 import { RiskBadge } from './RiskBadge'
 import { SnoozeMenu, type SnoozeOption } from './SnoozeMenu'
@@ -58,6 +60,9 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
 ) {
   const [draft, setDraft] = useState('')
   const [draftError, setDraftError] = useState<string | null>(null)
+  // A plan-mode session asks to leave plan mode; what it is really asking is
+  // "shall I do this?", so the inbox shows the plan rather than the tool call.
+  const plan = approval.tool === PLAN_TOOL ? planText(approval.updated_input ?? approval.input) : null
 
   function startEdit() {
     setDraft(JSON.stringify(approval.updated_input ?? approval.input, null, 2))
@@ -105,7 +110,7 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
       <div className="flex min-w-0 items-center gap-2">
         <RiskBadge tier={approval.risk} />
         <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-secondary">
-          {summarizeToolInput(approval.tool, approval.input)}
+          {plan ? 'Plan awaiting approval' : summarizeToolInput(approval.tool, approval.input)}
         </span>
       </div>
 
@@ -121,6 +126,10 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
             className="resize-y bg-surface-3"
           />
           {draftError && <p className="mt-1.5 text-[12px] text-fg-danger">{draftError}</p>}
+        </div>
+      ) : plan ? (
+        <div data-testid="plan-summary" className="max-h-56 overflow-y-auto rounded-[var(--radius-1)] bg-surface-2 px-3 py-2">
+          <PlanBody markdown={plan} compact />
         </div>
       ) : (
         <ToolInput tool={approval.tool} input={approval.input} />

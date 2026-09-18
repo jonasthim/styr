@@ -2,8 +2,9 @@
 // composer and the right-hand Activity/Changes/Info panel. Route:
 // /sessions/$id (see router.tsx).
 import { useMemo } from 'react'
-import { useParams, useSearch } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { ArrowLeft } from 'lucide-react'
 import { q } from '../api/queries'
 import { foldEvents, type Block } from '../lib/blocks'
 import { SessionHeader } from '../components/session/SessionHeader'
@@ -11,6 +12,9 @@ import { Transcript } from '../components/session/Transcript'
 import { PermissionCard } from '../components/session/PermissionCard'
 import { Composer } from '../components/session/Composer'
 import { SidePanel } from '../components/session/SidePanel'
+import { PlanCard } from '../components/session/PlanCard'
+import { DiffView } from '../components/review/DiffView'
+import { Button } from '../components/ui'
 
 // The session view is the one screen that does not scroll as a page: the
 // transcript scrolls inside it. The shell reserves 56px for the tab bar below
@@ -30,6 +34,7 @@ function touchesFile(block: Block, file: string): boolean {
 export function SessionDetail() {
   const { id } = useParams({ from: '/_app/sessions/$id' })
   const search = useSearch({ from: '/_app/sessions/$id' })
+  const navigate = useNavigate()
   const sessionQuery = useQuery(q.session(id))
   const eventsQuery = useQuery(q.sessionEvents(id))
   const workspacesQuery = useQuery(q.workspaces())
@@ -40,6 +45,24 @@ export function SessionDetail() {
     () => (search.file ? blocks.filter((b) => touchesFile(b, search.file!)) : blocks),
     [blocks, search.file],
   )
+  // What the session last said, which is what a pull request body should
+  // start as (components/review/PullRequestDialog.tsx).
+  const lastText = useMemo(() => {
+    for (let i = blocks.length - 1; i >= 0; i -= 1) {
+      const block = blocks[i]
+      if (block.kind === 'text') return block.text
+    }
+    return ''
+  }, [blocks])
+
+  function closeDiff() {
+    void navigate({
+      to: '/sessions/$id',
+      params: { id },
+      search: (prev) => ({ ...prev, diff: undefined }),
+      replace: true,
+    })
+  }
 
   if (sessionQuery.isLoading) {
     return (
@@ -70,13 +93,43 @@ export function SessionDetail() {
     // only needs a definite height to fill: the viewport, less the tab bar
     // below 900px where the shell reserves that space.
     <div data-testid="session-view" className={VIEW_HEIGHT}>
-      <SessionHeader session={session} workspaceName={workspaceName} profileName={profileName} />
+      <SessionHeader
+        session={session}
+        workspaceName={workspaceName}
+        profileName={profileName}
+        summary={lastText}
+      />
       <div className="flex min-h-0 flex-1 flex-col min-[1100px]:flex-row">
         <div className="flex min-h-0 flex-1 flex-col">
-          <Transcript blocks={visibleBlocks} sessionId={session.id} />
+          {search.diff ? (
+            <>
+              {/* Reviewing takes the main area over; the transcript stays one
+                  click away rather than being pushed off-screen. */}
+              <div className="flex shrink-0 items-center gap-2 border-b border-hairline bg-surface-1 px-3! py-1.5!">
+                <Button size="sm" variant="ghost" icon={<ArrowLeft size={13} aria-hidden />} onClick={closeDiff}>
+                  Back to transcript
+                </Button>
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-muted">{search.diff}</span>
+              </div>
+              <DiffView sessionId={session.id} path={search.diff} />
+            </>
+          ) : (
+            <Transcript blocks={visibleBlocks} sessionId={session.id} />
+          )}
+          <PlanCard sessionId={session.id} />
           <PermissionCard sessionId={session.id} />
         </div>
-        <SidePanel blocks={blocks} session={session} profile={profile} />
+        {/* Reading a diff on a phone needs the column: below the side-by-side
+            breakpoint the full-height panel would leave the diff barely a
+            hundred pixels tall, so it gives most of that back while a file is
+            open — the file list and Send review are a scroll away, not a
+            navigation away. */}
+        <SidePanel
+          blocks={blocks}
+          session={session}
+          profile={profile}
+          className={search.diff ? 'max-[1099px]:h-32' : undefined}
+        />
       </div>
       <Composer session={session} />
     </div>

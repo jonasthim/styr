@@ -1,15 +1,19 @@
 // TanStack Query options factories. useLiveEvents() patches these caches
 // directly on SSE frames; components should read through `q`, never call
 // api() ad hoc, so query keys stay consistent.
-import { queryOptions } from '@tanstack/react-query'
+import { queryOptions, type QueryClient } from '@tanstack/react-query'
 import { api } from './client'
 import type {
   Approval,
+  Checkpoint,
   Delivery,
+  DiffSummary,
+  FileDiff,
   Me,
   NotificationChannel,
   Profile,
   Provider,
+  ReviewComment,
   RunOutcome,
   RunView,
   Session,
@@ -96,4 +100,39 @@ export const q = {
 
   notifications: () =>
     queryOptions({ queryKey: ['notifications'], queryFn: () => api<NotificationChannel[]>('/api/v1/notifications') }),
+
+  // --- review (T43) --------------------------------------------------------
+  // The whole worktree diff for a session. Cheap enough to keep fresh: a turn
+  // that edits files moves these numbers, and `session.stats` only patches the
+  // totals onto the session row, not the file list.
+  sessionDiff: (id: string) =>
+    queryOptions({ queryKey: ['session-diff', id], queryFn: () => api<DiffSummary>(`/api/v1/sessions/${id}/diff`) }),
+
+  sessionFileDiff: (id: string, path: string) =>
+    queryOptions({
+      queryKey: ['session-file-diff', id, path],
+      queryFn: () => api<FileDiff>(`/api/v1/sessions/${id}/diff/file?path=${encodeURIComponent(path)}`),
+    }),
+
+  sessionComments: (id: string) =>
+    queryOptions({
+      queryKey: ['session-comments', id],
+      queryFn: () => api<ReviewComment[]>(`/api/v1/sessions/${id}/comments`),
+    }),
+
+  sessionCheckpoints: (id: string) =>
+    queryOptions({
+      queryKey: ['session-checkpoints', id],
+      queryFn: () => api<Checkpoint[]>(`/api/v1/sessions/${id}/checkpoints`),
+    }),
+}
+
+/** Everything the review surface reads that a review action can change.
+ * Send review, commit, rewind and discard all move the diff (and the comment
+ * list with it), so they invalidate the lot rather than guessing which. */
+export function invalidateReview(client: QueryClient, sessionId: string): void {
+  for (const key of ['session-diff', 'session-file-diff', 'session-comments', 'session-checkpoints']) {
+    void client.invalidateQueries({ queryKey: [key, sessionId] })
+  }
+  void client.invalidateQueries({ queryKey: ['session', sessionId] })
 }

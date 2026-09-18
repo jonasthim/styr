@@ -68,6 +68,10 @@ interface SessionDetailSearch {
   // Set by ChangesList.tsx when a file row is clicked; SessionDetail.tsx
   // filters the transcript to blocks touching this path (Task 21).
   file?: string
+  // Set by the Review tab's file list (T43): the path whose diff replaces the
+  // transcript in the main area. A search param rather than local state so a
+  // review of one file is a link a reviewer can send someone.
+  diff?: string
 }
 
 const sessionDetailRoute = createRoute({
@@ -75,6 +79,7 @@ const sessionDetailRoute = createRoute({
   path: '/sessions/$id',
   validateSearch: (search: Record<string, unknown>): SessionDetailSearch => ({
     file: typeof search.file === 'string' ? search.file : undefined,
+    diff: typeof search.diff === 'string' ? search.diff : undefined,
   }),
   component: SessionDetail,
 })

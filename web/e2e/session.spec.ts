@@ -74,7 +74,9 @@ test('sending a message shows it as a user block', async ({ page }, testInfo) =>
 })
 
 // Task 21: the side panel's Activity tab shows the fixture's Read tool call
-// as a span, and the Changes tab lists the file it touched (note.txt).
+// as a span, and the file it touched (note.txt) is listed under "Touched by
+// tools" in the Review tab — v0.3 renamed that tab and gave it the worktree
+// diff (e2e/review.spec.ts), keeping the transcript-derived list underneath.
 test('the Activity tab shows a span for the fixture session', async ({ page }, testInfo) => {
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
@@ -83,19 +85,19 @@ test('the Activity tab shows a span for the fixture session', async ({ page }, t
   await expect(page.getByTestId('span').first()).toBeVisible()
 })
 
-test('the Changes tab lists note.txt', async ({ page }, testInfo) => {
+test('the Review tab lists note.txt among the touched files', async ({ page }, testInfo) => {
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
-  await page.getByRole('tab', { name: 'Changes' }).click()
+  await page.getByRole('tab', { name: 'Review' }).click()
   await expect(page.getByTestId('changes-list')).toContainText('note.txt')
 })
 
-test('clicking a file in Changes filters the transcript to blocks touching it', async ({ page }, testInfo) => {
+test('clicking a touched file filters the transcript to blocks touching it', async ({ page }, testInfo) => {
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
-  await page.getByRole('tab', { name: 'Changes' }).click()
+  await page.getByRole('tab', { name: 'Review' }).click()
   await page.getByTestId('changes-list').getByRole('button', { name: /note\.txt/ }).click()
 
   await expect(page).toHaveURL(/[?&]file=/)

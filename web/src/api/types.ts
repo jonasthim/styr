@@ -44,7 +44,9 @@ export type Profile = Schemas['Profile']
 export type SessionState = Schemas['Session']['state']
 export type Origin = Schemas['Session']['origin']
 
-export type Session = Schemas['Session']
+/** The session row, plus the diff counters T42 adds to it (SessionDiffStats,
+ * declared at the bottom of this file with the rest of the v0.3 contract). */
+export type Session = Schemas['Session'] & SessionDiffStats
 
 export type SessionEvent = Omit<Schemas['Event'], 'payload'> & { payload: unknown }
 
@@ -136,3 +138,106 @@ export type NotificationChannelKind = Schemas['NotificationChannel']['kind']
 export type NotificationEvent = 'run.finished' | 'run.needs_human' | 'run.failed'
 
 export type NotificationChannel = Schemas['NotificationChannel']
+
+// --- review: diff, comments, checkpoints (T43) -----------------------------
+// Hand-written, unlike everything above: these are the v0.3 contract from
+// docs/superpowers/plans/2026-09-18-styr-v0.3-review.md ("API"), and the
+// handlers that serve them arrive in T42 — docs/openapi.yaml does not
+// describe them yet, so `npm run gen:api` has nothing to re-export. T44
+// regenerates the schema and this block collapses back into aliases.
+
+/** git's status letter for a changed file: added, modified, deleted, renamed. */
+export type FileStatus = 'A' | 'M' | 'D' | 'R'
+
+/** One file in GET /sessions/{id}/diff. `old_path` is only set for a rename. */
+export interface FileChange {
+  path: string
+  old_path: string
+  status: FileStatus
+  add: number
+  del: number
+  binary: boolean
+}
+
+/** GET /sessions/{id}/diff: the whole worktree against the ref it started from. */
+export interface DiffSummary {
+  base_ref: string
+  branch: string
+  files: FileChange[]
+  total_add: number
+  total_del: number
+  dirty: boolean
+}
+
+export type DiffLineType = 'ctx' | 'add' | 'del'
+
+/** `old_no`/`new_no` is null on the side the line does not exist on. */
+export interface DiffLine {
+  type: DiffLineType
+  old_no: number | null
+  new_no: number | null
+  text: string
+}
+
+export interface DiffHunk {
+  old_start: number
+  old_lines: number
+  new_start: number
+  new_lines: number
+  lines: DiffLine[]
+}
+
+/** GET /sessions/{id}/diff/file?path=. `truncated` is this card's addition to
+ * the plan's shape: gitops caps a file diff at 2 MB, and the reader has to be
+ * told when it is looking at part of one. */
+export interface FileDiff {
+  path: string
+  old_path: string
+  status: FileStatus
+  binary: boolean
+  truncated: boolean
+  hunks: DiffHunk[]
+}
+
+/** One inline review comment (table `review_comments`). `author_name` is this
+ * card's addition — the table stores only `author_id`, and a comment has to
+ * say who wrote it without the UI fetching every user. `sent_at` is null
+ * until POST review hands the comment to the CLI. */
+export interface ReviewComment {
+  id: string
+  session_id: string
+  path: string
+  line: number
+  side: 'old' | 'new'
+  body: string
+  author_id: string
+  author_name: string
+  created_at: string
+  sent_at: string | null
+}
+
+export interface Checkpoint {
+  id: string
+  commit_sha: string
+  turn: number
+  summary: string
+  created_at: string
+}
+
+/** POST /sessions/{id}/commit. */
+export interface CommitResult {
+  sha: string
+}
+
+/** POST /sessions/{id}/pr. 409 carries code `gh_unavailable` instead. */
+export interface PullRequestResult {
+  url: string
+}
+
+/** The diff counters `session.stats` patches onto a session row. Part of
+ * Schemas['Session'] from T42 on; declared here so the sessions list can
+ * already draw its badge. */
+export interface SessionDiffStats {
+  diff_add?: number
+  diff_del?: number
+}
