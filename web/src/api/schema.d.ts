@@ -226,12 +226,15 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List workspaces */
+        /**
+         * List workspaces
+         * @description Every workspace visible to the current user: workspaces they own, shared (admin-registered) workspaces, and — for an admin — every workspace.
+         */
         get: operations["listWorkspaces"];
         put?: never;
         /**
          * Create a workspace
-         * @description path must exist, be a directory, and contain a .git entry (directory or file); otherwise 422 invalid_path.
+         * @description Styr manages a workspace's directory unless source is "path". For source "git" the workspace is created in state "cloning" and cloned in the background (poll GET /workspaces/{id} or watch "workspace.state" on the SSE stream for the transition to "ready" or "failed"). For source "empty" a fresh directory is created and `git init -b main` is run synchronously. For source "path" — an existing absolute server path, shared by everyone — the caller must be an admin, and path must exist, be a directory, and contain a .git entry (directory or file); otherwise 422 invalid_path. default_profile_id defaults to "interactive" when omitted.
          */
         post: operations["createWorkspace"];
         delete?: never;
@@ -247,15 +250,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** Get a workspace */
+        get: operations["getWorkspace"];
         put?: never;
         post?: never;
-        /** Delete a workspace */
+        /**
+         * Delete a workspace
+         * @description The owner or an admin may delete a workspace. For a managed workspace (source "git" or "empty") its directory is removed too; a shared "path" workspace's directory is left alone.
+         */
         delete: operations["deleteWorkspace"];
         options?: never;
         head?: never;
-        /** Update a workspace */
+        /**
+         * Update a workspace
+         * @description The owner or an admin may update default_profile_id and/or worktrees.
+         */
         patch: operations["patchWorkspace"];
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a failed clone
+         * @description Re-runs the clone for a source "git" workspace currently in state "failed", transitioning it back to "cloning".
+         */
+        post: operations["retryWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/profiles": {
@@ -530,10 +560,26 @@ export interface components {
         };
         Workspace: {
             id: string;
+            /** @description null for a shared, admin-registered "path" workspace. */
+            owner_id: string | null;
             name: string;
             path: string;
+            /** @enum {string} */
+            source: "git" | "path" | "empty";
+            repo_url: string;
+            branch: string;
+            /** @description Whether Styr created path and may delete it. */
+            managed: boolean;
+            /** @enum {string} */
+            state: "cloning" | "ready" | "failed";
+            /** @description The last clone failure's message, when state is "failed". */
+            error: string;
             default_profile_id: string;
             worktrees: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
         };
         Profile: {
             id: string;
@@ -982,7 +1028,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Every workspace */
+            /** @description Every visible workspace */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1004,8 +1050,15 @@ export interface operations {
             content: {
                 "application/json": {
                     name: string;
-                    path: string;
-                    default_profile_id: string;
+                    /** @enum {string} */
+                    source: "git" | "path" | "empty";
+                    /** @description Required when source is "git". */
+                    repo_url?: string;
+                    /** @description Optional, source "git" only. */
+                    branch?: string;
+                    /** @description Required when source is "path". */
+                    path?: string;
+                    default_profile_id?: string;
                     worktrees?: boolean;
                 };
             };
@@ -1020,8 +1073,16 @@ export interface operations {
                     "application/json": components["schemas"]["Workspace"];
                 };
             };
-            403: components["responses"]["Forbidden"];
-            /** @description Invalid path */
+            /** @description source "path" was requested by a non-admin */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description invalid_url (source "git", a malformed repo_url), invalid_path (source "path", not an existing git directory), or name_taken (the name is already used by another workspace owned by this user, or by another shared workspace) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -1030,6 +1091,29 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+        };
+    };
+    getWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            404: components["responses"]["NotFound"];
         };
     };
     deleteWorkspace: {
@@ -1050,6 +1134,17 @@ export interface operations {
                 };
                 content?: never;
             };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description A session on this workspace is still open, running or waiting */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
         };
     };
     patchWorkspace: {
@@ -1064,8 +1159,6 @@ export interface operations {
         requestBody?: {
             content: {
                 "application/json": {
-                    name?: string;
-                    path?: string;
                     default_profile_id?: string;
                     worktrees?: boolean;
                 };
@@ -1079,6 +1172,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    retryWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace, now in state "cloning" */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Workspace"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The workspace is not a failed git-source workspace */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };
@@ -1234,6 +1362,24 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Session"];
+                };
+            };
+            /** @description workspace_id is not visible to the current user */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The workspace is not yet ready (e.g. still cloning) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
             /** @description No Claude token available for the current user (add one in profile settings) */

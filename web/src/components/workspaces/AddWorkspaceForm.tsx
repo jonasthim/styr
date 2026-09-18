@@ -17,6 +17,7 @@ import { api, ApiError } from '../../api/client'
 import { q } from '../../api/queries'
 import type { Workspace, WorkspaceSource } from '../../api/types'
 import { Button, Field, Input, Select, Tabs, TabsContent, TabsList, TabsTrigger } from '../ui'
+import { useCloningPoll } from '../../hooks/useCloningPoll'
 
 /** Auto-fills Name from a git URL's last path segment - "https://host/a/repo.git" or "git@host:a/repo.git" both end in the part someone actually recognises. */
 function nameFromUrl(url: string): string {
@@ -37,6 +38,7 @@ export function AddWorkspaceForm({ isAdmin, onCreated, onCancel }: AddWorkspaceF
   const queryClient = useQueryClient()
   const profiles = useQuery(q.profiles())
   const workspaces = useQuery(q.workspaces())
+  useCloningPoll(workspaces.data)
 
   const [source, setSource] = useState<WorkspaceSource>('git')
   const [repoUrl, setRepoUrl] = useState('')

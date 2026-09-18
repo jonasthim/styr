@@ -27,7 +27,7 @@ export type User = Omit<Schemas['User'], 'prefs'> & { prefs: Record<string, unkn
 export type WorkspaceSource = 'git' | 'path' | 'empty'
 export type WorkspaceState = 'cloning' | 'ready' | 'failed'
 
-export type Workspace = Omit<Schemas['Workspace'], 'path'> & {
+export type Workspace = Omit<Schemas['Workspace'], 'path' | 'error' | 'repo_url' | 'branch'> & {
   owner_id: string | null
   path: string
   source: WorkspaceSource

@@ -14,6 +14,7 @@ import { AddWorkspaceForm } from '../components/workspaces/AddWorkspaceForm'
 import { DeleteWorkspaceDialog } from '../components/workspaces/DeleteWorkspaceDialog'
 import { WorkspaceSourceChip, WorkspaceStateBadge } from '../components/workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, EmptyState, PageHeader, Select, Switch, TableFrame, Td, Th, Tr } from '../components/ui'
+import { useCloningPoll } from '../hooks/useCloningPoll'
 
 function WorktreesSwitch({ workspace }: { workspace: Workspace }) {
   const queryClient = useQueryClient()
@@ -95,6 +96,7 @@ function RetryButton({ workspaceId }: { workspaceId: string }) {
 export function Workspaces() {
   const { data: me } = useMe()
   const workspaces = useQuery(q.workspaces())
+  useCloningPoll(workspaces.data)
   const profiles = useQuery(q.profiles())
   const [addOpen, setAddOpen] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<Workspace | null>(null)
