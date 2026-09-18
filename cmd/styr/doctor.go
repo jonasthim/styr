@@ -173,6 +173,10 @@ func runDoctor(stdout io.Writer) int {
 	}
 	if n := loadEnvFile(envFile); n > 0 {
 		fmt.Fprintf(stdout, "note loaded %d variable(s) from %s\n", n, envFile)
+	} else if _, statErr := os.Stat(envFile); statErr == nil {
+		if _, readErr := os.ReadFile(envFile); readErr != nil {
+			fmt.Fprintf(stdout, "warn %s exists but is not readable by this user (%v); secrets from it are missing below, run doctor as root or as a member of the file's group\n", envFile, readErr)
+		}
 	}
 	cfg, _ := config.Load(os.Getenv("STYR_CONFIG"))
 

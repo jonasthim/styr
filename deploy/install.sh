@@ -402,10 +402,14 @@ if [[ ! -f "$ENV_FILE" ]]; then
     printf 'STYR_SECRET_KEY=%s\n' "$secret"
     printf 'STYR_OIDC_CLIENT_SECRET=\n'
   } > "$ENV_FILE.new"
-  chown root:root "$ENV_FILE.new"
-  chmod 0600 "$ENV_FILE.new"
+  chown root:styr "$ENV_FILE.new"
+  chmod 0640 "$ENV_FILE.new"
   mv -f "$ENV_FILE.new" "$ENV_FILE"
 fi
+# Existing installs created by v0.1.0/v0.1.1 left the env file root:root 0600,
+# which prevents `styr doctor` run as styr from reading the secrets.
+chown root:styr "$ENV_FILE"
+chmod 0640 "$ENV_FILE"
 
 if [[ $NO_CLAUDE -eq 0 ]]; then
   if claude_path >/dev/null 2>&1; then
