@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jonasthim/styr/internal/domain"
@@ -19,7 +20,7 @@ func NewSessions(d *DB) *Sessions { return &Sessions{d: d} }
 
 const sessionColumns = `id, owner_user_id, title, workspace_id, profile_id, harness, state, origin, origin_ref,
 	worktree, branch, base_ref, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model, effort,
-	slash_commands, diff_add, diff_del`
+	slash_commands, diff_add, diff_del, worktree_shared`
 
 // sessionStateOrder is the CASE expression used by ListVisible to sort
 // sessions by lifecycle priority before recency.
@@ -35,12 +36,12 @@ const sessionStateOrder = `CASE state
 func (s *Sessions) Create(ctx context.Context, sess domain.Session) error {
 	_, err := s.d.ExecContext(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.OwnerID, sess.Title, sess.WorkspaceID, sess.ProfileID, sess.Harness,
 		string(sess.State), string(sess.Origin), sess.OriginRef, sess.Worktree, sess.Branch, sess.BaseRef,
 		nowString(sess.CreatedAt), nowString(sess.LastActiveAt), sess.NumTurns, sess.CostUSD,
 		sess.TokensIn, sess.TokensOut, sess.NowLine, sess.Model, sess.Effort,
-		marshalToolList(sess.SlashCommands), sess.DiffAdd, sess.DiffDel)
+		marshalToolList(sess.SlashCommands), sess.DiffAdd, sess.DiffDel, boolToInt(sess.WorktreeShared))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create session: %w", domain.ErrConflict)
@@ -57,11 +58,12 @@ func scanSession(row interface{ Scan(dest ...any) error }) (*domain.Session, err
 		state, origin         string
 		createdAt, lastActive string
 		slashCommands         string
+		worktreeShared        int
 	)
 	if err := row.Scan(&sess.ID, &ownerID, &sess.Title, &sess.WorkspaceID, &sess.ProfileID, &sess.Harness,
 		&state, &origin, &sess.OriginRef, &sess.Worktree, &sess.Branch, &sess.BaseRef, &createdAt, &lastActive,
 		&sess.NumTurns, &sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model, &sess.Effort,
-		&slashCommands, &sess.DiffAdd, &sess.DiffDel); err != nil {
+		&slashCommands, &sess.DiffAdd, &sess.DiffDel, &worktreeShared); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(slashCommands), &sess.SlashCommands)
@@ -70,6 +72,7 @@ func scanSession(row interface{ Scan(dest ...any) error }) (*domain.Session, err
 	sess.Origin = domain.Origin(origin)
 	sess.CreatedAt = parseTime(createdAt)
 	sess.LastActiveAt = parseTime(lastActive)
+	sess.WorktreeShared = worktreeShared != 0
 	return &sess, nil
 }
 
@@ -148,6 +151,56 @@ func (s *Sessions) UpdateEffort(ctx context.Context, id string, effort string) e
 func (s *Sessions) SetWorktree(ctx context.Context, id, path, branch, baseRef string) error {
 	return s.exec1(ctx, `UPDATE sessions SET worktree = ?, branch = ?, base_ref = ? WHERE id = ?`,
 		path, branch, baseRef, id)
+}
+
+// SetWorktreeShared updates worktree_shared: true records that the session
+// was created on a worktree an earlier session already owned
+// (sessions.CreateInput.WorktreePath), rather than getting a fresh one of
+// its own. It is separate from SetWorktree so a plain worktree creation
+// (SetWorktree alone) leaves the column at its default, false.
+func (s *Sessions) SetWorktreeShared(ctx context.Context, id string, shared bool) error {
+	return s.exec1(ctx, `UPDATE sessions SET worktree_shared = ? WHERE id = ?`, boolToInt(shared), id)
+}
+
+// GetByWorktree returns the session that first created the worktree at
+// path — the one whose base_ref every session later reusing that path
+// (CreateInput.WorktreePath) inherits, since `git worktree list` itself
+// carries no record of the commit a worktree started from. ErrNotFound
+// when no session has ever run on that path.
+func (s *Sessions) GetByWorktree(ctx context.Context, path string) (*domain.Session, error) {
+	row := s.d.QueryRowContext(ctx,
+		`SELECT `+sessionColumns+` FROM sessions WHERE worktree = ? ORDER BY created_at ASC LIMIT 1`, path)
+	sess, err := scanSession(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("get session by worktree: %w", domain.ErrNotFound)
+		}
+		return nil, fmt.Errorf("get session by worktree: %w", err)
+	}
+	return sess, nil
+}
+
+// CountByWorktree counts sessions, other than excludeSessionID, whose
+// worktree is path and whose state is one of states. Discard uses it to
+// refuse removing a worktree another session is still using.
+func (s *Sessions) CountByWorktree(ctx context.Context, path, excludeSessionID string, states []domain.SessionState) (int, error) {
+	if len(states) == 0 {
+		return 0, nil
+	}
+	placeholders := make([]string, len(states))
+	args := make([]any, 0, len(states)+2)
+	args = append(args, path, excludeSessionID)
+	for i, st := range states {
+		placeholders[i] = "?"
+		args = append(args, string(st))
+	}
+	query := `SELECT COUNT(*) FROM sessions WHERE worktree = ? AND id != ? AND state IN (` +
+		strings.Join(placeholders, ",") + `)`
+	var n int
+	if err := s.d.QueryRowContext(ctx, query, args...).Scan(&n); err != nil {
+		return 0, fmt.Errorf("count sessions by worktree: %w", err)
+	}
+	return n, nil
 }
 
 // UpdateDiffStats sets the worktree's added/removed line counts against

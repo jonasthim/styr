@@ -724,6 +724,16 @@ paths:
                   type: string
                   enum: ["", low, medium, high, xhigh, max]
                   description: Overrides the profile's effort default.
+                worktree_path:
+                  type: string
+                  description: >
+                    Starts the session on an existing worktree (typically
+                    another session's, under the workspace's
+                    .styr/worktrees/ directory) instead of creating a fresh
+                    one, so a pipeline "worktree: shared" step can continue
+                    where the previous step left off. Empty (the default)
+                    creates a fresh worktree as before. The workspace must
+                    have worktrees enabled; otherwise the request is 422.
               required: [workspace_id, profile_id, prompt]
       responses:
         "201":
@@ -747,7 +757,10 @@ paths:
         "422":
           description: >
             No Claude token available for the current user (add one in
-            profile settings)
+            profile settings), or worktree_path does not point to an
+            existing worktree registered under the workspace's
+            .styr/worktrees/ directory (or the workspace has worktrees
+            disabled)
           content:
             application/json:
               schema:
@@ -2800,6 +2813,12 @@ components:
         base_ref:
           type: string
           description: The commit the worktree started from; empty without a worktree.
+        worktree_shared:
+          type: boolean
+          description: >
+            Whether this session's worktree started life as another
+            session's (created with worktree_path in the request below),
+            rather than being created fresh for it.
         created_at:
           type: string
           format: date-time
@@ -2852,6 +2871,7 @@ components:
         - worktree
         - branch
         - base_ref
+        - worktree_shared
         - created_at
         - last_active_at
         - num_turns

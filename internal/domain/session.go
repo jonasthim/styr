@@ -39,16 +39,23 @@ type Session struct {
 	Worktree string
 	// Branch is the branch the worktree is checked out on, and BaseRef the
 	// commit it started from; both empty without a worktree.
-	Branch       string
-	BaseRef      string
-	CreatedAt    time.Time
-	LastActiveAt time.Time
-	NumTurns     int
-	CostUSD      float64
-	TokensIn     int
-	TokensOut    int
-	NowLine      string // latest "what it is doing" summary
-	Model        string
+	Branch  string
+	BaseRef string
+	// WorktreeShared reports whether this session's worktree started life
+	// as another session's (CreateInput.WorktreePath), rather than being
+	// created fresh for it — a pipeline's "worktree: shared" step
+	// continuing the previous step's work. It is informational only:
+	// review and Discard identify a shared worktree by path, not this
+	// flag.
+	WorktreeShared bool
+	CreatedAt      time.Time
+	LastActiveAt   time.Time
+	NumTurns       int
+	CostUSD        float64
+	TokensIn       int
+	TokensOut      int
+	NowLine        string // latest "what it is doing" summary
+	Model          string
 	// Effort is the reasoning effort the process was started with ("" = the CLI default).
 	Effort string
 	// SlashCommands is the command list the CLI reported on its last init message, without

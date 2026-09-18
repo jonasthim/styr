@@ -181,6 +181,73 @@ func TestSessionsModel_UnknownEffortIs422(t *testing.T) {
 	}
 }
 
+// POST /sessions with worktree_path set to another session's worktree reuses it instead of
+// creating a fresh one, and the response reports it shared.
+func TestSessionsCreate_WorktreePathReusesExistingWorktree(t *testing.T) {
+	e := newEnv(t, createResultStep(), createResultStep())
+	ws := e.seedGitWorkspace()
+	e.seedToken(e.adminID)
+
+	var first struct {
+		ID       string `json:"id"`
+		Worktree string `json:"worktree"`
+		Branch   string `json:"branch"`
+		BaseRef  string `json:"base_ref"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "title": "step one", "prompt": "hello",
+	}, &first)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /sessions (first) = %d, want 201", status)
+	}
+	waitForSessionState(t, e, first.ID, "open")
+
+	var second struct {
+		ID             string `json:"id"`
+		Worktree       string `json:"worktree"`
+		Branch         string `json:"branch"`
+		BaseRef        string `json:"base_ref"`
+		WorktreeShared bool   `json:"worktree_shared"`
+	}
+	status = e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "title": "step two", "prompt": "hello",
+		"worktree_path": first.Worktree,
+	}, &second)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /sessions (worktree_path) = %d, want 201", status)
+	}
+	waitForSessionState(t, e, second.ID, "open")
+
+	if second.Worktree != first.Worktree {
+		t.Errorf("worktree = %q, want the first session's %q", second.Worktree, first.Worktree)
+	}
+	if second.Branch != first.Branch {
+		t.Errorf("branch = %q, want the first session's %q", second.Branch, first.Branch)
+	}
+	if second.BaseRef != first.BaseRef {
+		t.Errorf("base_ref = %q, want the first session's %q", second.BaseRef, first.BaseRef)
+	}
+	if !second.WorktreeShared {
+		t.Error("worktree_shared = false, want true")
+	}
+}
+
+// POST /sessions with a worktree_path that is not a registered worktree under the workspace's
+// worktrees directory is refused with 422.
+func TestSessionsCreate_WorktreePathInvalidIs422(t *testing.T) {
+	e := newEnv(t, createResultStep())
+	ws := e.seedGitWorkspace()
+	e.seedToken(e.adminID)
+
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "title": "t", "prompt": "hello",
+		"worktree_path": t.TempDir(),
+	}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /sessions with a bogus worktree_path = %d, want 422", status)
+	}
+}
+
 func TestSessionsModel_OtherUsersSessionIs404(t *testing.T) {
 	e := newEnv(t, createResultStep())
 	ws := e.seedWorkspace("interactive")
