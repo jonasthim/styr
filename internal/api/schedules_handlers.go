@@ -36,10 +36,12 @@ func registerSchedulesRoutes(r chi.Router, d *Deps) {
 // scheduleDTO is domain.Schedule shaped for JSON: exactly the fields the
 // v0.4 API contract documents, nothing more.
 type scheduleDTO struct {
-	ID          string          `json:"id"`
-	OwnerID     *string         `json:"owner_id"`
-	Name        string          `json:"name"`
-	TemplateID  string          `json:"template_id"`
+	ID         string  `json:"id"`
+	OwnerID    *string `json:"owner_id"`
+	Name       string  `json:"name"`
+	TemplateID string  `json:"template_id"`
+	// PipelineID is the alternative to TemplateID; exactly one is set.
+	PipelineID  *string         `json:"pipeline_id"`
 	Cron        string          `json:"cron"`
 	Enabled     bool            `json:"enabled"`
 	Vars        json.RawMessage `json:"vars"`
@@ -52,7 +54,7 @@ type scheduleDTO struct {
 
 func scheduleDTOFrom(sc domain.Schedule) scheduleDTO {
 	return scheduleDTO{
-		ID: sc.ID, OwnerID: sc.OwnerID, Name: sc.Name, TemplateID: sc.TemplateID, Cron: sc.Cron,
+		ID: sc.ID, OwnerID: sc.OwnerID, Name: sc.Name, TemplateID: sc.TemplateID, PipelineID: sc.PipelineID, Cron: sc.Cron,
 		Enabled: sc.Enabled, Vars: sc.Vars, LastRunAt: sc.LastRunAt, LastOutcome: sc.LastOutcome,
 		NextRunAt: sc.NextRunAt, CreatedAt: sc.CreatedAt, UpdatedAt: sc.UpdatedAt,
 	}
@@ -61,6 +63,7 @@ func scheduleDTOFrom(sc domain.Schedule) scheduleDTO {
 type scheduleInput struct {
 	Name       string          `json:"name"`
 	TemplateID string          `json:"template_id"`
+	PipelineID *string         `json:"pipeline_id"`
 	Cron       string          `json:"cron"`
 	Vars       json.RawMessage `json:"vars"`
 	Enabled    *bool           `json:"enabled"`
@@ -69,7 +72,7 @@ type scheduleInput struct {
 
 func (in scheduleInput) toDomain() domain.ScheduleInput {
 	return domain.ScheduleInput{
-		Name: in.Name, TemplateID: in.TemplateID, Cron: in.Cron, Vars: in.Vars,
+		Name: in.Name, TemplateID: in.TemplateID, PipelineID: in.PipelineID, Cron: in.Cron, Vars: in.Vars,
 		Enabled: in.Enabled, Shared: in.Shared,
 	}
 }
@@ -96,6 +99,10 @@ func handleSchedulesCreate(d *Deps) http.HandlerFunc {
 		var in scheduleInput
 		if err := decodeJSON(r, &in); err != nil {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "invalid request body")
+			return
+		}
+		if !exactlyOneOfTemplateOrPipeline(in.TemplateID, in.PipelineID) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "exactly one of template_id or pipeline_id is required")
 			return
 		}
 		sc, err := d.Schedules.Create(r.Context(), actorFrom(r), in.toDomain())
@@ -126,6 +133,10 @@ func handleSchedulesPatch(d *Deps) http.HandlerFunc {
 		var in scheduleInput
 		if err := decodeJSON(r, &in); err != nil {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "invalid request body")
+			return
+		}
+		if !exactlyOneOfTemplateOrPipeline(in.TemplateID, in.PipelineID) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "exactly one of template_id or pipeline_id is required")
 			return
 		}
 		sc, err := d.Schedules.Update(r.Context(), actorFrom(r), chi.URLParam(r, "id"), in.toDomain())

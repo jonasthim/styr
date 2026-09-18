@@ -18,6 +18,7 @@ type triggerOut struct {
 	SecretHint      string  `json:"secret_hint"`
 	SecretHash      *string `json:"secret_hash"` // must never be sent by the server
 	TemplateID      string  `json:"template_id"`
+	PipelineID      *string `json:"pipeline_id"`
 	Enabled         bool    `json:"enabled"`
 	CooldownS       int     `json:"cooldown_s"`
 	StormCapPerHour int     `json:"storm_cap_per_hour"`
@@ -67,6 +68,64 @@ func TestTriggersCreate_ReturnsSecretOnlyOnce(t *testing.T) {
 	}
 	if containsSubstring(string(raw), `"secret_hash"`) {
 		t.Fatalf("response includes a secret_hash field: %s", raw)
+	}
+}
+
+func TestTriggersCreate_BothTemplateAndPipelineIs422(t *testing.T) {
+	e := newEnv(t)
+	e.triggers.CreateTriggerFn = func(context.Context, api.Actor, domain.TriggerInput) (domain.Trigger, string, error) {
+		t.Fatal("CreateTrigger must not be called when both template_id and pipeline_id are set")
+		return domain.Trigger{}, "", nil
+	}
+	var body errorOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/triggers", map[string]any{
+		"name": "prod alerts", "kind": "grafana", "template_id": "tmpl-1", "pipeline_id": "pipe-1",
+	}, &body)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", status)
+	}
+	if body.Error.Code != "invalid" {
+		t.Fatalf("error code = %q, want invalid", body.Error.Code)
+	}
+}
+
+func TestTriggersCreate_NeitherTemplateNorPipelineIs422(t *testing.T) {
+	e := newEnv(t)
+	e.triggers.CreateTriggerFn = func(context.Context, api.Actor, domain.TriggerInput) (domain.Trigger, string, error) {
+		t.Fatal("CreateTrigger must not be called when neither template_id nor pipeline_id is set")
+		return domain.Trigger{}, "", nil
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/triggers", map[string]any{
+		"name": "prod alerts", "kind": "grafana",
+	}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", status)
+	}
+}
+
+func TestTriggersCreate_PipelineIDOnly_OK(t *testing.T) {
+	e := newEnv(t)
+	e.triggers.CreateTriggerFn = func(_ context.Context, _ api.Actor, in domain.TriggerInput) (domain.Trigger, string, error) {
+		if in.TemplateID != "" {
+			t.Fatalf("template_id = %q, want empty", in.TemplateID)
+		}
+		if in.PipelineID == nil || *in.PipelineID != "pipe-1" {
+			t.Fatalf("pipeline_id = %v, want pipe-1", in.PipelineID)
+		}
+		trig := sampleTrigger()
+		trig.TemplateID = ""
+		trig.PipelineID = in.PipelineID
+		return trig, "styr_whs_plaintext_secret", nil
+	}
+	var out triggerCreateOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/triggers", map[string]any{
+		"name": "prod alerts", "kind": "grafana", "pipeline_id": "pipe-1",
+	}, &out)
+	if status != http.StatusCreated {
+		t.Fatalf("status = %d, want 201", status)
+	}
+	if out.Trigger.PipelineID == nil || *out.Trigger.PipelineID != "pipe-1" {
+		t.Fatalf("trigger.pipeline_id = %v, want pipe-1", out.Trigger.PipelineID)
 	}
 }
 

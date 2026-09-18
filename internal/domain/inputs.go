@@ -26,11 +26,14 @@ type TemplateInput struct {
 
 // TriggerInput is the create/update payload for a Trigger. Enabled is a
 // pointer so update can distinguish "leave enabled as-is" (nil) from an
-// explicit true/false; create treats nil as enabled.
+// explicit true/false; create treats nil as enabled. PipelineID is the
+// alternative to TemplateID: exactly one of the two must be set, a rule
+// enforced at the API layer and (defensively) by the service.
 type TriggerInput struct {
 	Name              string
 	Kind              string
 	TemplateID        string
+	PipelineID        *string
 	DedupeKeyTemplate string
 	CooldownS         int
 	StormCapPerHour   int

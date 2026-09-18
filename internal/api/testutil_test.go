@@ -29,6 +29,7 @@ import (
 	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/harness/fake"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/pipelines"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
@@ -163,6 +164,7 @@ type testEnv struct {
 	notifier  *fakeNotifier
 	schedules *fakeSchedulesService
 	stats     *fakeStatsService
+	pipelines *fakePipelinesService
 
 	adminClient *http.Client
 	adminID     string
@@ -216,6 +218,7 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		notifier:      newFakeNotifier(),
 		schedules:     newFakeSchedulesService(),
 		stats:         newFakeStatsService(),
+		pipelines:     newFakePipelinesService(),
 	}
 	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
 
@@ -270,6 +273,7 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		Notifier:       e.notifier,
 		Schedules:      e.schedules,
 		Stats:          e.stats,
+		Pipelines:      e.pipelines,
 		Status: func() api.StatusInfo {
 			return api.StatusInfo{Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0}
 		},
@@ -872,4 +876,128 @@ func (f *fakeNotifier) lastCall() (fakeNotifierCall, bool) {
 		return fakeNotifierCall{}, false
 	}
 	return f.calls[len(f.calls)-1], true
+}
+
+// fakePipelinesService is an in-memory api.PipelinesService, recording
+// calls the same way fakeTriggersService does.
+type fakePipelinesService struct {
+	mu    sync.Mutex
+	calls []fakeCall
+
+	CreatePipelineFn func(ctx context.Context, actor api.Actor, in domain.PipelineInput) (domain.Pipeline, error)
+	ListPipelinesFn  func(ctx context.Context, actor api.Actor) ([]domain.Pipeline, error)
+	GetPipelineFn    func(ctx context.Context, actor api.Actor, id string) (domain.Pipeline, error)
+	UpdatePipelineFn func(ctx context.Context, actor api.Actor, id string, in domain.PipelineInput) (domain.Pipeline, error)
+	DeletePipelineFn func(ctx context.Context, actor api.Actor, id string) error
+	ValidateFn       func(ctx context.Context, actor api.Actor, workspaceID string, yamlText []byte) (pipelines.ValidationResult, error)
+	StartFn          func(ctx context.Context, actor api.Actor, pipelineID string, input templates.Vars, origin domain.Origin, originRef string) (domain.PipelineRun, error)
+	GetRunFn         func(ctx context.Context, actor api.Actor, id string) (pipelines.RunView, error)
+	ListRunsFn       func(ctx context.Context, actor api.Actor, f domain.PipelineRunFilter) ([]domain.PipelineRun, error)
+	CancelFn         func(ctx context.Context, actor api.Actor, id string) error
+	RetryFailedFn    func(ctx context.Context, actor api.Actor, id string) error
+}
+
+func newFakePipelinesService() *fakePipelinesService { return &fakePipelinesService{} }
+
+func (f *fakePipelinesService) record(method string, actor api.Actor, args ...any) {
+	f.mu.Lock()
+	f.calls = append(f.calls, fakeCall{method: method, actor: actor, args: args})
+	f.mu.Unlock()
+}
+
+func (f *fakePipelinesService) lastCall() (fakeCall, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.calls) == 0 {
+		return fakeCall{}, false
+	}
+	return f.calls[len(f.calls)-1], true
+}
+
+func (f *fakePipelinesService) CreatePipeline(ctx context.Context, actor api.Actor, in domain.PipelineInput) (domain.Pipeline, error) {
+	f.record("CreatePipeline", actor, in)
+	if f.CreatePipelineFn != nil {
+		return f.CreatePipelineFn(ctx, actor, in)
+	}
+	return domain.Pipeline{}, errFakeNotConfigured
+}
+
+func (f *fakePipelinesService) ListPipelines(ctx context.Context, actor api.Actor) ([]domain.Pipeline, error) {
+	f.record("ListPipelines", actor)
+	if f.ListPipelinesFn != nil {
+		return f.ListPipelinesFn(ctx, actor)
+	}
+	return nil, nil
+}
+
+func (f *fakePipelinesService) GetPipeline(ctx context.Context, actor api.Actor, id string) (domain.Pipeline, error) {
+	f.record("GetPipeline", actor, id)
+	if f.GetPipelineFn != nil {
+		return f.GetPipelineFn(ctx, actor, id)
+	}
+	return domain.Pipeline{}, fmt.Errorf("get pipeline: %w", domain.ErrNotFound)
+}
+
+func (f *fakePipelinesService) UpdatePipeline(ctx context.Context, actor api.Actor, id string, in domain.PipelineInput) (domain.Pipeline, error) {
+	f.record("UpdatePipeline", actor, id, in)
+	if f.UpdatePipelineFn != nil {
+		return f.UpdatePipelineFn(ctx, actor, id, in)
+	}
+	return domain.Pipeline{}, errFakeNotConfigured
+}
+
+func (f *fakePipelinesService) DeletePipeline(ctx context.Context, actor api.Actor, id string) error {
+	f.record("DeletePipeline", actor, id)
+	if f.DeletePipelineFn != nil {
+		return f.DeletePipelineFn(ctx, actor, id)
+	}
+	return nil
+}
+
+func (f *fakePipelinesService) Validate(ctx context.Context, actor api.Actor, workspaceID string, yamlText []byte) (pipelines.ValidationResult, error) {
+	f.record("Validate", actor, workspaceID, yamlText)
+	if f.ValidateFn != nil {
+		return f.ValidateFn(ctx, actor, workspaceID, yamlText)
+	}
+	return pipelines.ValidationResult{}, errFakeNotConfigured
+}
+
+func (f *fakePipelinesService) Start(ctx context.Context, actor api.Actor, pipelineID string, input templates.Vars, origin domain.Origin, originRef string) (domain.PipelineRun, error) {
+	f.record("Start", actor, pipelineID, input, origin, originRef)
+	if f.StartFn != nil {
+		return f.StartFn(ctx, actor, pipelineID, input, origin, originRef)
+	}
+	return domain.PipelineRun{}, errFakeNotConfigured
+}
+
+func (f *fakePipelinesService) GetRun(ctx context.Context, actor api.Actor, id string) (pipelines.RunView, error) {
+	f.record("GetRun", actor, id)
+	if f.GetRunFn != nil {
+		return f.GetRunFn(ctx, actor, id)
+	}
+	return pipelines.RunView{}, fmt.Errorf("get pipeline run: %w", domain.ErrNotFound)
+}
+
+func (f *fakePipelinesService) ListRuns(ctx context.Context, actor api.Actor, filter domain.PipelineRunFilter) ([]domain.PipelineRun, error) {
+	f.record("ListRuns", actor, filter)
+	if f.ListRunsFn != nil {
+		return f.ListRunsFn(ctx, actor, filter)
+	}
+	return nil, nil
+}
+
+func (f *fakePipelinesService) Cancel(ctx context.Context, actor api.Actor, id string) error {
+	f.record("Cancel", actor, id)
+	if f.CancelFn != nil {
+		return f.CancelFn(ctx, actor, id)
+	}
+	return errFakeNotConfigured
+}
+
+func (f *fakePipelinesService) RetryFailed(ctx context.Context, actor api.Actor, id string) error {
+	f.record("RetryFailed", actor, id)
+	if f.RetryFailedFn != nil {
+		return f.RetryFailedFn(ctx, actor, id)
+	}
+	return errFakeNotConfigured
 }

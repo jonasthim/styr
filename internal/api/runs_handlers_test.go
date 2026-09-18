@@ -13,6 +13,7 @@ type runOut struct {
 	ID        string  `json:"id"`
 	SessionID string  `json:"session_id"`
 	Origin    string  `json:"origin"`
+	StepRunID *string `json:"step_run_id"`
 	LoopID    string  `json:"loop_id"`
 	Iteration int     `json:"iteration"`
 	Outcome   string  `json:"outcome"`
@@ -102,6 +103,24 @@ func TestRunsGet_OK(t *testing.T) {
 	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-1", nil, &out)
 	if status != http.StatusOK || out.Run.ID != "run-1" {
 		t.Fatalf("GET /runs/run-1 = %d, out = %+v", status, out)
+	}
+}
+
+func TestRunsGet_IncludesStepRunID(t *testing.T) {
+	e := newEnv(t)
+	stepRunID := "step-1"
+	e.runs.GetFn = func(context.Context, string) (domain.RunView, error) {
+		return domain.RunView{Run: domain.Run{
+			ID: "run-3", Origin: "pipeline", StepRunID: &stepRunID, Outcome: domain.RunSuccess,
+		}}, nil
+	}
+	var out runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-3", nil, &out)
+	if status != http.StatusOK {
+		t.Fatalf("GET /runs/run-3 = %d, want 200", status)
+	}
+	if out.Run.StepRunID == nil || *out.Run.StepRunID != "step-1" {
+		t.Fatalf("run.step_run_id = %v, want step-1", out.Run.StepRunID)
 	}
 }
 

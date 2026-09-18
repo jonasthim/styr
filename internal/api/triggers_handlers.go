@@ -42,13 +42,15 @@ func registerTriggersRoutes(r chi.Router, d *Deps) {
 // the plaintext secret — that appears only in triggerCreateDTO (create) and
 // triggerSecretDTO (rotate).
 type triggerDTO struct {
-	ID                string     `json:"id"`
-	OwnerID           *string    `json:"owner_id"`
-	Name              string     `json:"name"`
-	Slug              string     `json:"slug"`
-	Kind              string     `json:"kind"`
-	SecretHint        string     `json:"secret_hint"`
-	TemplateID        string     `json:"template_id"`
+	ID         string  `json:"id"`
+	OwnerID    *string `json:"owner_id"`
+	Name       string  `json:"name"`
+	Slug       string  `json:"slug"`
+	Kind       string  `json:"kind"`
+	SecretHint string  `json:"secret_hint"`
+	TemplateID string  `json:"template_id"`
+	// PipelineID is the alternative to TemplateID; exactly one is set.
+	PipelineID        *string    `json:"pipeline_id"`
 	Enabled           bool       `json:"enabled"`
 	DedupeKeyTemplate string     `json:"dedupe_key_template"`
 	CooldownS         int        `json:"cooldown_s"`
@@ -62,7 +64,7 @@ type triggerDTO struct {
 func triggerDTOFrom(t domain.Trigger) triggerDTO {
 	return triggerDTO{
 		ID: t.ID, OwnerID: t.OwnerID, Name: t.Name, Slug: t.Slug, Kind: string(t.Kind),
-		SecretHint: t.SecretHint, TemplateID: t.TemplateID, Enabled: t.Enabled,
+		SecretHint: t.SecretHint, TemplateID: t.TemplateID, PipelineID: t.PipelineID, Enabled: t.Enabled,
 		DedupeKeyTemplate: t.DedupeKeyTemplate, CooldownS: t.CooldownS, StormCapPerHour: t.StormCapPerHour,
 		RunOnResolved: t.RunOnResolved, CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt, LastDeliveryAt: t.LastDeliveryAt,
 	}
@@ -78,23 +80,37 @@ type triggerSecretDTO struct {
 }
 
 type triggerInput struct {
-	Name              string `json:"name"`
-	Kind              string `json:"kind"`
-	TemplateID        string `json:"template_id"`
-	DedupeKeyTemplate string `json:"dedupe_key_template"`
-	CooldownS         int    `json:"cooldown_s"`
-	StormCapPerHour   int    `json:"storm_cap_per_hour"`
-	RunOnResolved     bool   `json:"run_on_resolved"`
-	Shared            bool   `json:"shared"`
-	Enabled           *bool  `json:"enabled"`
+	Name              string  `json:"name"`
+	Kind              string  `json:"kind"`
+	TemplateID        string  `json:"template_id"`
+	PipelineID        *string `json:"pipeline_id"`
+	DedupeKeyTemplate string  `json:"dedupe_key_template"`
+	CooldownS         int     `json:"cooldown_s"`
+	StormCapPerHour   int     `json:"storm_cap_per_hour"`
+	RunOnResolved     bool    `json:"run_on_resolved"`
+	Shared            bool    `json:"shared"`
+	Enabled           *bool   `json:"enabled"`
 }
 
 func (in triggerInput) toDomain() domain.TriggerInput {
 	return domain.TriggerInput{
-		Name: in.Name, Kind: in.Kind, TemplateID: in.TemplateID, DedupeKeyTemplate: in.DedupeKeyTemplate,
-		CooldownS: in.CooldownS, StormCapPerHour: in.StormCapPerHour, RunOnResolved: in.RunOnResolved,
+		Name: in.Name, Kind: in.Kind, TemplateID: in.TemplateID, PipelineID: in.PipelineID,
+		DedupeKeyTemplate: in.DedupeKeyTemplate,
+		CooldownS:         in.CooldownS, StormCapPerHour: in.StormCapPerHour, RunOnResolved: in.RunOnResolved,
 		Shared: in.Shared, Enabled: in.Enabled,
 	}
+}
+
+// exactlyOneOfTemplateOrPipeline reports whether exactly one of templateID
+// (non-empty) and pipelineID (non-nil and non-empty) is set — the rule
+// every trigger and schedule create/update must satisfy. Checked here so
+// the 422 comes back before ever reaching TriggersService/SchedulesService,
+// which also enforce it, defensively, against a caller that bypasses the
+// API (e.g. a future gRPC surface).
+func exactlyOneOfTemplateOrPipeline(templateID string, pipelineID *string) bool {
+	hasTemplate := templateID != ""
+	hasPipeline := pipelineID != nil && *pipelineID != ""
+	return hasTemplate != hasPipeline
 }
 
 // handleTriggersList is GET /api/v1/triggers.
@@ -120,6 +136,10 @@ func handleTriggersCreate(d *Deps) http.HandlerFunc {
 		var in triggerInput
 		if err := decodeJSON(r, &in); err != nil {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "invalid request body")
+			return
+		}
+		if !exactlyOneOfTemplateOrPipeline(in.TemplateID, in.PipelineID) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "exactly one of template_id or pipeline_id is required")
 			return
 		}
 		t, secret, err := d.Triggers.CreateTrigger(r.Context(), actorFrom(r), in.toDomain())
@@ -165,6 +185,10 @@ func handleTriggersPatch(d *Deps) http.HandlerFunc {
 		var in triggerInput
 		if err := decodeJSON(r, &in); err != nil {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "invalid request body")
+			return
+		}
+		if !exactlyOneOfTemplateOrPipeline(in.TemplateID, in.PipelineID) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "exactly one of template_id or pipeline_id is required")
 			return
 		}
 		t, err := d.Triggers.UpdateTrigger(r.Context(), actorFrom(r), chi.URLParam(r, "id"), in.toDomain())

@@ -14,6 +14,7 @@ import (
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/pipelines"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
@@ -92,6 +93,34 @@ type SchedulesService interface {
 	// times plus a human-readable description; it takes no actor since it
 	// reads nothing schedule-specific.
 	Preview(cronExpr string) (schedules.Preview, error)
+}
+
+// PipelinesService is what internal/api's pipelines and pipeline-runs
+// handlers call. Card T56 implements it as internal/pipelines.Executor
+// (CRUD + validation + execution); see TriggersService's doc comment for
+// why this is an interface here.
+type PipelinesService interface {
+	CreatePipeline(ctx context.Context, actor Actor, in domain.PipelineInput) (domain.Pipeline, error)
+	ListPipelines(ctx context.Context, actor Actor) ([]domain.Pipeline, error)
+	GetPipeline(ctx context.Context, actor Actor, id string) (domain.Pipeline, error)
+	UpdatePipeline(ctx context.Context, actor Actor, id string, in domain.PipelineInput) (domain.Pipeline, error)
+	DeletePipeline(ctx context.Context, actor Actor, id string) error
+
+	// Validate parses and validates yamlText against workspaceID's
+	// templates without persisting anything, backing POST
+	// /pipelines/validate. It only errors for a genuine service failure
+	// (e.g. an unknown workspace) — an invalid definition is reported via
+	// ValidationResult.OK/Problems, not an error.
+	Validate(ctx context.Context, actor Actor, workspaceID string, yamlText []byte) (pipelines.ValidationResult, error)
+
+	// Start begins a pipeline run, backing both POST /pipelines/{id}/start
+	// (origin ui) and trigger/schedule delivery (origin webhook/schedule).
+	Start(ctx context.Context, actor Actor, pipelineID string, input templates.Vars, origin domain.Origin, originRef string) (domain.PipelineRun, error)
+
+	GetRun(ctx context.Context, actor Actor, id string) (pipelines.RunView, error)
+	ListRuns(ctx context.Context, actor Actor, f domain.PipelineRunFilter) ([]domain.PipelineRun, error)
+	Cancel(ctx context.Context, actor Actor, id string) error
+	RetryFailed(ctx context.Context, actor Actor, id string) error
 }
 
 // StatsService is what internal/api's stats handlers call. Card T48
@@ -178,6 +207,10 @@ type Deps struct {
 	// (internal/schedules.Service and internal/stats.Service at runtime).
 	Schedules SchedulesService
 	Stats     StatsService
+
+	// Pipelines backs the /pipelines and /pipeline-runs routes
+	// (internal/pipelines.Executor at runtime).
+	Pipelines PipelinesService
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not
