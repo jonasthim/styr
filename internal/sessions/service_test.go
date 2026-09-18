@@ -564,3 +564,32 @@ func TestVisibility(t *testing.T) {
 		t.Fatalf("member get owner-less session: %v", err)
 	}
 }
+
+func TestSend_RecordsUserTurnAsEvent(t *testing.T) {
+	svc, repos, _ := newService(t, fake.Step{Events: []harness.Event{{Type: harness.EventResult, Result: &harness.Result{Subtype: "success", NumTurns: 1}}}})
+	owner := testAdminID
+	actor := Actor{UserID: owner, IsAdmin: true}
+	sess, err := svc.Create(context.Background(), actor, CreateInput{WorkspaceID: testWorkspaceID, ProfileID: "interactive", Title: "t", Prompt: "first prompt", Origin: domain.OriginUI, Owner: &owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+	if err := svc.Send(context.Background(), actor, sess.ID, "second prompt"); err != nil {
+		t.Fatal(err)
+	}
+	evs, err := repos.Events.ListAfter(context.Background(), sess.ID, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var texts []string
+	for _, e := range evs {
+		if e.Type == string(harness.EventUser) {
+			var ev harness.Event
+			_ = json.Unmarshal(e.Payload, &ev)
+			texts = append(texts, ev.Text)
+		}
+	}
+	if len(texts) != 2 || texts[0] != "first prompt" || texts[1] != "second prompt" {
+		t.Fatalf("user turns = %v, want first and second prompt in order", texts)
+	}
+}

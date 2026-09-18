@@ -204,6 +204,7 @@ func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error 
 	s.mu.Lock()
 	if entry, ok := s.procs[id]; ok {
 		s.mu.Unlock()
+		s.recordUserTurn(ctx, sess, text)
 		return entry.proc.Send(ctx, harness.UserMessage{Text: text})
 	}
 	if _, already := s.starting[id]; already {
@@ -212,6 +213,7 @@ func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error 
 		if err != nil {
 			return err
 		}
+		s.recordUserTurn(ctx, sess, text)
 		return entry.proc.Send(ctx, harness.UserMessage{Text: text})
 	}
 	s.starting[id] = struct{}{}
@@ -449,7 +451,25 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 			return err
 		}
 	}
+	s.recordUserTurn(ctx, sess, firstMessage)
 	return p.Send(ctx, harness.UserMessage{Text: firstMessage})
+}
+
+// recordUserTurn persists the user's own message as a transcript event of
+// type "user" so the transcript shows both sides, and publishes it on the bus.
+// The CLI echoes user turns back (--replay-user-messages) but the codec drops
+// those echoes, so this is the single source of user turns.
+func (s *Service) recordUserTurn(ctx context.Context, sess domain.Session, text string) {
+	payload, err := json.Marshal(harness.Event{Type: harness.EventUser, At: time.Now(), Text: text})
+	if err != nil {
+		return
+	}
+	seq, err := s.repos.Events.Append(ctx, sess.ID, string(harness.EventUser), payload)
+	if err != nil {
+		s.logger.Error("record user turn", "session", sess.ID, "err", err)
+		return
+	}
+	s.bus.Publish(events.Message{Kind: "session.event", SessionID: sess.ID, OwnerID: sess.OwnerID, Seq: seq, Payload: payload})
 }
 
 // registerProcess tracks a live process under sessionID. If a live process

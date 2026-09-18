@@ -81,6 +81,7 @@ const (
 	EventResult     EventType = "result"
 	EventRaw        EventType = "raw"  // unknown message, kept verbatim
 	EventExit       EventType = "exit" // process ended
+	EventUser       EventType = "user" // a user turn recorded by the host; never produced by the CLI codec
 )
 
 // Init carries the session metadata reported when a session starts.
