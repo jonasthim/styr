@@ -1,9 +1,13 @@
 import { test, expect, type Page } from '@playwright/test'
+import { denyPendingApproval, isReal, seedWaitingSession } from './helpers/seed'
 
-// Runs against the mock backend (see e2e/login.spec.ts for the general mock
-// setup notes). /api/v1/me starts logged in as the dev admin, so every test
-// here can navigate straight to an authenticated route. The mock seeds two
-// pending approvals, both against the same session.
+// Runs against both backends. /api/v1/me starts logged in as the dev admin
+// in both, so every test here can navigate straight to an authenticated
+// route. Mock: the mock seeds two pending approvals, both against the same
+// session (web/src/mocks/handlers.ts). Real: the badge test seeds its own
+// single pending approval (e2e/helpers/seed.ts) - the real projects run
+// with workers: 1 (web/playwright.config.ts), so no other file's approvals
+// are in flight while this test reads the count.
 
 // Waits for the placeholder page's heading (proof the route rendered inside
 // the Shell) plus a beat for Shell's passive effects - useShortcuts' global
@@ -62,9 +66,21 @@ test('t flips data-theme on <html>', async ({ page }) => {
   await expect(html).toHaveAttribute('data-theme', 'dark')
 })
 
-test('the Inbox badge shows the pending approvals count', async ({ page }) => {
-  await page.goto('/inbox')
-  await expect(page.getByTestId('inbox-badge')).toHaveText('2')
+test('the Inbox badge shows the pending approvals count', async ({ page }, testInfo) => {
+  if (isReal(testInfo)) {
+    const { sessionId } = await seedWaitingSession(page, testInfo)
+    await page.goto('/inbox')
+    await expect(page.getByTestId('inbox-badge')).toHaveText('1')
+    // Decide it before the test ends: e2e/inbox.spec.ts's own tests (and
+    // this file's own group-header friends in e2e/sessions.spec.ts) assert
+    // an exact pending-approvals count, which a leftover approval here
+    // would throw off (the real projects share one backend and database
+    // across every file - see web/playwright.config.ts's workers: 1 note).
+    await denyPendingApproval(page, sessionId)
+  } else {
+    await page.goto('/inbox')
+    await expect(page.getByTestId('inbox-badge')).toHaveText('2')
+  }
 })
 
 test('the rail and tab bar follow the viewport breakpoint', async ({ page }, testInfo) => {

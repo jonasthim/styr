@@ -1,10 +1,22 @@
 import { test, expect, type Page } from '@playwright/test'
+import {
+  denyPendingApproval,
+  ensureRealToken,
+  ensureRealWorkspace,
+  isReal,
+  seedClosedSession,
+  seedToolSession,
+  seedWaitingSession,
+} from './helpers/seed'
 
-// Runs against the mock backend (msw handlers + FakeEventSource; see
-// web/src/mocks/). /api/v1/me starts logged in as the dev admin. The mock
-// seeds sessions in every state (waiting, running, closed, failed) but none
-// in `open`, so the "Idle" group is absent until a new session is created
-// (POST /api/v1/sessions always returns an `open` session).
+// Runs against both backends. Mock: /api/v1/me starts logged in as the dev
+// admin; the mock seeds sessions in every state (waiting, running, closed,
+// failed) but none in `open`, so the "Idle" group is absent until a new
+// session is created (POST /api/v1/sessions always returns an `open`
+// session). Real: a fresh backend starts with none of that, so each test
+// seeds what it needs (e2e/helpers/seed.ts). The real projects run with
+// workers: 1 (web/playwright.config.ts), so this file's tests never race
+// each other or another file's over the shared account.
 
 async function gotoReady(page: Page, path: string, heading: string) {
   await page.goto(path)
@@ -12,7 +24,16 @@ async function gotoReady(page: Page, path: string, heading: string) {
   await page.waitForTimeout(50)
 }
 
-test('create a session via the palette shortcut, then find it back in the list', async ({ page }) => {
+test.describe.configure({ mode: 'serial' })
+
+test('create a session via the palette shortcut, then find it back in the list', async ({ page }, testInfo) => {
+  // The New session dialog defaults its workspace select to the first
+  // workspace the account has (NewSessionDialog.tsx); a fresh real backend
+  // starts with none.
+  if (isReal(testInfo)) {
+    await ensureRealToken(page)
+    await ensureRealWorkspace(page)
+  }
   await gotoReady(page, '/sessions', 'Sessions')
 
   await page.keyboard.press('n')
@@ -33,18 +54,35 @@ test('create a session via the palette shortcut, then find it back in the list',
   await expect(newRow).toContainText('Untitled session')
 })
 
-test('a seeded closed session row shows a cost like $0.05', async ({ page }) => {
+test('a seeded closed session row shows a cost like $0.05', async ({ page }, testInfo) => {
+  if (isReal(testInfo)) await seedClosedSession(page, testInfo)
   await gotoReady(page, '/sessions', 'Sessions')
   const closedGroup = page.getByTestId('session-group-closed')
   await expect(closedGroup).toBeVisible()
   await expect(closedGroup.getByText(/\$\d+\.\d\d/).first()).toBeVisible()
 })
 
-test('group headers only render for groups that have sessions', async ({ page }) => {
+test('group headers only render for groups that have sessions', async ({ page }, testInfo) => {
+  let waitingSessionId: string | undefined
+  if (isReal(testInfo)) {
+    // Self-contained: seeds one session per group this test checks, rather
+    // than relying on this file's earlier tests (or another file's) having
+    // left the right states behind. `running` is deliberately not seeded:
+    // the shell fake (testdata/fake-claude/fake-claude.sh) replays a
+    // fixture in a few milliseconds, so a session only passes through
+    // `running` for an instant - too short a window for a real HTTP+browser
+    // round trip to reliably observe, unlike the mock's frozen fixture
+    // data. The "Running" heading assertion below is skipped in real mode
+    // for the same reason.
+    await Promise.all([seedToolSession(page, testInfo), seedClosedSession(page, testInfo)])
+    waitingSessionId = (await seedWaitingSession(page, testInfo)).sessionId
+  }
   await gotoReady(page, '/sessions', 'Sessions')
 
   await expect(page.getByRole('heading', { name: 'Needs you' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'Running' })).toBeVisible()
+  if (!isReal(testInfo)) {
+    await expect(page.getByRole('heading', { name: 'Running' })).toBeVisible()
+  }
   await expect(page.getByRole('heading', { name: 'Closed' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Idle' })).toBeVisible()
   // Every rendered group header must have at least one row under it.
@@ -53,6 +91,8 @@ test('group headers only render for groups that have sessions', async ({ page })
     if ((await group.count()) === 0) continue
     await expect(group.getByRole('link').first()).toBeVisible()
   }
+
+  if (isReal(testInfo) && waitingSessionId) await denyPendingApproval(page, waitingSessionId)
 })
 
 test('at 390 px the sessions list has no horizontal scroll', async ({ page }, testInfo) => {
@@ -87,7 +127,10 @@ async function firstRun(page: Page, role: 'admin' | 'member') {
   }, role)
 }
 
-test('an admin with no workspaces gets a link to add one and cannot start', async ({ page }) => {
+test('an admin with no workspaces gets a link to add one and cannot start', async ({ page }, testInfo) => {
+  // Mock only: emptying the real backend's workspace table would break the
+  // other real specs, which share one account and one serial run.
+  test.skip(isReal(testInfo), 'drives the mock backend in place')
   await gotoReady(page, '/sessions', 'Sessions')
   await firstRun(page, 'admin')
 
@@ -99,7 +142,8 @@ test('an admin with no workspaces gets a link to add one and cannot start', asyn
   await expect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled()
 })
 
-test('a member with no workspaces is told to ask an admin', async ({ page }) => {
+test('a member with no workspaces is told to ask an admin', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'drives the mock backend in place')
   await gotoReady(page, '/sessions', 'Sessions')
   await firstRun(page, 'member')
 

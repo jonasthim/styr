@@ -91,7 +91,6 @@ const workspaces: Workspace[] = [
     path: '/home/dev/styr',
     default_profile_id: 'interactive',
     worktrees: false,
-    created_at: iso(60 * 24 * 30),
   },
   {
     id: 'w2',
@@ -99,7 +98,6 @@ const workspaces: Workspace[] = [
     path: '/home/dev/notes',
     default_profile_id: 'interactive',
     worktrees: true,
-    created_at: iso(60 * 24 * 10),
   },
 ]
 
@@ -287,8 +285,6 @@ const approvals: Approval[] = [
     risk: 'exec',
     state: 'pending',
     created_at: iso(2),
-    decided_by: null,
-    decided_at: null,
     snoozed_until: null,
     updated_input: null,
     message: '',
@@ -304,8 +300,6 @@ const approvals: Approval[] = [
     risk: 'destructive',
     state: 'pending',
     created_at: iso(1),
-    decided_by: null,
-    decided_at: null,
     snoozed_until: null,
     updated_input: null,
     message: '',
@@ -321,8 +315,7 @@ const users: User[] = [
     display_name: 'Dev Admin',
     avatar_url: '',
     role: 'admin',
-    created_at: iso(60 * 24 * 60),
-    last_login_at: iso(5),
+    prefs: {},
   },
 ]
 
@@ -481,7 +474,6 @@ export const handlers = [
       path: body.path,
       default_profile_id: body.default_profile_id ?? 'interactive',
       worktrees: body.worktrees ?? false,
-      created_at: iso(0),
     }
     workspaces.push(ws)
     return HttpResponse.json(ws, { status: 201 })
@@ -619,8 +611,6 @@ export const handlers = [
     const approval = approvals.find((a) => a.id === params.id)
     if (!approval) return HttpResponse.json(errorBody('not_found', 'approval not found'), { status: 404 })
     approval.state = body.decision === 'allow' ? 'allowed' : 'denied'
-    approval.decided_by = DEV_USER_ID
-    approval.decided_at = iso(0)
     if (body.updated_input !== undefined) approval.updated_input = body.updated_input
     if (body.message) approval.message = body.message
     const session = sessions.find((s) => s.id === approval.session_id)

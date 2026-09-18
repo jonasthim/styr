@@ -1,10 +1,15 @@
 import { test, expect } from '@playwright/test'
+import { isReal } from './helpers/seed'
 
-// Runs against the mock backend (msw handlers + FakeEventSource; see
-// web/src/mocks/). The mock providers list has exactly one provider
-// ("Authentik"), and /api/v1/me starts logged in as the dev admin.
+// Runs against both backends. The mock (msw handlers + FakeEventSource; see
+// web/src/mocks/) seeds a providers list with exactly one provider
+// ("Authentik") and a "logged out" flag the two mock-only tests below flip;
+// the real backend's dev mode has no OIDC providers configured and always
+// auto-logs the dev user in (cmd/styr/wire.go's devUser bypass), so those
+// two scenarios have nothing to exercise there.
 
-test('login page shows the wordmark and one provider button', async ({ page }) => {
+test('login page shows the wordmark and one provider button', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: dev mode auto-login has no providers to list')
   await page.goto('/login')
   await expect(page.getByRole('heading', { name: 'Styr' })).toBeVisible()
   await expect(page.getByRole('link', { name: /^Continue with/ })).toHaveCount(1)
@@ -20,7 +25,8 @@ test('/ redirects to /inbox when /api/v1/me returns a user', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Inbox' })).toBeVisible()
 })
 
-test('/ lands on /login when the session is logged out', async ({ page }) => {
+test('/ lands on /login when the session is logged out', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: dev mode auto-login bypasses the login session entirely')
   // A hard page reload would re-evaluate the mock handlers module and reset
   // its "logged out" flag along with the rest of the page's JS, so this
   // flips the flag and forces a refetch within the same page session
