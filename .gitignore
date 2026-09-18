@@ -1,0 +1,11 @@
+/bin/
+/web/node_modules/
+/web/dist/*
+!/web/dist/.gitkeep
+/web/test-results/
+/web/playwright-report/
+/data/
+*.db
+*.db-wal
+*.db-shm
+.env
