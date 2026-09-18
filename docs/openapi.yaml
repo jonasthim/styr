@@ -1,0 +1,982 @@
+openapi: 3.1.0
+info:
+  title: Styr API
+  description: >
+    Styr's REST and SSE API: OIDC login, Claude Code sessions, approvals,
+    workspaces, profiles and server administration.
+  version: 0.1.0
+  license:
+    name: MIT
+servers:
+  - url: /
+security:
+  - sessionCookie: []
+paths:
+  /healthz:
+    get:
+      summary: Liveness check
+      operationId: healthz
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+
+  /api/v1/auth/providers:
+    get:
+      summary: List configured OIDC login providers
+      operationId: listAuthProviders
+      security: []
+      tags: [auth]
+      responses:
+        "200":
+          description: Configured providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                    slug:
+                      type: string
+                  required: [name, slug]
+
+  /api/v1/auth/login/{slug}:
+    get:
+      summary: Begin an OIDC login
+      operationId: beginAuthLogin
+      security: []
+      tags: [auth]
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "302":
+          description: Redirect to the provider's authorization endpoint
+
+  /api/v1/auth/callback:
+    get:
+      summary: Complete an OIDC login
+      operationId: completeAuthLogin
+      security: []
+      tags: [auth]
+      parameters:
+        - name: code
+          in: query
+          schema:
+            type: string
+        - name: state
+          in: query
+          schema:
+            type: string
+      responses:
+        "302":
+          description: >
+            Redirect to "/" on success, "/login?error=..." on failure
+
+  /api/v1/auth/logout:
+    post:
+      summary: Log out
+      operationId: logout
+      tags: [auth]
+      responses:
+        "204":
+          description: Logged out
+
+  /api/v1/me:
+    get:
+      summary: Get the current user
+      operationId: getMe
+      tags: [me]
+      responses:
+        "200":
+          description: The current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+    patch:
+      summary: Update the current user's preferences
+      operationId: patchMe
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                prefs:
+                  type: object
+      responses:
+        "200":
+          description: The updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /api/v1/me/claude-token:
+    put:
+      summary: Set the current user's Claude token
+      description: >
+        The token is verified before anything is stored; on a failed verify
+        nothing is written and the response is 422 token_invalid. The token
+        itself is never returned by any response.
+      operationId: putMeClaudeToken
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required: [token]
+      responses:
+        "204":
+          description: Token verified and stored
+        "422":
+          description: The token failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      summary: Remove the current user's Claude token
+      operationId: deleteMeClaudeToken
+      tags: [me]
+      responses:
+        "204":
+          description: Removed (idempotent)
+
+  /api/v1/users:
+    get:
+      summary: List users
+      operationId: listUsers
+      tags: [admin]
+      responses:
+        "200":
+          description: Every user
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/users/{id}:
+    patch:
+      summary: Change a user's role
+      operationId: patchUser
+      tags: [admin]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                role:
+                  type: string
+                  enum: [admin, member]
+              required: [role]
+      responses:
+        "200":
+          description: The updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /api/v1/settings:
+    get:
+      summary: Get server-wide settings
+      operationId: getSettings
+      tags: [admin]
+      responses:
+        "200":
+          description: Server-wide settings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  max_open_sessions:
+                    type: integer
+                  idle_timeout:
+                    type: string
+                    description: A Go duration string, e.g. "15m0s".
+                  service_token:
+                    $ref: "#/components/schemas/ClaudeToken"
+                required: [max_open_sessions, idle_timeout, service_token]
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/settings/service-token:
+    put:
+      summary: Set the service-wide Claude token
+      description: Same verify-then-store rule as PUT /me/claude-token.
+      operationId: putServiceToken
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required: [token]
+      responses:
+        "204":
+          description: Token verified and stored
+        "422":
+          description: The token failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/workspaces:
+    get:
+      summary: List workspaces
+      operationId: listWorkspaces
+      tags: [workspaces]
+      responses:
+        "200":
+          description: Every workspace
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Workspace"
+    post:
+      summary: Create a workspace
+      description: >
+        path must exist, be a directory, and contain a .git entry
+        (directory or file); otherwise 422 invalid_path.
+      operationId: createWorkspace
+      tags: [workspaces]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+                default_profile_id:
+                  type: string
+                worktrees:
+                  type: boolean
+              required: [name, path, default_profile_id]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "422":
+          description: Invalid path
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+
+  /api/v1/workspaces/{id}:
+    patch:
+      summary: Update a workspace
+      operationId: patchWorkspace
+      tags: [workspaces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                path:
+                  type: string
+                default_profile_id:
+                  type: string
+                worktrees:
+                  type: boolean
+      responses:
+        "200":
+          description: The updated workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+    delete:
+      summary: Delete a workspace
+      operationId: deleteWorkspace
+      tags: [workspaces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /api/v1/profiles:
+    get:
+      summary: List profiles
+      operationId: listProfiles
+      tags: [profiles]
+      responses:
+        "200":
+          description: Every profile
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Profile"
+    post:
+      summary: Create a profile
+      operationId: createProfile
+      tags: [profiles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                mode:
+                  type: string
+                  enum: [default, acceptEdits, plan, dontAsk, auto]
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+                disallowed_tools:
+                  type: array
+                  items:
+                    type: string
+                max_turns:
+                  type: integer
+                unattended:
+                  type: boolean
+                approval_timeout:
+                  type: integer
+                  description: Seconds.
+              required: [name, mode]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "422":
+          description: mode is not an allowed permission mode
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/profiles/{id}:
+    patch:
+      summary: Update a profile
+      description: >
+        Builtin profiles only allow max_turns and approval_timeout to
+        change. mode may never be "bypassPermissions" (422 on any profile).
+      operationId: patchProfile
+      tags: [profiles]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                mode:
+                  type: string
+                allowed_tools:
+                  type: array
+                  items:
+                    type: string
+                disallowed_tools:
+                  type: array
+                  items:
+                    type: string
+                max_turns:
+                  type: integer
+                unattended:
+                  type: boolean
+                approval_timeout:
+                  type: integer
+      responses:
+        "200":
+          description: The updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Profile"
+        "422":
+          description: Disallowed mode, or a non-editable field on a builtin profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions:
+    get:
+      summary: List sessions visible to the current user
+      operationId: listSessions
+      tags: [sessions]
+      responses:
+        "200":
+          description: Visible sessions, in attention order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Session"
+    post:
+      summary: Create a session
+      operationId: createSession
+      tags: [sessions]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                workspace_id:
+                  type: string
+                profile_id:
+                  type: string
+                title:
+                  type: string
+                prompt:
+                  type: string
+              required: [workspace_id, profile_id, prompt]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "422":
+          description: >
+            No Claude token available for the current user (add one in
+            profile settings)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/sessions/{id}:
+    get:
+      summary: Get a session
+      operationId: getSession
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/sessions/{id}/messages:
+    post:
+      summary: Send a message to a session
+      operationId: sendSessionMessage
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+              required: [text]
+      responses:
+        "202":
+          description: Accepted
+
+  /api/v1/sessions/{id}/interrupt:
+    post:
+      summary: Interrupt a session's current turn
+      operationId: interruptSession
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted
+
+  /api/v1/sessions/{id}/close:
+    post:
+      summary: Close a session
+      operationId: closeSession
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Closed
+
+  /api/v1/sessions/{id}/events:
+    get:
+      summary: List a session's transcript events
+      operationId: listSessionEvents
+      tags: [sessions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          schema:
+            type: integer
+            format: int64
+            default: 0
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 500
+      responses:
+        "200":
+          description: Events after the given sequence number
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Event"
+
+  /api/v1/approvals:
+    get:
+      summary: List pending approvals visible to the current user
+      operationId: listApprovals
+      tags: [approvals]
+      parameters:
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending]
+      responses:
+        "200":
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Approval"
+
+  /api/v1/approvals/{id}:
+    post:
+      summary: Decide a pending approval
+      operationId: decideApproval
+      tags: [approvals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                decision:
+                  type: string
+                  enum: [allow, deny]
+                updated_input:
+                  type: object
+                message:
+                  type: string
+              required: [decision]
+      responses:
+        "204":
+          description: Decided
+
+  /api/v1/approvals/{id}/snooze:
+    post:
+      summary: Snooze a pending approval
+      operationId: snoozeApproval
+      tags: [approvals]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                until:
+                  type: string
+                  format: date-time
+              required: [until]
+      responses:
+        "204":
+          description: Snoozed
+
+  /api/v1/events:
+    get:
+      summary: Live event stream (Server-Sent Events)
+      description: >
+        Frames are "event: <Kind>\ndata: <Event JSON>\n\n", filtered to
+        messages visible to the current user (owned by them, owner-less, or
+        every message for an admin). A ": ping" comment is sent every 25s
+        as a heartbeat.
+      operationId: streamEvents
+      tags: [events]
+      responses:
+        "200":
+          description: text/event-stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/Event"
+
+  /api/v1/status:
+    get:
+      summary: Server status summary
+      operationId: getStatus
+      tags: [status]
+      responses:
+        "200":
+          description: Status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusInfo"
+
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: styr_session
+  responses:
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    Forbidden:
+      description: The current user may not perform this action
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    NotFound:
+      description: Not found (or not visible to the current user)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+
+  schemas:
+    ErrorBody:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+          required: [code, message]
+      required: [error]
+
+    ClaudeToken:
+      type: object
+      properties:
+        present:
+          type: boolean
+        label:
+          type: string
+        verified_at:
+          type: [string, "null"]
+          format: date-time
+      required: [present, label]
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        display_name:
+          type: string
+        avatar_url:
+          type: string
+        role:
+          type: string
+          enum: [admin, member]
+        prefs:
+          type: object
+        claude_token:
+          $ref: "#/components/schemas/ClaudeToken"
+      required: [id, email, display_name, avatar_url, role]
+
+    Workspace:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        path:
+          type: string
+        default_profile_id:
+          type: string
+        worktrees:
+          type: boolean
+      required: [id, name, path, default_profile_id, worktrees]
+
+    Profile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        mode:
+          type: string
+          enum: [default, acceptEdits, plan, dontAsk, auto]
+        allowed_tools:
+          type: array
+          items:
+            type: string
+        disallowed_tools:
+          type: array
+          items:
+            type: string
+        max_turns:
+          type: integer
+        unattended:
+          type: boolean
+        approval_timeout:
+          type: integer
+          description: Seconds.
+        builtin:
+          type: boolean
+      required: [id, name, mode, max_turns, unattended, approval_timeout, builtin]
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: [string, "null"]
+        title:
+          type: string
+        workspace_id:
+          type: string
+        profile_id:
+          type: string
+        harness:
+          type: string
+        state:
+          type: string
+          enum: [open, running, waiting, closed, failed]
+        origin:
+          type: string
+          enum: [ui, webhook, schedule, pipeline]
+        origin_ref:
+          type: string
+        worktree:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        last_active_at:
+          type: string
+          format: date-time
+        num_turns:
+          type: integer
+        cost_usd:
+          type: number
+        tokens_in:
+          type: integer
+        tokens_out:
+          type: integer
+        now_line:
+          type: string
+        model:
+          type: string
+      required:
+        - id
+        - title
+        - workspace_id
+        - profile_id
+        - harness
+        - state
+        - origin
+        - created_at
+        - last_active_at
+
+    Event:
+      type: object
+      properties:
+        id:
+          type: integer
+          format: int64
+        session_id:
+          type: string
+        seq:
+          type: integer
+          format: int64
+        at:
+          type: string
+          format: date-time
+        type:
+          type: string
+        payload:
+          type: object
+      required: [id, session_id, seq, at, type, payload]
+
+    Approval:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        session_title:
+          type: string
+        now_line:
+          type: string
+        request_id:
+          type: string
+        tool:
+          type: string
+        input:
+          type: object
+        risk:
+          type: string
+          enum: [read, write, exec, destructive]
+        state:
+          type: string
+          enum: [pending, allowed, denied, expired]
+        created_at:
+          type: string
+          format: date-time
+        snoozed_until:
+          type: [string, "null"]
+          format: date-time
+        updated_input:
+          type: object
+        message:
+          type: string
+      required: [id, session_id, session_title, now_line, request_id, tool, input, risk, state, created_at]
+
+    StatusInfo:
+      type: object
+      properties:
+        version:
+          type: string
+        claude_version:
+          type: string
+        open_processes:
+          type: integer
+        slots:
+          type: integer
+        queue_depth:
+          type: integer
+      required: [version, claude_version, open_processes, slots, queue_depth]
