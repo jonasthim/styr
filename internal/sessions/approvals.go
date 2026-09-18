@@ -42,6 +42,14 @@ func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, al
 		return err
 	}
 
+	// The session goes back to running BEFORE the process hears the decision:
+	// once the answer is on the pipe the CLI may finish the turn immediately,
+	// and the pump's "result → open" transition must not be overwritten by a
+	// late "running" write here.
+	if err := s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning); err != nil {
+		return err
+	}
+
 	s.mu.Lock()
 	entry, ok := s.procs[sess.ID]
 	s.mu.Unlock()
@@ -54,10 +62,6 @@ func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, al
 		}); err != nil {
 			return err
 		}
-	}
-
-	if err := s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning); err != nil {
-		return err
 	}
 	if err := s.repos.Audit.Append(ctx, actor.UserID, action, approvalID, nil); err != nil {
 		return err

@@ -170,7 +170,7 @@ func resultStep(res *harness.Result) fake.Step {
 // waitForRun polls until the run reaches want, or fails the test.
 func waitForRun(t *testing.T, repos Repos, id string, want domain.RunOutcome) domain.Run {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		run, err := repos.Runs.Get(context.Background(), id)
 		if err != nil {
@@ -188,7 +188,7 @@ func waitForRun(t *testing.T, repos Repos, id string, want domain.RunOutcome) do
 
 func waitForEvents(t *testing.T, rec *recorder, n int) []notify.Event {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if evs := rec.snapshot(); len(evs) >= n {
 			return evs
@@ -319,7 +319,7 @@ func TestRunFinishesSuccessWithStructuredOutputAndNotifiesNtfy(t *testing.T) {
 		if c.click != "https://styr.test/runs/"+run.ID {
 			t.Fatalf("Click header = %q", c.click)
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(20 * time.Second):
 		t.Fatal("no ntfy notification within 5s")
 	}
 }

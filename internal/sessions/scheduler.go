@@ -193,13 +193,18 @@ func (s *Service) expireApprovals(ctx context.Context) {
 		s.mu.Lock()
 		entry, ok := s.procs[sess.ID]
 		s.mu.Unlock()
-		if ok {
-			if err := entry.proc.Decide(ctx, harness.Decision{RequestID: ap.RequestID, Allow: false, Message: timeoutMsg}); err != nil {
-				s.logger.Error("expire approval: notify process failed", "approval_id", ap.ID, "session_id", sess.ID, "error", err)
-				_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionFailed)
-				continue
-			}
+		if !ok {
+			// No live process: nothing to tell, the session is simply idle again.
+			_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionOpen)
+			continue
 		}
-		_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionOpen)
+		// Same ordering rule as Decide: the session is running before the
+		// process hears the denial, so the pump's result transition wins.
+		_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionRunning)
+		if err := entry.proc.Decide(ctx, harness.Decision{RequestID: ap.RequestID, Allow: false, Message: timeoutMsg}); err != nil {
+			s.logger.Error("expire approval: notify process failed", "approval_id", ap.ID, "session_id", sess.ID, "error", err)
+			_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionFailed)
+			continue
+		}
 	}
 }

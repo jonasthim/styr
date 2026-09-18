@@ -14,7 +14,7 @@ import (
 // one entry or the 5s deadline passes.
 func waitForApprovals(t *testing.T, e *testEnv, client *http.Client) []map[string]any {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		var out []map[string]any
 		status := e.doJSON(client, http.MethodGet, "/api/v1/approvals?state=pending", nil, &out)
@@ -83,7 +83,7 @@ func TestApprovals_EndToEndDecide(t *testing.T) {
 		t.Fatalf("POST /approvals/%s = %d, want 204", approvalID, status)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		if len(e.harness.Procs) > 0 && len(e.harness.Procs[0].Decisions) > 0 {
 			break

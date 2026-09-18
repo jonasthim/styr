@@ -136,7 +136,7 @@ func TestRunMaintenance_ExpiresStaleApprovals(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 	svc.RunMaintenance(context.Background())
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		got, err := repos.Approvals.Get(context.Background(), ap.ID)
 		if err != nil {

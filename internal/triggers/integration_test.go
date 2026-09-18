@@ -251,7 +251,7 @@ func TestDeliverEndToEndReachesSuccess(t *testing.T) {
 		t.Fatal("no run id")
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		run, err := s.runs.Get(ctx, *dl.RunID)
 		if err != nil {

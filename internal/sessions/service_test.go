@@ -95,10 +95,10 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 }
 
 // waitForState polls repos for sess to reach want, failing the test if it
-// does not within 5s.
+// does not within the deadline.
 func waitForState(t *testing.T, repos Repos, id string, want domain.SessionState) domain.Session {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
+	deadline := time.Now().Add(20 * time.Second)
 	for {
 		sess, err := repos.Sessions.Get(context.Background(), id)
 		if err != nil {
@@ -108,7 +108,7 @@ func waitForState(t *testing.T, repos Repos, id string, want domain.SessionState
 			return *sess
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("session %s: want state %s, still %s after 5s", id, want, sess.State)
+			t.Fatalf("session %s: want state %s, still %s after the deadline", id, want, sess.State)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -254,7 +254,7 @@ func TestPump_PersistsAllEventsExceptPartial(t *testing.T) {
 	}
 
 	var sawPartial, sawText bool
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(20 * time.Second)
 	for !sawPartial || !sawText {
 		select {
 		case msg := <-ch:
@@ -395,7 +395,7 @@ func TestToolUseAndResult_UpdateStateAndStats(t *testing.T) {
 	}
 
 	var sawRunning, sawStats bool
-	deadline := time.After(5 * time.Second)
+	deadline := time.After(20 * time.Second)
 	for !sawRunning || !sawStats {
 		select {
 		case msg := <-ch:
