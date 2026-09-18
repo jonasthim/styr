@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/jonasthim/styr/internal/domain"
 )
@@ -48,13 +49,13 @@ func writeErrorCode(w http.ResponseWriter, status int, code, message string) {
 func WriteError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
-		writeErrorCode(w, http.StatusNotFound, "not_found", err.Error())
+		writeErrorCode(w, http.StatusNotFound, "not_found", userMessage(err, domain.ErrNotFound))
 	case errors.Is(err, domain.ErrForbidden):
-		writeErrorCode(w, http.StatusForbidden, "forbidden", err.Error())
+		writeErrorCode(w, http.StatusForbidden, "forbidden", userMessage(err, domain.ErrForbidden))
 	case errors.Is(err, domain.ErrInvalid):
-		writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", err.Error())
+		writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", userMessage(err, domain.ErrInvalid))
 	case errors.Is(err, domain.ErrConflict):
-		writeErrorCode(w, http.StatusConflict, "conflict", err.Error())
+		writeErrorCode(w, http.StatusConflict, "conflict", userMessage(err, domain.ErrConflict))
 	default:
 		writeErrorCode(w, http.StatusInternalServerError, "internal", "internal error")
 	}
@@ -67,4 +68,17 @@ func decodeJSON(r *http.Request, dst any) error {
 	}
 	dec := json.NewDecoder(io.LimitReader(r.Body, maxJSONBody))
 	return dec.Decode(dst)
+}
+
+// userMessage strips the sentinel's own text from a wrapped error so the API
+// says "the workspace has no git remote configured" rather than
+// "conflict: the workspace has no git remote configured". A bare sentinel keeps
+// its text.
+func userMessage(err, sentinel error) string {
+	msg := err.Error()
+	prefix := sentinel.Error() + ": "
+	if strings.HasPrefix(msg, prefix) && len(msg) > len(prefix) {
+		return msg[len(prefix):]
+	}
+	return msg
 }
