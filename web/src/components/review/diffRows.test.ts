@@ -10,9 +10,9 @@ const hunk: DiffHunk = {
   new_lines: 5,
   lines: [
     { type: 'ctx', old_no: 41, new_no: 41, text: 'func New() *Service {' },
-    { type: 'del', old_no: 42, new_no: null, text: '\treturn &Service{}' },
-    { type: 'add', old_no: null, new_no: 42, text: '\treturn &Service{' },
-    { type: 'add', old_no: null, new_no: 43, text: '\t\tworktree: "",' },
+    { type: 'del', old_no: 42, new_no: 0, text: '\treturn &Service{}' },
+    { type: 'add', old_no: 0, new_no: 42, text: '\treturn &Service{' },
+    { type: 'add', old_no: 0, new_no: 43, text: '\t\tworktree: "",' },
     { type: 'ctx', old_no: 43, new_no: 44, text: '}' },
   ],
 }

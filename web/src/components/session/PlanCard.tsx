@@ -12,7 +12,7 @@ import { api } from '../../api/client'
 import type { Approval } from '../../api/types'
 import { Button, Textarea } from '../ui'
 import { TextBlock } from './TextBlock'
-import { parsePlan, planText, PLAN_TOOL } from './planMarkdown'
+import { parsePlan, planOf, PLAN_TOOL } from './planMarkdown'
 
 /** The plan's own body: prose as markdown, steps as a checklist. Shared with
  * the inbox card, which renders the same thing at a smaller size. */
@@ -49,7 +49,7 @@ export function usePlanApproval(sessionId: string): { approval: Approval; plan: 
   const approvalsQuery = useQuery(q.approvals())
   for (const approval of approvalsQuery.data ?? []) {
     if (approval.session_id !== sessionId || approval.state !== 'pending' || approval.tool !== PLAN_TOOL) continue
-    const plan = planText(approval.updated_input ?? approval.input)
+    const plan = planOf(approval)
     if (plan) return { approval, plan }
   }
   return null

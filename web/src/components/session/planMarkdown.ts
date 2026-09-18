@@ -14,6 +14,15 @@ export type PlanChunk = { kind: 'prose'; text: string } | { kind: 'steps'; items
 
 const CHECKBOX = /^\s*[-*]\s+\[([ xX])\]\s+(.*)$/
 
+/** The plan an approval carries, or null when it is not a plan request. The
+ * handler lifts the markdown onto the approval's own `plan` field
+ * (docs/openapi.yaml, Approval.plan); the raw tool input is the fallback,
+ * for an edited request whose plan the operator rewrote. */
+export function planOf(approval: { tool: string; plan?: string; input: unknown; updated_input?: unknown }): string | null {
+  if (approval.tool !== PLAN_TOOL) return null
+  return planText(approval.updated_input ?? approval.input) ?? (approval.plan?.trim() ? approval.plan : null)
+}
+
 /** The plan markdown carried by an ExitPlanMode request, or null for anything
  * that does not look like one. */
 export function planText(input: unknown): string | null {

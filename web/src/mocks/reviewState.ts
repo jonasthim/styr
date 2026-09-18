@@ -23,8 +23,10 @@ function hunk(oldStart: number, newStart: number, specs: LineSpec[]): DiffHunk {
   let newNo = newStart
   const lines: DiffLine[] = specs.map(([type, text]) => ({
     type,
-    old_no: type === 'add' ? null : oldNo++,
-    new_no: type === 'del' ? null : newNo++,
+    // 0, not null, on the side a line does not exist on - the handler serves
+    // plain ints (internal/api/review_handlers.go's diffLineDTO).
+    old_no: type === 'add' ? 0 : oldNo++,
+    new_no: type === 'del' ? 0 : newNo++,
     text,
   }))
   return {
@@ -168,9 +170,9 @@ export const diffSummary: DiffSummary = {
 }
 
 export const checkpoints: Checkpoint[] = [
-  { id: 'cp3', commit_sha: 'c3f10adf2b91', turn: 3, summary: 'Delete the legacy diff handler', created_at: iso(11) },
-  { id: 'cp2', commit_sha: 'b71e94c0aa32', turn: 2, summary: 'Document the review flow', created_at: iso(18) },
-  { id: 'cp1', commit_sha: 'a09d4471ee10', turn: 1, summary: 'Add the worktree fields', created_at: iso(26) },
+  { id: 'cp3', session_id: TOOL_FIXTURE_SESSION_ID, commit_sha: 'c3f10adf2b91', turn: 3, summary: 'Delete the legacy diff handler', created_at: iso(11) },
+  { id: 'cp2', session_id: TOOL_FIXTURE_SESSION_ID, commit_sha: 'b71e94c0aa32', turn: 2, summary: 'Document the review flow', created_at: iso(18) },
+  { id: 'cp1', session_id: TOOL_FIXTURE_SESSION_ID, commit_sha: 'a09d4471ee10', turn: 1, summary: 'Add the worktree fields', created_at: iso(26) },
 ]
 
 /** Comments start empty: a review is something the operator writes, and every
@@ -231,6 +233,10 @@ export function planApproval(sessionId: string, sessionTitle: string) {
     request_id: 'req-plan-1',
     tool: 'ExitPlanMode',
     input: { plan: PLAN_MARKDOWN },
+    // The handler serves the plan on its own field too
+    // (internal/api/approvals_handlers.go's approvalDTO.Plan); the UI reads
+    // that first and only falls back to the raw tool input.
+    plan: PLAN_MARKDOWN,
     risk: 'read' as const,
     state: 'pending' as const,
     created_at: iso(0),

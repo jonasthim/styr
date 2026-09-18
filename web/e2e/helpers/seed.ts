@@ -11,6 +11,9 @@
 // fake-claude.sh's "[fixture:NN]" marker (see its own comment): a prompt
 // carrying the marker replays internal/harness/claude/testdata/NN_*.jsonl
 // for that turn instead of the shell fake's default fixture.
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
 
@@ -413,4 +416,145 @@ export async function setClaudeTokenPresence(page: Page, testInfo: TestInfo, pre
     await ok(res, 'DELETE /me/claude-token')
   }
   await page.reload()
+}
+
+// --- review: a worktree-enabled workspace on a throwaway repo (v0.3) ------
+
+// The file the review session's prompt makes the shell fake write into the
+// session's worktree, and the content it writes (three lines, no trailing
+// newline). Exported so the spec asserts against one definition.
+export const WORKTREE_FILE = 'src/hello.go'
+
+// fake-claude.sh's two markers in one prompt (see its header comment):
+// "[write:<path>:<text>]" writes the file into the fake's cwd - the session's
+// own worktree - before the turn replays, and "[fixture:02]" replays the Read
+// fixture so the turn looks like ordinary work.
+//
+// The newlines below are real newlines, not the two-character escape: the
+// fake matches the marker against the raw JSON line it reads on stdin, where
+// JSON encoding has already turned each newline into a literal backslash-n -
+// which is exactly the sequence the fake expands back into a newline before
+// writing the file. Writing "\\n" here would reach it doubled and land a
+// stray backslash in the file. The text may not contain "]".
+const WORKTREE_PROMPT = '[write:src/hello.go:package main\n\nfunc main() {}][fixture:02] change'
+
+/** Creates a git repository with one commit under a fresh temp directory and
+ * returns its path. Deliberately without a remote: opening a pull request
+ * from a session on it answers 409 no_remote, which is the state the review
+ * spec asserts is reported cleanly. */
+function createWorktreeRepo(): string {
+  const dir = mkdtempSync(path.join(tmpdir(), 'styr-e2e-worktrees-'))
+  execFileSync('git', ['init', '-q', '-b', 'main', dir])
+  writeFileSync(path.join(dir, 'README.md'), '# styr review fixture\n')
+  execFileSync('git', ['-C', dir, 'add', 'README.md'])
+  execFileSync('git', [
+    '-C',
+    dir,
+    '-c',
+    'user.email=e2e@styr.local',
+    '-c',
+    'user.name=styr-e2e',
+    'commit',
+    '-q',
+    '-m',
+    'seed',
+  ])
+  return dir
+}
+
+let realWorktreeWorkspaceId: string | null = null
+
+// ensureRealWorktreeWorkspace (idempotent, cached for the worker) registers
+// the throwaway repo above as a "path" workspace with worktrees and
+// auto-checkpointing on, so every session created in it runs in its own git
+// worktree and leaves a checkpoint commit after each turn. Source "path" is
+// admin-only, and the dev account the suite runs as is the admin.
+export async function ensureRealWorktreeWorkspace(page: Page): Promise<string> {
+  if (realWorktreeWorkspaceId) return realWorktreeWorkspaceId
+  const res = await page.request.post('/api/v1/workspaces', {
+    headers: HEADERS,
+    data: {
+      name: `styr-e2e-worktrees-${Date.now()}`,
+      source: 'path',
+      path: createWorktreeRepo(),
+      default_profile_id: REAL_PROFILE_ID,
+      worktrees: true,
+      auto_checkpoint: true,
+    },
+  })
+  await ok(res, 'POST /workspaces (worktrees)')
+  const ws = (await res.json()) as MinimalWorkspace
+  realWorktreeWorkspaceId = ws.id
+  return realWorktreeWorkspaceId
+}
+
+export interface WorktreeSession {
+  workspaceId: string
+  sessionId: string
+}
+
+// seedWorktreeSession: a session in the worktree workspace whose first turn
+// writes WORKTREE_FILE into its worktree and then replays fixture 02, so the
+// session is `open` with a real one-file diff behind it. Each call gets its
+// own session (and worktree): the review actions a spec drives - commit,
+// rewind, discard - are one-way, so tests must not share one.
+export async function seedWorktreeSession(page: Page, title: string): Promise<WorktreeSession> {
+  await ensureRealToken(page)
+  const workspaceId = await ensureRealWorktreeWorkspace(page)
+  const res = await page.request.post('/api/v1/sessions', {
+    headers: HEADERS,
+    data: { workspace_id: workspaceId, profile_id: REAL_PROFILE_ID, title, prompt: WORKTREE_PROMPT },
+  })
+  await ok(res, 'POST /sessions (worktree)')
+  const sess = (await res.json()) as MinimalSession
+  await waitForSessionState(page, sess.id, ['open'])
+  return { workspaceId, sessionId: sess.id }
+}
+
+// --- plan approval (v0.3) --------------------------------------------------
+
+const PLAN_PROFILE_NAME = 'styr-e2e-plan'
+
+let realPlanProfileId: string | null = null
+
+// ensureRealPlanProfile (idempotent) returns a custom profile with permission
+// mode "plan" - one of the modes internal/api's allowedModes permits, unlike
+// the CLI's skip-all-permissions mode. A session started under it ends its
+// first turn with an ExitPlanMode permission request instead of a result.
+export async function ensureRealPlanProfile(page: Page): Promise<string> {
+  if (realPlanProfileId) return realPlanProfileId
+  const list = await page.request.get('/api/v1/profiles', { headers: HEADERS })
+  await ok(list, 'GET /profiles')
+  const existing = ((await list.json()) as Array<{ id: string; name: string }>).find((p) => p.name === PLAN_PROFILE_NAME)
+  if (existing) {
+    realPlanProfileId = existing.id
+    return realPlanProfileId
+  }
+  const res = await page.request.post('/api/v1/profiles', {
+    headers: HEADERS,
+    data: { name: PLAN_PROFILE_NAME, mode: 'plan' },
+  })
+  await ok(res, 'POST /profiles')
+  const created = (await res.json()) as { id: string }
+  realPlanProfileId = created.id
+  return realPlanProfileId
+}
+
+// seedPlanSession: a plan-mode session waiting on its ExitPlanMode request,
+// replaying fixture 08 (internal/harness/claude/testdata/08_plan_mode.jsonl -
+// the recorded `--permission-mode plan` run whose plan is about adding a
+// --version flag). It waits on the ordinary repo workspace, not the worktree
+// one: what is under test is the plan card, not the diff.
+export async function seedPlanSession(page: Page, title: string): Promise<string> {
+  await ensureRealToken(page)
+  const workspaceId = await ensureRealWorkspace(page)
+  const profileId = await ensureRealPlanProfile(page)
+  const res = await page.request.post('/api/v1/sessions', {
+    headers: HEADERS,
+    data: { workspace_id: workspaceId, profile_id: profileId, title, prompt: '[fixture:08] plan it' },
+  })
+  await ok(res, 'POST /sessions (plan)')
+  const sess = (await res.json()) as MinimalSession
+  await waitForSessionState(page, sess.id, ['waiting'])
+  return sess.id
 }

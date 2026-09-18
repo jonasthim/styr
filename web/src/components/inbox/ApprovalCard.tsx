@@ -9,7 +9,7 @@ import clsx from 'clsx'
 import type { Approval } from '../../api/types'
 import { ToolInput } from '../common/ToolInput'
 import { PlanBody } from '../session/PlanCard'
-import { planText, PLAN_TOOL } from '../session/planMarkdown'
+import { planOf } from '../session/planMarkdown'
 import { Button, buttonClasses, Textarea } from '../ui'
 import { RiskBadge } from './RiskBadge'
 import { SnoozeMenu, type SnoozeOption } from './SnoozeMenu'
@@ -62,7 +62,7 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
   const [draftError, setDraftError] = useState<string | null>(null)
   // A plan-mode session asks to leave plan mode; what it is really asking is
   // "shall I do this?", so the inbox shows the plan rather than the tool call.
-  const plan = approval.tool === PLAN_TOOL ? planText(approval.updated_input ?? approval.input) : null
+  const plan = planOf(approval)
 
   function startEdit() {
     setDraft(JSON.stringify(approval.updated_input ?? approval.input, null, 2))

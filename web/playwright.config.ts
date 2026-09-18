@@ -1,4 +1,8 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig, devices } from '@playwright/test'
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 // Playwright starts every entry in `webServer` for every run regardless of
 // which --project filters are passed, so a plain `real` webServer entry
@@ -51,6 +55,15 @@ if (wants('real')) {
   // gets its own STYR_DATA_DIR so seeded state (workspaces, sessions,
   // approvals, the e2e Claude token) never leaks between runs.
   //
+  // STYR_CLAUDE_BIN overrides dev.config.yaml's relative
+  // ./testdata/fake-claude/fake-claude.sh with the absolute path to the same
+  // script. A session on a worktree-enabled workspace runs its process with
+  // cwd set to the worktree (internal/sessions/service.go's sessionCwd), and
+  // os/exec resolves a relative program name against that cwd, so the
+  // relative form only ever worked for sessions running in the repo checkout
+  // itself. The fake resolves its own fixture directory from $0, so an
+  // absolute path fixes fixture lookup from any cwd too.
+  //
   // STYR_MAX_OPEN_SESSIONS raises dev.config.yaml's default of 4: the shell
   // fake (testdata/fake-claude/fake-claude.sh) never exits on its own after
   // a turn (it loops waiting for more stdin), so every seeded session's
@@ -62,7 +75,12 @@ if (wants('real')) {
   webServer.push({
     command: 'npm --prefix web run build && make dev-backend',
     cwd: '..',
-    env: { STYR_CONFIG: 'dev.config.yaml', STYR_DATA_DIR: `data/e2e-${process.pid}`, STYR_MAX_OPEN_SESSIONS: '100' },
+    env: {
+      STYR_CONFIG: 'dev.config.yaml',
+      STYR_DATA_DIR: `data/e2e-${process.pid}`,
+      STYR_MAX_OPEN_SESSIONS: '100',
+      STYR_CLAUDE_BIN: path.join(repoRoot, 'testdata', 'fake-claude', 'fake-claude.sh'),
+    },
     url: 'http://127.0.0.1:8080/healthz',
     reuseExistingServer: false,
     timeout: 120_000,

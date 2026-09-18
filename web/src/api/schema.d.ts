@@ -493,6 +493,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sessions/{id}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The session worktree's diff against the commit it started from
+         * @description Covers committed and uncommitted changes alike. Only for a session that runs in a git worktree (its workspace has worktrees turned on); any other session answers 422.
+         */
+        get: operations["getSessionDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/diff/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** One file's unified diff */
+        get: operations["getSessionFileDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/comments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the review comments on a session's diff */
+        get: operations["listReviewComments"];
+        put?: never;
+        /**
+         * Add one inline comment to a session's diff
+         * @description The comment is queued, not sent; POST /sessions/{id}/review sends every unsent comment as one message.
+         */
+        post: operations["createReviewComment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/comments/{cid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete one review comment */
+        delete: operations["deleteReviewComment"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send every unsent review comment to the session
+         * @description The comments are composed into one user message ("Review comments on your changes ...", one "- path:line (side): body" bullet each), sent like an ordinary turn, and marked sent.
+         */
+        post: operations["sendSessionReview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/commit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Fold the session's work into one commit
+         * @description Any checkpoint commits since the base are squashed and the working tree is committed on top, authored by the calling user.
+         */
+        post: operations["commitSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/pr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Push the session's branch and open a pull request
+         * @description Pushes with `git push -u origin <branch>` (never forced) and opens the PR with the gh CLI. base defaults to the workspace's base branch, and failing that the checkout's current branch.
+         */
+        post: operations["createSessionPR"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/checkpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the session's checkpoints */
+        get: operations["listSessionCheckpoints"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/rewind": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset the session's worktree to a checkpoint */
+        post: operations["rewindSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/discard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Discard the session's worktree and branch
+         * @description Closes the session's process, removes the worktree directory and its branch, clears the session's worktree fields and closes the session. The work is gone.
+         */
+        post: operations["discardSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sessions/{id}/patch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Download the session's whole diff as a patch */
+        get: operations["getSessionPatch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/approvals": {
         parameters: {
             query?: never;
@@ -987,6 +1193,10 @@ export interface components {
             error: string;
             default_profile_id: string;
             worktrees: boolean;
+            /** @description The branch new session worktrees are created from. Empty means "whatever the checkout's current branch is at that moment". */
+            base_branch: string;
+            /** @description Whether Styr commits the session's worktree after every turn, so the work can be rewound turn by turn. On by default. */
+            auto_checkpoint: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1024,7 +1234,12 @@ export interface components {
             /** @enum {string} */
             origin: "ui" | "webhook" | "schedule" | "pipeline";
             origin_ref: string;
+            /** @description Absolute path of the git worktree the session runs in; empty for a session that runs directly in the workspace checkout. */
             worktree: string;
+            /** @description The worktree's branch (styr/<short id>-<slug>); empty without a worktree. */
+            branch: string;
+            /** @description The commit the worktree started from; empty without a worktree. */
+            base_ref: string;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1040,6 +1255,84 @@ export interface components {
             effort: "" | "low" | "medium" | "high" | "xhigh" | "max";
             /** @description The commands the CLI reported on its last init message, without the leading slash (custom commands, plugin skills and built-ins). Empty until a process has started. */
             slash_commands: string[];
+            /** @description Lines added in the worktree since base_ref, as of the last turn. */
+            diff_add: number;
+            /** @description Lines removed in the worktree since base_ref, as of the last turn. */
+            diff_del: number;
+        };
+        ReviewFileChange: {
+            path: string;
+            /** @description The previous path, for a rename. */
+            old_path: string;
+            /** @enum {string} */
+            status: "A" | "M" | "D" | "R";
+            add: number;
+            del: number;
+            /** @description True when git has no line-by-line diff for the file. */
+            binary: boolean;
+        };
+        ReviewDiff: {
+            base_ref: string;
+            branch: string;
+            files: components["schemas"]["ReviewFileChange"][];
+            total_add: number;
+            total_del: number;
+            /** @description Whether the worktree has uncommitted changes right now. */
+            dirty: boolean;
+        };
+        DiffLine: {
+            /** @enum {string} */
+            type: "ctx" | "add" | "del";
+            /** @description 1-based line number on the old side; 0 for an added line. */
+            old_no: number;
+            /** @description 1-based line number on the new side; 0 for a removed line. */
+            new_no: number;
+            text: string;
+        };
+        DiffHunk: {
+            old_start: number;
+            old_lines: number;
+            new_start: number;
+            new_lines: number;
+            lines: components["schemas"]["DiffLine"][];
+        };
+        FileDiff: {
+            path: string;
+            old_path: string;
+            /** @enum {string} */
+            status: "A" | "M" | "D" | "R";
+            binary: boolean;
+            /** @description True when the diff exceeded 2 MiB and was cut off. */
+            truncated: boolean;
+            hunks: components["schemas"]["DiffHunk"][];
+        };
+        ReviewComment: {
+            id: string;
+            session_id: string;
+            path: string;
+            line: number;
+            /** @enum {string} */
+            side: "old" | "new";
+            body: string;
+            author_id: string;
+            /** @description The author's display name, falling back to their email. */
+            author_name: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: date-time
+             * @description When the comment was sent to the session; null while unsent.
+             */
+            sent_at: string | null;
+        };
+        Checkpoint: {
+            id: string;
+            session_id: string;
+            commit_sha: string;
+            turn: number;
+            summary: string;
+            /** Format: date-time */
+            created_at: string;
         };
         Event: {
             /** Format: int64 */
@@ -1070,6 +1363,8 @@ export interface components {
             snoozed_until: string | null;
             updated_input?: Record<string, never>;
             message?: string;
+            /** @description The plan markdown an ExitPlanMode request carries. Present only for tool "ExitPlanMode", which the UI renders as a plan card (approve = allow, request changes = deny with a message) rather than the ordinary tool-approval card. */
+            plan?: string;
         };
         StatusInfo: {
             version: string;
@@ -1702,6 +1997,10 @@ export interface operations {
                     path?: string;
                     default_profile_id?: string;
                     worktrees?: boolean;
+                    /** @description The branch session worktrees are created from. Empty (the default) means the checkout's current branch. */
+                    base_branch?: string;
+                    /** @description Commit the session worktree after every turn. Omitted means on. */
+                    auto_checkpoint?: boolean;
                 };
             };
         };
@@ -1803,6 +2102,8 @@ export interface operations {
                 "application/json": {
                     default_profile_id?: string;
                     worktrees?: boolean;
+                    base_branch?: string;
+                    auto_checkpoint?: boolean;
                 };
             };
         };
@@ -2206,6 +2507,468 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Event"][];
+                };
+            };
+        };
+    };
+    getSessionDiff: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The diff summary */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewDiff"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getSessionFileDiff: {
+        parameters: {
+            query: {
+                /** @description The file's path, relative to the worktree root. */
+                path: string;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file's hunks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FileDiff"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description path is missing, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listReviewComments: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every comment, oldest first, sent ones included */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewComment"][];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createReviewComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    path: string;
+                    line: number;
+                    /**
+                     * @description Defaults to "new".
+                     * @enum {string}
+                     */
+                    side?: "old" | "new";
+                    body: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReviewComment"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description path or body is empty, side is not old/new, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deleteReviewComment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+                cid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    sendSessionReview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted; the review was sent */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session is waiting on an approval */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description There are no unsent comments, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    commitSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    message: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The new commit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        sha: string;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description There is nothing to commit, or the session is still working */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description message is empty, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    createSessionPR: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title: string;
+                    body?: string;
+                    base?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The pull request */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        url: string;
+                    };
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description code "gh_unavailable" (gh is not installed or not authenticated) or "no_remote" (the checkout has no remote) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description title is empty, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    listSessionCheckpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Checkpoints, newest first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Checkpoint"][];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    rewindSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    checkpoint_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted; the worktree was reset */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session is running or waiting on an approval, or the checkpoint is no longer on this branch */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description checkpoint_id is missing, or the session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    discardSession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Discarded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session is running or waiting on an approval */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getSessionPatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The patch */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/x-diff": string;
+                };
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The session has no worktree */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
                 };
             };
         };

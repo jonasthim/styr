@@ -136,6 +136,8 @@ const workspaces: Workspace[] = [
     error: '',
     default_profile_id: 'interactive',
     worktrees: false,
+    base_branch: '',
+    auto_checkpoint: true,
     created_at: iso(60 * 24),
     updated_at: iso(60 * 24),
   },
@@ -152,6 +154,8 @@ const workspaces: Workspace[] = [
     error: '',
     default_profile_id: 'interactive',
     worktrees: true,
+    base_branch: 'main',
+    auto_checkpoint: true,
     created_at: iso(60 * 24),
     updated_at: iso(60 * 24),
   },
@@ -492,6 +496,8 @@ export const handlers = [
       path?: string
       default_profile_id?: string
       worktrees?: boolean
+      base_branch?: string
+      auto_checkpoint?: boolean
     }
     const source = body.source
     if (source === 'path' && devRole !== 'admin') {
@@ -531,6 +537,10 @@ export const handlers = [
       error: '',
       default_profile_id: body.default_profile_id || 'interactive',
       worktrees: body.worktrees ?? false,
+      base_branch: body.base_branch ?? '',
+      // Omitted means on, the same default internal/api's workspaceInput
+      // (*bool) applies.
+      auto_checkpoint: body.auto_checkpoint ?? true,
       created_at: now,
       updated_at: now,
     }
@@ -654,6 +664,10 @@ export const handlers = [
       origin: 'ui',
       origin_ref: '',
       worktree: '',
+      branch: '',
+      base_ref: '',
+      diff_add: 0,
+      diff_del: 0,
       created_at: iso(0),
       last_active_at: iso(0),
       num_turns: 0,
