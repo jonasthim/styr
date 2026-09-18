@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -90,10 +91,16 @@ func runServe(stdout io.Writer) int {
 	// server does.
 	go bg.Runs.Run(maintCtx)
 
+	// Every request context derives from reqCtx so that cancelling it ends the
+	// long-lived SSE streams; http.Server.Shutdown only waits for handlers and
+	// would otherwise time out behind a stream that never finishes on its own.
+	reqCtx, reqCancel := context.WithCancel(context.Background())
+	defer reqCancel()
 	srv := &http.Server{
 		Addr:              cfg.Listen,
 		Handler:           api.NewRouter(deps, web.Handler()),
 		ReadHeaderTimeout: 10 * time.Second,
+		BaseContext:       func(net.Listener) context.Context { return reqCtx },
 	}
 
 	serveErr := make(chan error, 1)
@@ -117,6 +124,7 @@ func runServe(stdout io.Writer) int {
 	}
 
 	log.Info("shutting down")
+	reqCancel() // end SSE streams and any in-flight handler waits first
 	shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	if err := srv.Shutdown(shutCtx); err != nil {
