@@ -860,6 +860,682 @@ paths:
               schema:
                 $ref: "#/components/schemas/StatusInfo"
 
+  /api/v1/templates:
+    get:
+      summary: List templates
+      description: Every template visible to the current user (owned, shared, or — for an admin — all).
+      operationId: listTemplates
+      tags: [templates]
+      responses:
+        "200":
+          description: Every visible template
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Template"
+    post:
+      summary: Create a template
+      description: >
+        shared marks the template as owned by nobody rather than the
+        caller; only an admin may set it.
+      operationId: createTemplate
+      tags: [templates]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/templates/{id}:
+    get:
+      summary: Get a template
+      operationId: getTemplate
+      tags: [templates]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update a template
+      operationId: patchTemplate
+      tags: [templates]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemplateInput"
+      responses:
+        "200":
+          description: The updated template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Template"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a template
+      operationId: deleteTemplate
+      tags: [templates]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/templates/{id}/render:
+    post:
+      summary: Dry-run render a template
+      description: >
+        Renders a title and prompt against payload without starting a
+        session. kind selects how payload is normalized into template
+        variables ("generic", "grafana" or "github"); it defaults to
+        "grafana" when omitted. When title_template and/or prompt_template
+        are given, they override the stored template's own text for this
+        render only (e.g. a live preview while editing); the field left
+        unset falls back to the stored template's text.
+      operationId: renderTemplate
+      tags: [templates]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: object
+                kind:
+                  type: string
+                  enum: [generic, grafana, github]
+                title_template:
+                  type: string
+                prompt_template:
+                  type: string
+              required: [payload]
+      responses:
+        "200":
+          description: The rendered title, prompt and any template-execution errors
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  title:
+                    type: string
+                  prompt:
+                    type: string
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                required: [title, prompt, errors]
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/triggers:
+    get:
+      summary: List triggers
+      description: Every trigger visible to the current user (owned, shared, or — for an admin — all).
+      operationId: listTriggers
+      tags: [triggers]
+      responses:
+        "200":
+          description: Every visible trigger (never includes a secret)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Trigger"
+    post:
+      summary: Create a trigger
+      description: >
+        Styr generates the bearer secret; it is returned in this response
+        only — GET/PATCH/list never include it again, only secret_hint.
+        shared marks the trigger as owned by nobody; only an admin may set
+        it.
+      operationId: createTrigger
+      tags: [triggers]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerInput"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trigger:
+                    $ref: "#/components/schemas/Trigger"
+                  secret:
+                    type: string
+                required: [trigger, secret]
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/triggers/samples/{kind}:
+    get:
+      summary: Get a realistic sample payload for a trigger kind
+      description: >
+        Used for "send test payload" and template dry-run preview in the
+        UI. This literal path is matched before /triggers/{id}, so "samples"
+        is never treated as a trigger id. An unrecognized kind is a 404.
+      operationId: getTriggerSample
+      tags: [triggers]
+      parameters:
+        - name: kind
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [generic, grafana, github]
+      responses:
+        "200":
+          description: A sample webhook body for kind
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: Unrecognized kind
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/triggers/{id}:
+    get:
+      summary: Get a trigger
+      operationId: getTrigger
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The trigger (never includes a secret)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trigger"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    patch:
+      summary: Update a trigger
+      operationId: patchTrigger
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TriggerInput"
+      responses:
+        "200":
+          description: The updated trigger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Trigger"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a trigger
+      operationId: deleteTrigger
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/triggers/{id}/rotate-secret:
+    post:
+      summary: Rotate a trigger's secret
+      description: Invalidates the previous secret; the new plaintext secret is returned only in this response.
+      operationId: rotateTriggerSecret
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The new secret
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  secret:
+                    type: string
+                required: [secret]
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/triggers/{id}/deliveries:
+    get:
+      summary: List a trigger's deliveries
+      operationId: listTriggerDeliveries
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Deliveries, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Delivery"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/triggers/{id}/test:
+    post:
+      summary: Run the delivery pipeline against a test payload
+      description: >
+        Runs the same pipeline as an inbound POST /hooks/{slug} call, as an
+        authenticated request: dedupe, cooldown and the storm cap apply
+        unless force is true. Responds with the same {delivery_id, status,
+        run_id?} shape as POST /hooks/{slug}.
+      operationId: testTrigger
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                payload:
+                  type: object
+                force:
+                  type: boolean
+              required: [payload]
+      responses:
+        "200":
+          description: The resulting delivery
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/deliveries/{id}/replay:
+    post:
+      summary: Replay a delivery
+      description: Re-renders the delivery's stored payload and starts a new run, bypassing dedupe.
+      operationId: replayDelivery
+      tags: [triggers]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "202":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  run_id:
+                    type: [string, "null"]
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/runs:
+    get:
+      summary: List runs
+      description: >
+        Runs are visible to every signed-in user regardless of who owns
+        the session or trigger they came from.
+      operationId: listRuns
+      tags: [runs]
+      parameters:
+        - name: outcome
+          in: query
+          schema:
+            type: string
+            enum: [running, success, failed, timeout, needs_human]
+        - name: trigger
+          in: query
+          description: Filter to runs started by this trigger id.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Matching runs, most recent first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RunView"
+
+  /api/v1/runs/{id}:
+    get:
+      summary: Get a run
+      description: Includes the session, delivery and template it was started from, each null when unavailable.
+      operationId: getRun
+      tags: [runs]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RunView"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/notifications:
+    get:
+      summary: List notification channels
+      operationId: listNotifications
+      tags: [notifications]
+      responses:
+        "200":
+          description: Every notification channel (never includes a token)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/NotificationChannel"
+    post:
+      summary: Create a notification channel
+      description: Admin only. token, when given, is sealed at rest and never returned again.
+      operationId: createNotification
+      tags: [notifications]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum: [ntfy, webhook]
+                name:
+                  type: string
+                url:
+                  type: string
+                token:
+                  type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+              required: [kind, name, url]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannel"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  /api/v1/notifications/{id}:
+    patch:
+      summary: Update a notification channel
+      description: >
+        Admin only. An omitted token leaves it unchanged; an explicit
+        empty token clears it.
+      operationId: patchNotification
+      tags: [notifications]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                kind:
+                  type: string
+                  enum: [ntfy, webhook]
+                name:
+                  type: string
+                url:
+                  type: string
+                token:
+                  type: string
+                events:
+                  type: array
+                  items:
+                    type: string
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: The updated channel
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationChannel"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      summary: Delete a notification channel
+      description: Admin only.
+      operationId: deleteNotification
+      tags: [notifications]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/notifications/{id}/test:
+    post:
+      summary: Send a test notification
+      description: >
+        Admin only. Builds a synthetic "test" event and sends it through
+        the channel using its decrypted token; the token never appears in
+        this (or any) response.
+      operationId: testNotification
+      tags: [notifications]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The test notification was sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                required: [ok]
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: Sending the test notification failed (no detail leaked)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /hooks/{slug}:
+    post:
+      summary: Inbound webhook delivery
+      description: >
+        Unauthenticated by session cookie — the credential is the
+        trigger's own secret, via header X-Styr-Secret or Authorization
+        Bearer, or (for a "github" kind trigger) an X-Hub-Signature-256
+        HMAC over the raw body. Not part of /api/v1: no CSRF header
+        required, no request timeout. Body is capped at 256 KiB.
+      operationId: deliverHook
+      security: []
+      tags: [hooks]
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        "202":
+          description: Delivery logged (a run may or may not have started, depending on status)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryResult"
+        "401":
+          description: Bad secret
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "404":
+          description: Unknown or disabled trigger
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "413":
+          description: Body exceeds the 256 KiB limit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
 components:
   securitySchemes:
     sessionCookie:
@@ -881,6 +1557,12 @@ components:
             $ref: "#/components/schemas/ErrorBody"
     NotFound:
       description: Not found (or not visible to the current user)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorBody"
+    UnprocessableEntity:
+      description: Validation failed
       content:
         application/json:
           schema:
@@ -1182,3 +1864,279 @@ components:
         queue_depth:
           type: integer
       required: [version, claude_version, open_processes, slots, queue_depth]
+
+    TemplateInput:
+      description: The create/update request body for POST/PATCH /templates(/{id}).
+      type: object
+      properties:
+        name:
+          type: string
+        workspace_id:
+          type: string
+        profile_id:
+          type: string
+        title_template:
+          type: string
+        prompt_template:
+          type: string
+        system_prompt:
+          type: string
+        report_schema:
+          type: string
+          description: JSON schema text; empty means no structured report is expected.
+        shared:
+          type: boolean
+          description: Owned by nobody rather than the caller. Admin only.
+      required: [name, workspace_id, profile_id, prompt_template]
+
+    Template:
+      type: object
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: [string, "null"]
+        name:
+          type: string
+        workspace_id:
+          type: string
+        profile_id:
+          type: string
+        title_template:
+          type: string
+        prompt_template:
+          type: string
+        system_prompt:
+          type: string
+        report_schema:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - owner_id
+        - name
+        - workspace_id
+        - profile_id
+        - title_template
+        - prompt_template
+        - system_prompt
+        - report_schema
+        - created_at
+        - updated_at
+
+    TriggerInput:
+      description: The create/update request body for POST/PATCH /triggers(/{id}).
+      type: object
+      properties:
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [generic, grafana, github]
+        template_id:
+          type: string
+        dedupe_key_template:
+          type: string
+        cooldown_s:
+          type: integer
+        storm_cap_per_hour:
+          type: integer
+        run_on_resolved:
+          type: boolean
+        shared:
+          type: boolean
+          description: Owned by nobody rather than the caller. Admin only.
+        enabled:
+          type: boolean
+          description: Update only; omit to leave enabled state unchanged.
+      required: [name, kind, template_id]
+
+    Trigger:
+      description: Never includes the secret or its hash — see secret_hint.
+      type: object
+      properties:
+        id:
+          type: string
+        owner_id:
+          type: [string, "null"]
+        name:
+          type: string
+        slug:
+          type: string
+        kind:
+          type: string
+          enum: [generic, grafana, github]
+        secret_hint:
+          type: string
+        template_id:
+          type: string
+        enabled:
+          type: boolean
+        dedupe_key_template:
+          type: string
+        cooldown_s:
+          type: integer
+        storm_cap_per_hour:
+          type: integer
+        run_on_resolved:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        last_delivery_at:
+          type: [string, "null"]
+          format: date-time
+      required:
+        - id
+        - owner_id
+        - name
+        - slug
+        - kind
+        - secret_hint
+        - template_id
+        - enabled
+        - dedupe_key_template
+        - cooldown_s
+        - storm_cap_per_hour
+        - run_on_resolved
+        - created_at
+        - updated_at
+        - last_delivery_at
+
+    Delivery:
+      type: object
+      properties:
+        id:
+          type: string
+        trigger_id:
+          type: string
+        received_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [accepted, deduped, cooldown, storm, rejected, failed, skipped]
+        reason:
+          type: string
+        dedupe_key:
+          type: string
+        payload:
+          type: object
+        run_id:
+          type: [string, "null"]
+      required: [id, trigger_id, received_at, status, reason, dedupe_key, payload, run_id]
+
+    DeliveryResult:
+      description: >
+        The shape POST /hooks/{slug} and POST /triggers/{id}/test both
+        respond with: enough to look the delivery up (or follow it to the
+        run it started) without the full Delivery record.
+      type: object
+      properties:
+        delivery_id:
+          type: string
+        status:
+          type: string
+          enum: [accepted, deduped, cooldown, storm, rejected, failed, skipped]
+        run_id:
+          type: string
+      required: [delivery_id, status]
+
+    Run:
+      type: object
+      properties:
+        id:
+          type: string
+        session_id:
+          type: string
+        template_id:
+          type: [string, "null"]
+        trigger_id:
+          type: [string, "null"]
+        delivery_id:
+          type: [string, "null"]
+        origin:
+          type: string
+        started_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+        outcome:
+          type: string
+          enum: [running, success, failed, timeout, needs_human]
+        report:
+          type: object
+          description: The structured report parsed from the session's result, when the template has a report_schema.
+        summary:
+          type: string
+        cost_usd:
+          type: number
+      required:
+        - id
+        - session_id
+        - template_id
+        - trigger_id
+        - delivery_id
+        - origin
+        - started_at
+        - finished_at
+        - outcome
+        - report
+        - summary
+        - cost_usd
+
+    RunView:
+      description: A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted).
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/Run"
+        session:
+          oneOf:
+            - $ref: "#/components/schemas/Session"
+            - type: "null"
+        delivery:
+          oneOf:
+            - $ref: "#/components/schemas/Delivery"
+            - type: "null"
+        template:
+          oneOf:
+            - $ref: "#/components/schemas/Template"
+            - type: "null"
+      required: [run, session, delivery, template]
+
+    NotificationChannel:
+      description: Never includes the token — see token_present.
+      type: object
+      properties:
+        id:
+          type: string
+        kind:
+          type: string
+          enum: [ntfy, webhook]
+        name:
+          type: string
+        url:
+          type: string
+        token_present:
+          type: boolean
+        events:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+      required: [id, kind, name, url, token_present, events, enabled, created_at]

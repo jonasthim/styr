@@ -1,0 +1,127 @@
+package api_test
+
+import (
+	"context"
+	"net/http"
+	"testing"
+	"time"
+
+	"github.com/jonasthim/styr/internal/domain"
+)
+
+type runOut struct {
+	ID        string  `json:"id"`
+	SessionID string  `json:"session_id"`
+	Outcome   string  `json:"outcome"`
+	Summary   string  `json:"summary"`
+	CostUSD   float64 `json:"cost_usd"`
+}
+
+type runViewOut struct {
+	Run      runOut       `json:"run"`
+	Session  *sessionOut  `json:"session"`
+	Delivery *deliveryOut `json:"delivery"`
+	Template *templateOut `json:"template"`
+}
+
+// sessionOut mirrors the fields runs_handlers_test.go asserts on; the full
+// session shape is already covered by sessions_handlers_test.go.
+type sessionOut struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+}
+
+func sampleRunView() domain.RunView {
+	now := time.Now()
+	return domain.RunView{
+		Run: domain.Run{
+			ID: "run-1", SessionID: "sess-1", Origin: "webhook",
+			StartedAt: now, Outcome: domain.RunSuccess, Summary: "all good", CostUSD: 0.42,
+		},
+		Session: &domain.Session{ID: "sess-1", Title: "investigate alert"},
+	}
+}
+
+func TestRunsList_PassesFiltersThrough(t *testing.T) {
+	e := newEnv(t)
+	e.runs.ListFn = func(context.Context, domain.RunFilter) ([]domain.RunView, error) {
+		return []domain.RunView{sampleRunView()}, nil
+	}
+
+	var out []runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs?outcome=failed&trigger=trig-1&limit=25", nil, &out)
+	if status != http.StatusOK {
+		t.Fatalf("GET /runs = %d, want 200", status)
+	}
+	if len(out) != 1 || out[0].Run.ID != "run-1" {
+		t.Fatalf("out = %+v", out)
+	}
+	if out[0].Session == nil || out[0].Session.ID != "sess-1" {
+		t.Fatalf("session = %+v, want embedded session", out[0].Session)
+	}
+
+	call, ok := e.runs.lastCall()
+	if !ok || call.method != "List" {
+		t.Fatalf("last call = %+v, ok=%v", call, ok)
+	}
+	filter, ok := call.args[0].(domain.RunFilter)
+	if !ok {
+		t.Fatalf("call.args[0] type = %T", call.args[0])
+	}
+	if filter.Outcome != "failed" || filter.TriggerID != "trig-1" || filter.Limit != 25 {
+		t.Fatalf("filter = %+v, want outcome=failed trigger=trig-1 limit=25", filter)
+	}
+}
+
+func TestRunsList_NoQueryLeavesFilterZero(t *testing.T) {
+	e := newEnv(t)
+	e.runs.ListFn = func(context.Context, domain.RunFilter) ([]domain.RunView, error) { return nil, nil }
+
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs", nil, nil); status != http.StatusOK {
+		t.Fatalf("GET /runs = %d, want 200", status)
+	}
+	call, _ := e.runs.lastCall()
+	filter := call.args[0].(domain.RunFilter)
+	if filter.Outcome != "" || filter.TriggerID != "" || filter.Limit != 0 {
+		t.Fatalf("filter = %+v, want zero value", filter)
+	}
+}
+
+func TestRunsGet_OK(t *testing.T) {
+	e := newEnv(t)
+	e.runs.GetFn = func(_ context.Context, id string) (domain.RunView, error) {
+		v := sampleRunView()
+		v.Run.ID = id
+		return v, nil
+	}
+	var out runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-1", nil, &out)
+	if status != http.StatusOK || out.Run.ID != "run-1" {
+		t.Fatalf("GET /runs/run-1 = %d, out = %+v", status, out)
+	}
+}
+
+func TestRunsGet_NotFound(t *testing.T) {
+	e := newEnv(t)
+	// GetFn left unset: the fake's default returns domain.ErrNotFound.
+	var body errorOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/missing", nil, &body)
+	if status != http.StatusNotFound {
+		t.Fatalf("GET missing run = %d, want 404", status)
+	}
+}
+
+func TestRunsGet_NilSessionOmittedGracefully(t *testing.T) {
+	e := newEnv(t)
+	e.runs.GetFn = func(context.Context, string) (domain.RunView, error) {
+		return domain.RunView{Run: domain.Run{ID: "run-2", Outcome: domain.RunRunning}}, nil
+	}
+	var out runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-2", nil, &out)
+	if status != http.StatusOK {
+		t.Fatalf("GET /runs/run-2 = %d, want 200", status)
+	}
+	if out.Session != nil || out.Delivery != nil || out.Template != nil {
+		t.Fatalf("out = %+v, want nil session/delivery/template", out)
+	}
+}
