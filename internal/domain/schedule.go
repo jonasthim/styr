@@ -15,6 +15,10 @@ type Schedule struct {
 	Name    string
 
 	TemplateID string
+	// PipelineID is the alternative to TemplateID: a schedule starts either
+	// a template run or a pipeline run, exactly one of the two set (a rule
+	// the service layer enforces, not the schema).
+	PipelineID *string
 	Cron       string
 	Enabled    bool
 	Vars       json.RawMessage

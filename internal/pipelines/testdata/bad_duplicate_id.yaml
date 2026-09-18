@@ -1,0 +1,7 @@
+name: bad-duplicate-id
+workspace: styr
+steps:
+  - id: triage
+    template: "CI failure triage"
+  - id: triage
+    template: "Apply fix"

@@ -41,8 +41,8 @@ func TestOpen_CreatesFileAndMigrates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("version = %d, want 7", version)
+	if version != 8 {
+		t.Fatalf("version = %d, want 8", version)
 	}
 }
 
@@ -67,8 +67,8 @@ func TestOpen_IdempotentReopen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetDBVersion: %v", err)
 	}
-	if version != 7 {
-		t.Fatalf("version = %d, want 7", version)
+	if version != 8 {
+		t.Fatalf("version = %d, want 8", version)
 	}
 }
 
@@ -171,5 +171,85 @@ func TestMigration_00002_ExistingWorkspacesBecomeSharedPathReady(t *testing.T) {
 		"ws-owned", "u1", "legacy", "/srv/u1/legacy", "interactive", 0, "empty", "", "", 1, "ready", "", now, now,
 	); err != nil {
 		t.Fatalf("insert owned workspace with same name: %v", err)
+	}
+}
+
+// TestMigration_00008_PipelinesTablesAndColumns migrates a fresh database
+// to head and checks that the pipelines/pipeline_runs/step_runs tables
+// exist with the shape 00008_pipelines.sql declares, and that triggers,
+// schedules and runs gained their new nullable pipeline_id/pipeline_id/
+// step_run_id columns.
+func TestMigration_00008_PipelinesTablesAndColumns(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+
+	seedTemplateFixtures(t, database)
+	now := time.Now()
+
+	// pipelines: create, unique index on (owner_user_id, name).
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO pipelines (id, name, workspace_id, yaml, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"pl1", "fix-ci", "ws1", "name: fix-ci\n", nowString(now), nowString(now),
+	); err != nil {
+		t.Fatalf("insert pipeline: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO pipelines (id, name, workspace_id, yaml, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		"pl2", "fix-ci", "ws1", "name: fix-ci\n", nowString(now), nowString(now),
+	); err == nil {
+		t.Fatal("insert duplicate shared pipeline name: want unique index violation")
+	}
+
+	// pipeline_runs: state CHECK constraint and the pipeline_id foreign key.
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO pipeline_runs (id, pipeline_id, origin, state, started_at) VALUES (?, ?, ?, ?, ?)`,
+		"pr1", "pl1", "ui", "running", nowString(now),
+	); err != nil {
+		t.Fatalf("insert pipeline run: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO pipeline_runs (id, pipeline_id, origin, state, started_at) VALUES (?, ?, ?, ?, ?)`,
+		"pr-bad-state", "pl1", "ui", "bogus", nowString(now),
+	); err == nil {
+		t.Fatal("insert pipeline run with invalid state: want CHECK violation")
+	}
+
+	// step_runs: state CHECK constraint, pipeline_run_id foreign key, and
+	// the step_runs_pipeline_idx index (queried below).
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO step_runs (id, pipeline_run_id, step_id, state) VALUES (?, ?, ?, ?)`,
+		"sr1", "pr1", "triage", "pending",
+	); err != nil {
+		t.Fatalf("insert step run: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`INSERT INTO step_runs (id, pipeline_run_id, step_id, state) VALUES (?, ?, ?, ?)`,
+		"sr-bad-state", "pr1", "triage", "bogus",
+	); err == nil {
+		t.Fatal("insert step run with invalid state: want CHECK violation")
+	}
+	row := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM step_runs WHERE pipeline_run_id = ?`, "pr1")
+	var n int
+	if err := row.Scan(&n); err != nil {
+		t.Fatalf("count step runs: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("step run count = %d, want 1", n)
+	}
+
+	// triggers/schedules gained a nullable pipeline_id column; runs gained
+	// a nullable step_run_id column. WHERE 1 = 0 matches no rows, so this
+	// only needs the columns to exist, not any FK-satisfying seed data.
+	if _, err := database.ExecContext(ctx,
+		`UPDATE triggers SET pipeline_id = ? WHERE 1 = 0`, "pl1"); err != nil {
+		t.Fatalf("triggers.pipeline_id does not exist: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE schedules SET pipeline_id = ? WHERE 1 = 0`, "pl1"); err != nil {
+		t.Fatalf("schedules.pipeline_id does not exist: %v", err)
+	}
+	if _, err := database.ExecContext(ctx,
+		`UPDATE runs SET step_run_id = ? WHERE 1 = 0`, "sr1"); err != nil {
+		t.Fatalf("runs.step_run_id does not exist: %v", err)
 	}
 }

@@ -1,0 +1,21 @@
+name: fix-ci
+workspace: styr            # workspace name; every step's template must use this workspace
+timeout: 2h
+steps:
+  - id: triage
+    template: "CI failure triage"          # template name (or template_id)
+    with: { alert: "{{ .payload.title }}" } # extra vars rendered from the pipeline input
+  - id: fix
+    needs: [triage]
+    template: "Apply fix"
+    with: { plan: "{{ .steps.triage.report.proposed_action }}" }
+    worktree: own
+    retries: 1
+  - id: verify
+    needs: [fix]
+    template: "Run tests and report"
+    worktree: shared                        # continue in fix's worktree
+  - id: review-each
+    needs: [triage]
+    foreach: "{{ .steps.triage.report.files }}"   # list → N parallel step-runs, item as .item
+    template: "Review file"

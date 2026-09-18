@@ -17,15 +17,15 @@ type Schedules struct{ d *DB }
 // NewSchedules constructs a Schedules repository.
 func NewSchedules(d *DB) *Schedules { return &Schedules{d: d} }
 
-const scheduleColumns = `id, owner_user_id, name, template_id, cron, enabled, vars,
+const scheduleColumns = `id, owner_user_id, name, template_id, pipeline_id, cron, enabled, vars,
 	last_run_at, last_outcome, next_run_at, created_at, updated_at`
 
 // Create inserts a new schedule row. sc.ID must already be set.
 func (s *Schedules) Create(ctx context.Context, sc domain.Schedule) error {
 	_, err := s.d.ExecContext(ctx, `
 		INSERT INTO schedules (`+scheduleColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.ID, ownerArg(sc.OwnerID), sc.Name, sc.TemplateID, sc.Cron, boolToInt(sc.Enabled), varsOrEmpty(sc.Vars),
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.ID, ownerArg(sc.OwnerID), sc.Name, sc.TemplateID, optionalString(sc.PipelineID), sc.Cron, boolToInt(sc.Enabled), varsOrEmpty(sc.Vars),
 		optionalTime(sc.LastRunAt), sc.LastOutcome, optionalTime(sc.NextRunAt), nowString(sc.CreatedAt), nowString(sc.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -49,6 +49,7 @@ func scanSchedule(row interface{ Scan(dest ...any) error }) (*domain.Schedule, e
 	var (
 		sc                   domain.Schedule
 		ownerID              sql.NullString
+		pipelineID           sql.NullString
 		enabled              int
 		vars                 string
 		lastRunAt            sql.NullString
@@ -56,12 +57,13 @@ func scanSchedule(row interface{ Scan(dest ...any) error }) (*domain.Schedule, e
 		createdAt, updatedAt string
 	)
 	if err := row.Scan(
-		&sc.ID, &ownerID, &sc.Name, &sc.TemplateID, &sc.Cron, &enabled, &vars,
+		&sc.ID, &ownerID, &sc.Name, &sc.TemplateID, &pipelineID, &sc.Cron, &enabled, &vars,
 		&lastRunAt, &sc.LastOutcome, &nextRunAt, &createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}
 	sc.OwnerID = nullString(ownerID)
+	sc.PipelineID = nullString(pipelineID)
 	sc.Enabled = enabled != 0
 	sc.Vars = json.RawMessage(vars)
 	sc.LastRunAt = nullTime(lastRunAt)
@@ -139,9 +141,9 @@ func (s *Schedules) ListDue(ctx context.Context, now time.Time) ([]domain.Schedu
 // updated separately.
 func (s *Schedules) Update(ctx context.Context, sc domain.Schedule) error {
 	res, err := s.d.ExecContext(ctx, `
-		UPDATE schedules SET owner_user_id = ?, name = ?, template_id = ?, cron = ?, enabled = ?, vars = ?, updated_at = ?
+		UPDATE schedules SET owner_user_id = ?, name = ?, template_id = ?, pipeline_id = ?, cron = ?, enabled = ?, vars = ?, updated_at = ?
 		WHERE id = ?`,
-		ownerArg(sc.OwnerID), sc.Name, sc.TemplateID, sc.Cron, boolToInt(sc.Enabled), varsOrEmpty(sc.Vars),
+		ownerArg(sc.OwnerID), sc.Name, sc.TemplateID, optionalString(sc.PipelineID), sc.Cron, boolToInt(sc.Enabled), varsOrEmpty(sc.Vars),
 		nowString(sc.UpdatedAt), sc.ID)
 	if err != nil {
 		if isUniqueViolation(err) {

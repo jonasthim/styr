@@ -1,0 +1,45 @@
+name: bad-too-many-steps
+workspace: styr
+steps:
+  - id: step1
+    template: "CI failure triage"
+  - id: step2
+    template: "CI failure triage"
+  - id: step3
+    template: "CI failure triage"
+  - id: step4
+    template: "CI failure triage"
+  - id: step5
+    template: "CI failure triage"
+  - id: step6
+    template: "CI failure triage"
+  - id: step7
+    template: "CI failure triage"
+  - id: step8
+    template: "CI failure triage"
+  - id: step9
+    template: "CI failure triage"
+  - id: step10
+    template: "CI failure triage"
+  - id: step11
+    template: "CI failure triage"
+  - id: step12
+    template: "CI failure triage"
+  - id: step13
+    template: "CI failure triage"
+  - id: step14
+    template: "CI failure triage"
+  - id: step15
+    template: "CI failure triage"
+  - id: step16
+    template: "CI failure triage"
+  - id: step17
+    template: "CI failure triage"
+  - id: step18
+    template: "CI failure triage"
+  - id: step19
+    template: "CI failure triage"
+  - id: step20
+    template: "CI failure triage"
+  - id: step21
+    template: "CI failure triage"

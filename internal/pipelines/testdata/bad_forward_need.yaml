@@ -1,0 +1,8 @@
+name: bad-forward-need
+workspace: styr
+steps:
+  - id: verify
+    needs: [fix]
+    template: "Run tests and report"
+  - id: fix
+    template: "Apply fix"

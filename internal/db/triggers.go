@@ -16,16 +16,16 @@ type Triggers struct{ d *DB }
 // NewTriggers constructs a Triggers repository.
 func NewTriggers(d *DB) *Triggers { return &Triggers{d: d} }
 
-const triggerColumns = `id, owner_user_id, name, slug, kind, secret_hash, secret_hint, template_id, enabled,
+const triggerColumns = `id, owner_user_id, name, slug, kind, secret_hash, secret_hint, template_id, pipeline_id, enabled,
 	dedupe_key_template, cooldown_s, storm_cap_per_hour, run_on_resolved, created_at, updated_at, last_delivery_at`
 
 // Create inserts a new trigger row. tr.ID must already be set.
 func (t *Triggers) Create(ctx context.Context, tr domain.Trigger) error {
 	_, err := t.d.ExecContext(ctx, `
 		INSERT INTO triggers (`+triggerColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tr.ID, ownerArg(tr.OwnerID), tr.Name, tr.Slug, string(tr.Kind), tr.SecretHash, tr.SecretHint,
-		tr.TemplateID, boolToInt(tr.Enabled), tr.DedupeKeyTemplate, tr.CooldownS, tr.StormCapPerHour,
+		tr.TemplateID, optionalString(tr.PipelineID), boolToInt(tr.Enabled), tr.DedupeKeyTemplate, tr.CooldownS, tr.StormCapPerHour,
 		boolToInt(tr.RunOnResolved), nowString(tr.CreatedAt), nowString(tr.UpdatedAt), optionalTime(tr.LastDeliveryAt))
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -41,12 +41,13 @@ func scanTrigger(row interface{ Scan(dest ...any) error }) (*domain.Trigger, err
 		tr                   domain.Trigger
 		ownerID              sql.NullString
 		kind                 string
+		pipelineID           sql.NullString
 		enabled, runOnResolv int
 		createdAt, updatedAt string
 		lastDeliveryAt       sql.NullString
 	)
 	if err := row.Scan(
-		&tr.ID, &ownerID, &tr.Name, &tr.Slug, &kind, &tr.SecretHash, &tr.SecretHint, &tr.TemplateID,
+		&tr.ID, &ownerID, &tr.Name, &tr.Slug, &kind, &tr.SecretHash, &tr.SecretHint, &tr.TemplateID, &pipelineID,
 		&enabled, &tr.DedupeKeyTemplate, &tr.CooldownS, &tr.StormCapPerHour, &runOnResolv,
 		&createdAt, &updatedAt, &lastDeliveryAt,
 	); err != nil {
@@ -54,6 +55,7 @@ func scanTrigger(row interface{ Scan(dest ...any) error }) (*domain.Trigger, err
 	}
 	tr.OwnerID = nullString(ownerID)
 	tr.Kind = domain.TriggerKind(kind)
+	tr.PipelineID = nullString(pipelineID)
 	tr.Enabled = enabled != 0
 	tr.RunOnResolved = runOnResolv != 0
 	tr.CreatedAt = parseTime(createdAt)
@@ -121,10 +123,10 @@ func (t *Triggers) ListVisible(ctx context.Context, userID string, isAdmin bool)
 // (SetSecret) and last_delivery_at (TouchDelivery) are updated separately.
 func (t *Triggers) Update(ctx context.Context, tr domain.Trigger) error {
 	res, err := t.d.ExecContext(ctx, `
-		UPDATE triggers SET owner_user_id = ?, name = ?, kind = ?, template_id = ?, enabled = ?,
+		UPDATE triggers SET owner_user_id = ?, name = ?, kind = ?, template_id = ?, pipeline_id = ?, enabled = ?,
 			dedupe_key_template = ?, cooldown_s = ?, storm_cap_per_hour = ?, run_on_resolved = ?, updated_at = ?
 		WHERE id = ?`,
-		ownerArg(tr.OwnerID), tr.Name, string(tr.Kind), tr.TemplateID, boolToInt(tr.Enabled),
+		ownerArg(tr.OwnerID), tr.Name, string(tr.Kind), tr.TemplateID, optionalString(tr.PipelineID), boolToInt(tr.Enabled),
 		tr.DedupeKeyTemplate, tr.CooldownS, tr.StormCapPerHour, boolToInt(tr.RunOnResolved),
 		nowString(tr.UpdatedAt), tr.ID)
 	if err != nil {

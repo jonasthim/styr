@@ -250,3 +250,64 @@ func TestRuns_LoopColumnsListByLoopAndFilter(t *testing.T) {
 		t.Fatalf("GetBySession = %q, want the newest iteration %q", bySession.ID, second.ID)
 	}
 }
+
+// TestRuns_StepRunIDRoundTrip checks the step_run_id column T53 added: nil
+// for an ordinary run, and set for a run started as one attempt of a
+// pipeline step (see internal/domain.Run.StepRunID).
+func TestRuns_StepRunIDRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+
+	// Build the session and step-run fixtures directly rather than via
+	// seedRunFixtures/seedStepRunFixtures, which would each seed the "ws1"
+	// workspace and conflict.
+	seedTemplateFixtures(t, database)
+	sess := domain.Session{
+		ID: uuid.NewString(), Title: "pipeline step run", WorkspaceID: "ws1", ProfileID: "investigate",
+		Harness: "claude", State: domain.SessionRunning, Origin: domain.OriginPipeline,
+		CreatedAt: time.Now(), LastActiveAt: time.Now(),
+	}
+	if err := NewSessions(database).Create(ctx, sess); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	pl := newTestPipeline("ws1", "fix-ci")
+	if err := NewPipelines(database).Create(ctx, pl); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	pr := newTestPipelineRun(pl.ID, domain.PipelineRunRunning, time.Now())
+	if err := NewPipelineRuns(database).Create(ctx, pr); err != nil {
+		t.Fatalf("seed pipeline run: %v", err)
+	}
+	sr := newTestStepRun(pr.ID, "triage")
+	if err := NewStepRuns(database).Create(ctx, sr); err != nil {
+		t.Fatalf("seed step run: %v", err)
+	}
+
+	runs := NewRuns(database)
+	r := newTestRun(sess.ID, domain.RunRunning, time.Now())
+	r.Origin = "pipeline"
+	r.StepRunID = &sr.ID
+	if err := runs.Create(ctx, r); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := runs.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.StepRunID == nil || *got.StepRunID != sr.ID {
+		t.Fatalf("StepRunID = %v, want %q", got.StepRunID, sr.ID)
+	}
+
+	plain := newTestRun(sess.ID, domain.RunRunning, time.Now())
+	if err := runs.Create(ctx, plain); err != nil {
+		t.Fatalf("Create plain: %v", err)
+	}
+	got, err = runs.Get(ctx, plain.ID)
+	if err != nil {
+		t.Fatalf("Get plain: %v", err)
+	}
+	if got.StepRunID != nil {
+		t.Fatalf("StepRunID = %v, want nil for an ordinary run", got.StepRunID)
+	}
+}
