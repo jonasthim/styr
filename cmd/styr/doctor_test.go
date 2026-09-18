@@ -230,3 +230,24 @@ func splitLines(s string) []string {
 	}
 	return lines
 }
+
+func TestLoadEnvFileSetsOnlyUnsetKeys(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "env")
+	if err := os.WriteFile(path, []byte("# comment\nSTYR_TEST_A=one\nexport STYR_TEST_B=\"two words\"\nSTYR_TEST_C='three'\nbroken line\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("STYR_TEST_A", "preset")
+	os.Unsetenv("STYR_TEST_B")
+	os.Unsetenv("STYR_TEST_C")
+	t.Cleanup(func() { os.Unsetenv("STYR_TEST_B"); os.Unsetenv("STYR_TEST_C") })
+	if n := loadEnvFile(path); n != 2 {
+		t.Fatalf("set %d keys, want 2", n)
+	}
+	if os.Getenv("STYR_TEST_A") != "preset" || os.Getenv("STYR_TEST_B") != "two words" || os.Getenv("STYR_TEST_C") != "three" {
+		t.Fatalf("env = %q %q %q", os.Getenv("STYR_TEST_A"), os.Getenv("STYR_TEST_B"), os.Getenv("STYR_TEST_C"))
+	}
+	if loadEnvFile(filepath.Join(dir, "missing")) != 0 {
+		t.Fatal("missing file must set nothing")
+	}
+}

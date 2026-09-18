@@ -27,7 +27,7 @@ Styr is early: v0.1.0 is the first release, and it covers login, sessions and ap
 ### Install script (bare host, systemd)
 
 ```bash
-curl -fsSL https://github.com/jonasthim/styr/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/jonasthim/styr/releases/latest/download/install.sh | sudo bash -s -- --listen 0.0.0.0:8080
 ```
 
 Then edit `/etc/styr/config.yaml` (set `base_url` and an OIDC provider) and

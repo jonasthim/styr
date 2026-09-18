@@ -128,7 +128,52 @@ func checkOIDCDiscovery(cfg config.Config) error {
 // runDoctor loads the configuration (best effort: a load error is reported
 // as its own FAIL line rather than aborting) and prints one line per check:
 // "ok", "FAIL" or "skip". It returns 1 when any check fails, 0 otherwise.
+// defaultEnvFile is what the systemd unit passes as EnvironmentFile. When
+// doctor runs by hand the secrets in it are not in the environment, so doctor
+// loads it itself (without overriding variables that are already set).
+const defaultEnvFile = "/etc/styr/env"
+
+// loadEnvFile sets KEY=VALUE pairs from path for keys not already set. It
+// returns the number of keys it set; a missing or unreadable file is not an
+// error. Values may be wrapped in single or double quotes.
+func loadEnvFile(path string) int {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		line = strings.TrimPrefix(line, "export ")
+		k, v, ok := strings.Cut(line, "=")
+		if !ok || k == "" {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
+			v = v[1 : len(v)-1]
+		}
+		if _, exists := os.LookupEnv(k); exists {
+			continue
+		}
+		if os.Setenv(k, v) == nil {
+			n++
+		}
+	}
+	return n
+}
+
 func runDoctor(stdout io.Writer) int {
+	envFile := os.Getenv("STYR_ENV_FILE")
+	if envFile == "" {
+		envFile = defaultEnvFile
+	}
+	if n := loadEnvFile(envFile); n > 0 {
+		fmt.Fprintf(stdout, "note loaded %d variable(s) from %s\n", n, envFile)
+	}
 	cfg, _ := config.Load(os.Getenv("STYR_CONFIG"))
 
 	failed := false

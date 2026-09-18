@@ -85,6 +85,36 @@ done
 [[ $EUID -eq 0 ]] || die "run as root, e.g.: curl -fsSL .../install.sh | sudo bash"
 command -v systemctl >/dev/null 2>&1 || die "systemd is required (systemctl not found)"
 
+# Runtime prerequisites: git (workspaces are git checkouts), curl and CA certs
+# (the Claude Code installer and the release download). Debian LXC images from
+# community scripts ship without git.
+ensure_pkgs() {
+  local missing=()
+  command -v git >/dev/null 2>&1 || missing+=(git)
+  command -v curl >/dev/null 2>&1 || missing+=(curl)
+  [[ -f /etc/ssl/certs/ca-certificates.crt ]] || missing+=(ca-certificates)
+  [[ ${#missing[@]} -eq 0 ]] && return 0
+  if command -v apt-get >/dev/null 2>&1; then
+    log "Installing prerequisites: ${missing[*]}"
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing[@]}"
+  else
+    die "missing prerequisites: ${missing[*]} (install them and re-run)"
+  fi
+}
+
+# claude_path prints the styr user's Claude Code binary, or nothing. It must not
+# use a login shell: on Debian/Ubuntu a login shell prints the MOTD, which then
+# pollutes the captured path.
+claude_path() {
+  local p
+  for p in /var/lib/styr/.local/bin/claude /var/lib/styr/.claude/local/claude /usr/local/bin/claude; do
+    if [[ -x "$p" && ! -L "$p" ]]; then printf '%s\n' "$p"; return 0; fi
+  done
+  p="$(run_as_styr env PATH="/var/lib/styr/.local/bin:/usr/local/bin:/usr/bin:/bin" bash -c 'command -v claude' </dev/null 2>/dev/null | tail -n 1 || true)"
+  [[ -n "$p" && -x "$p" ]] && printf '%s\n' "$p"
+}
+
 arch() {
   case "$(uname -m)" in
     x86_64) echo amd64 ;;
@@ -233,7 +263,7 @@ if [[ $CHECK -eq 1 ]]; then
   fi
   if [[ $NO_CLAUDE -eq 1 ]]; then
     echo "  - Claude Code CLI: skipped (--no-claude)"
-  elif id styr >/dev/null 2>&1 && run_as_styr bash -lc 'command -v claude' >/dev/null 2>&1; then
+  elif id styr >/dev/null 2>&1 && claude_path >/dev/null 2>&1; then
     echo "  - Claude Code CLI: already installed for styr"
   else
     echo "  - Claude Code CLI: would be installed for styr"
@@ -252,6 +282,8 @@ SERVICE_WAS_ACTIVE=0
 if systemctl is-active --quiet styr.service 2>/dev/null; then
   SERVICE_WAS_ACTIVE=1
 fi
+
+ensure_pkgs
 
 log "Creating user and directories"
 if ! id styr >/dev/null 2>&1; then
@@ -297,7 +329,7 @@ if [[ ! -f "$ENV_FILE" ]]; then
 fi
 
 if [[ $NO_CLAUDE -eq 0 ]]; then
-  if run_as_styr bash -lc 'command -v claude' >/dev/null 2>&1; then
+  if claude_path >/dev/null 2>&1; then
     log "Claude Code CLI already installed for styr"
   else
     log "Installing the Claude Code CLI for styr"
@@ -306,7 +338,7 @@ if [[ $NO_CLAUDE -eq 0 ]]; then
   # systemd's own default PATH does not include the styr user's HOME, so
   # symlink the installed binary into /usr/local/bin (already on that
   # default PATH) so `claude_bin: claude` resolves for the service too.
-  claude_real="$(run_as_styr bash -lc 'command -v claude' 2>/dev/null || true)"
+  claude_real="$(claude_path 2>/dev/null || true)"
   if [[ -n "$claude_real" ]]; then
     ln -sfn "$claude_real" "$CLAUDE_SYMLINK"
   else
