@@ -8,6 +8,7 @@ import { Activity } from 'lucide-react'
 import { q } from '../api/queries'
 import type { RunOutcome } from '../api/types'
 import { RunRow } from '../components/runs/RunRow'
+import { RunsTabs } from '../components/runs/RunsTabs'
 import { OUTCOME_LABEL } from '../components/runs/outcome'
 import { Button, EmptyState, PageHeader, Skeleton } from '../components/ui'
 
@@ -48,7 +49,9 @@ export function Runs() {
         description="Every unattended session a trigger started, with its report once it finishes."
       />
 
-      <div role="group" aria-label="Filter by outcome" className="mt-5 flex flex-wrap gap-1.5">
+      <RunsTabs className="mt-5" />
+
+      <div role="group" aria-label="Filter by outcome" className="mt-4 flex flex-wrap gap-1.5">
         <Button
           size="sm"
           variant={outcome === '' ? 'primary' : 'secondary'}

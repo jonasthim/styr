@@ -29,6 +29,7 @@ import type {
   Run,
 } from '../api/types'
 import { DEV_USER_ID, sessions } from './sessionsState'
+import { findLoop } from './loopsState'
 import { renderMiniTemplate } from './renderTemplate'
 
 function iso(minutesAgo: number): string {
@@ -166,7 +167,7 @@ const GRAFANA_PROMPT_TEMPLATE = `A Grafana alert is {{ .status }}. Investigate r
 {{ end }}
 Use the workspace's runbooks and only read-only commands. Do not change anything.`
 
-const templates: Template[] = [
+export const templates: Template[] = [
   {
     id: TEMPLATE_GRAFANA_ID,
     owner_id: null,
@@ -177,6 +178,9 @@ const templates: Template[] = [
     prompt_template: GRAFANA_PROMPT_TEMPLATE,
     system_prompt: '',
     report_schema: JSON.stringify(GRAFANA_REPORT_SCHEMA, null, 2),
+    // No loop: one alert, one investigation (T49's loop fields default off).
+    loop_until: '',
+    loop_max: 0,
     created_at: iso(60 * 24 * 3),
     updated_at: iso(60 * 24),
   },
@@ -330,7 +334,7 @@ const SUCCESS_REPORT: StructuredReport = {
   resolved_itself: false,
 }
 
-const runs: Run[] = [
+export const runs: Run[] = [
   {
     id: RUN_SUCCESS_ID,
     session_id: SESSION_RUN_SUCCESS_ID,
@@ -344,6 +348,8 @@ const runs: Run[] = [
     report: SUCCESS_REPORT,
     summary: 'prod-01 memory usage climbed past 90%; styr-api looks like a slow leak, not load.',
     cost_usd: 0.34,
+    loop_id: null,
+    iteration: 0,
   },
   {
     id: RUN_RUNNING_ID,
@@ -358,6 +364,8 @@ const runs: Run[] = [
     report: null,
     summary: '',
     cost_usd: 0.06,
+    loop_id: null,
+    iteration: 0,
   },
   {
     id: RUN_NEEDS_HUMAN_ID,
@@ -373,6 +381,8 @@ const runs: Run[] = [
     summary:
       "Investigation needs a decision only a human can make: the only fix available is restarting a service, which is outside the investigate profile's read-only tools.",
     cost_usd: 0.11,
+    loop_id: null,
+    iteration: 0,
   },
 ]
 
@@ -494,7 +504,13 @@ function findWorkspaceSessionOrigin(): { workspace_id: string; profile_id: strin
  * synthesised report, the same shape the mock uses for workspace cloning
  * (web/src/mocks/handlers.ts's scheduleCloneOutcome) - long enough for the
  * UI's running state to be observable, short enough not to stall a test. */
-function startRun(templateId: string, triggerId: string | null, deliveryId: string, title: string): Run {
+export function startRun(
+  templateId: string,
+  triggerId: string | null,
+  deliveryId: string | null,
+  title: string,
+  origin?: string,
+): Run {
   const { workspace_id, profile_id } = findWorkspaceSessionOrigin()
   const runId = nextId('run')
   const sessionId = nextId('sess-run')
@@ -507,7 +523,7 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
     profile_id,
     harness: 'claude',
     state: 'running',
-    origin: 'webhook',
+    origin: origin === 'schedule' ? 'schedule' : 'webhook',
     origin_ref: runId,
     worktree: '',
     branch: '',
@@ -533,13 +549,15 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
     template_id: templateId,
     trigger_id: triggerId,
     delivery_id: deliveryId,
-    origin: triggerId ? 'webhook' : 'test',
+    origin: origin ?? (triggerId ? 'webhook' : 'test'),
     started_at: now,
     finished_at: null,
     outcome: 'running',
     report: null,
     summary: '',
     cost_usd: 0,
+    loop_id: null,
+    iteration: 0,
   }
   runs.unshift(run)
 
@@ -569,12 +587,13 @@ function startRun(templateId: string, triggerId: string | null, deliveryId: stri
 /** Both run routes answer with the run row plus the records it was started
  * from, each null when unavailable - internal/api/runs_handlers.go's
  * runViewDTO (docs/openapi.yaml's RunView). */
-function runView(run: Run): RunView {
+export function runView(run: Run): RunView {
   return {
     run,
     session: sessions.find((s) => s.id === run.session_id) ?? null,
     delivery: deliveries.find((d) => d.id === run.delivery_id) ?? null,
     template: templates.find((t) => t.id === run.template_id) ?? null,
+    loop: findLoop(run.loop_id),
   }
 }
 
@@ -598,6 +617,8 @@ export const triggersHandlers = [
       prompt_template: body.prompt_template ?? '',
       system_prompt: body.system_prompt ?? '',
       report_schema: body.report_schema ?? '',
+      loop_until: body.loop_until ?? '',
+      loop_max: body.loop_max ?? 0,
       created_at: now,
       updated_at: now,
     }

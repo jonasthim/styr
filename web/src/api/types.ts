@@ -75,7 +75,15 @@ export type ApiTokenCreated = Schemas['APITokenCreated']
 
 // --- triggers, templates, runs and notifications (T33/T34/T35) -------------
 
-export type Template = Schemas['Template']
+/** Since T49 a template can carry a loop: `loop_until` names the report
+ * field whose truthiness ends the loop ('' means no loop) and `loop_max`
+ * caps the iterations. Written as an intersection because docs/openapi.yaml
+ * only learns about the two columns in T50; `npm run gen:api` collapses this
+ * back to a plain alias in T51, the way the v0.3 review block below was. */
+export type Template = Schemas['Template'] & {
+  loop_until: string
+  loop_max: number
+}
 
 export type TemplateRenderResult = JSONResponse<'renderTemplate', 200>
 
@@ -107,6 +115,10 @@ export type Run = Omit<Schemas['Run'], 'report'> & {
    * template's report_schema asked for - see StructuredReport for the one
    * seeded for Grafana. */
   report: unknown
+  /** Set on every run a loop chained (T49); null for a one-shot run. */
+  loop_id: string | null
+  /** 1-based position in its loop; 0 for a run outside one. */
+  iteration: number
 }
 
 /** The report_schema seeded for the Grafana template (plan, "Template
@@ -125,9 +137,12 @@ export interface StructuredReport {
  * row plus the session it started and the delivery and template it came
  * from, each null when that record is unavailable (e.g. the template was
  * since deleted). */
-export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery'> & {
+export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery' | 'template'> & {
   run: Run
   delivery: Delivery | null
+  template: Template | null
+  /** The loop this run belongs to (T49), null for a one-shot run. */
+  loop: Loop | null
 }
 
 export type NotificationChannelKind = Schemas['NotificationChannel']['kind']
@@ -181,3 +196,143 @@ export type CommitResult = JSONResponse<'commitSession', 200>
 /** POST /sessions/{id}/pr. 409 carries code `gh_unavailable` or `no_remote`
  * instead. */
 export type PullRequestResult = JSONResponse<'createSessionPR', 200>
+
+// --- schedules, loops and stats (v0.4, T49) --------------------------------
+// Hand-written, unlike everything above: the handlers these describe land in
+// T50 and docs/openapi.yaml only gains them then. They are exactly the
+// contract in docs/superpowers/plans/2026-09-19-styr-v0.4-schedules-loops.md
+// ("API"), which the msw mock implements verbatim, so T51's `npm run
+// gen:api` can replace this block with re-exports without moving a field.
+
+/** A cron entry that starts a template on a cadence. `cron` is a standard
+ * 5-field expression (or an `@hourly`/`@daily` descriptor) in the server's
+ * timezone; `vars` is merged into the template's render context. */
+export interface Schedule {
+  id: string
+  owner_id: string | null
+  name: string
+  template_id: string
+  cron: string
+  enabled: boolean
+  vars: Record<string, unknown>
+  /** Null until it has fired once. */
+  last_run_at: string | null
+  /** A RunOutcome, or '' before the first firing. */
+  last_outcome: RunOutcome | ''
+  /** Null while the schedule is disabled or its cron never matches again. */
+  next_run_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+/** POST/PATCH /schedules(/{id}). PATCH replaces the mutable fields rather
+ * than merging, so the UI always sends the whole row back. */
+export interface ScheduleInput {
+  name: string
+  template_id: string
+  cron: string
+  vars?: Record<string, unknown>
+  enabled?: boolean
+}
+
+/** `skipped_overlap` is the scheduler declining to start a second run while
+ * the previous one is still going; `failed` carries the reason in `reason`. */
+export type ScheduleFiringStatus = 'started' | 'skipped_overlap' | 'failed'
+
+export interface ScheduleFiring {
+  id: string
+  schedule_id: string
+  fired_at: string
+  status: ScheduleFiringStatus
+  reason: string
+  run_id: string | null
+}
+
+/** POST /schedules/preview: the next five times a cron would fire, plus a
+ * human sentence for the expression. `error` is set instead when the
+ * expression does not parse. */
+export interface CronPreview {
+  next: string[]
+  description: string
+  error?: string
+}
+
+/** POST /schedules/{id}/run and POST /templates/{id}/run both answer 202
+ * with the run they started. */
+export interface RunStartedResult {
+  run_id: string
+}
+
+export type LoopState = 'running' | 'done' | 'exhausted' | 'failed' | 'stopped'
+
+/** A template with `loop_until` set repeats on one session until the
+ * report's field is truthy (`done`), the cap is reached (`exhausted`), a run
+ * fails (`failed`) or someone stops it (`stopped`). */
+export interface Loop {
+  id: string
+  template_id: string
+  session_id: string | null
+  origin: string
+  origin_ref: string
+  until_field: string
+  max_iterations: number
+  iteration: number
+  state: LoopState
+  created_at: string
+  updated_at: string
+}
+
+/** GET /loops/{id}: the loop plus its runs in iteration order. */
+export interface LoopView {
+  loop: Loop
+  runs: Run[]
+  template: Template | null
+}
+
+/** What a session was doing across one slice of the Gantt window. */
+export type GanttKind = 'running' | 'waiting' | 'idle'
+
+export interface GanttSegment {
+  kind: GanttKind
+  start: string
+  end: string
+}
+
+export interface GanttLane {
+  session_id: string
+  title: string
+  owner: string
+  state: SessionState
+  segments: GanttSegment[]
+}
+
+/** GET /stats/gantt?from=&to=. Lanes are the sessions active in the window,
+ * capped server-side at 200. */
+export interface GanttStats {
+  lanes: GanttLane[]
+}
+
+export interface CostDay {
+  /** YYYY-MM-DD in the server's timezone. */
+  day: string
+  usd: number
+  sessions: number
+}
+
+/** One row of a cost breakdown: a user, an origin or a template. */
+export interface CostBreakdown {
+  name: string
+  usd: number
+  count: number
+}
+
+/** GET /stats/costs?days=. `total_usd` is the window's total; `window` is
+ * the span it covers, so the page can say what "30 days" actually means. */
+export interface CostStats {
+  days: CostDay[]
+  by_user: CostBreakdown[]
+  by_origin: CostBreakdown[]
+  top_templates: CostBreakdown[]
+  total_usd: number
+  window: { from: string; to: string }
+}

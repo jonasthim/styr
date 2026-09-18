@@ -2,14 +2,38 @@
 // (debounced POST /templates/{id}/render against a picked kind's sample) and
 // the Grafana variables help on the right.
 import { useEffect, useRef, useState } from 'react'
-import { useParams, Link } from '@tanstack/react-router'
+import { useParams, Link, useNavigate } from '@tanstack/react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, Play } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import { q } from '../api/queries'
-import type { Template, TemplateRenderResult, TriggerKind } from '../api/types'
+import type { RunStartedResult, Template, TemplateRenderResult, TriggerKind } from '../api/types'
+import { useDebounced } from '../hooks/useDebounced'
 import { useToast } from '../hooks/useToast'
 import { Button, Card, Field, Input, Select, Textarea } from '../components/ui'
+
+// The until-field picker offers the report schema's own boolean properties
+// first - those are the fields a run can actually answer with - and a
+// free-text escape hatch for a schema this editor cannot read.
+// Radix Select refuses an empty item value, so "off" needs a sentinel.
+const NO_LOOP = '__none__'
+const CUSTOM_FIELD = '__custom__'
+
+/** The boolean property names declared by a JSON Schema string, or [] when
+ * it is empty, invalid or has no booleans. */
+function booleanProperties(reportSchema: string): string[] {
+  if (!reportSchema.trim()) return []
+  try {
+    const parsed: unknown = JSON.parse(reportSchema)
+    const properties = (parsed as { properties?: Record<string, { type?: string }> } | null)?.properties
+    if (!properties || typeof properties !== 'object') return []
+    return Object.entries(properties)
+      .filter(([, value]) => value?.type === 'boolean')
+      .map(([name]) => name)
+  } catch {
+    return []
+  }
+}
 
 const PREVIEW_KIND_OPTIONS: Array<{ value: TriggerKind; label: string }> = [
   { value: 'grafana', label: 'Grafana sample' },
@@ -31,15 +55,6 @@ const GRAFANA_VARIABLES: Array<{ name: string; hint: string }> = [
 
 const TEMPLATE_FUNCTIONS = ['lower', 'upper', 'join', 'default', 'truncate n', 'json', 'now']
 
-function useDebounced<T>(value: T, delayMs: number): T {
-  const [debounced, setDebounced] = useState(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delayMs)
-    return () => clearTimeout(timer)
-  }, [value, delayMs])
-  return debounced
-}
-
 export function TemplateEditor() {
   const { id } = useParams({ from: '/_app/templates/$id' })
   const queryClient = useQueryClient()
@@ -52,11 +67,17 @@ export function TemplateEditor() {
   const [schemaError, setSchemaError] = useState('')
   const [saving, setSaving] = useState(false)
   const [previewKind, setPreviewKind] = useState<TriggerKind>('grafana')
+  const [customUntil, setCustomUntil] = useState(false)
+  const [starting, setStarting] = useState(false)
+  const navigate = useNavigate()
   const loadedId = useRef<string | null>(null)
 
   useEffect(() => {
     if (templateQuery.data && loadedId.current !== templateQuery.data.id) {
       setForm(templateQuery.data)
+      setCustomUntil(
+        !!templateQuery.data.loop_until && !booleanProperties(templateQuery.data.report_schema).includes(templateQuery.data.loop_until),
+      )
       loadedId.current = templateQuery.data.id
     }
   }, [templateQuery.data])
@@ -94,6 +115,24 @@ export function TemplateEditor() {
     enabled: sample.isSuccess,
   })
 
+  async function handleRunNow() {
+    setStarting(true)
+    try {
+      const result = await api<RunStartedResult>(`/api/v1/templates/${id}/run`, { method: 'POST' })
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['loops'] })
+      void navigate({ to: '/runs/$id', params: { id: result.run_id } })
+    } catch (err) {
+      toast({
+        title: 'Could not start a run',
+        description: err instanceof ApiError ? err.message : undefined,
+        tone: 'danger',
+      })
+    } finally {
+      setStarting(false)
+    }
+  }
+
   async function handleSave() {
     if (!form || schemaError) return
     setSaving(true)
@@ -108,6 +147,8 @@ export function TemplateEditor() {
           prompt_template: form.prompt_template,
           system_prompt: form.system_prompt,
           report_schema: form.report_schema,
+          loop_until: form.loop_until,
+          loop_max: form.loop_max,
         },
       })
       queryClient.setQueryData(['template', id], saved)
@@ -133,9 +174,14 @@ export function TemplateEditor() {
 
       <div className="mt-3 flex items-start justify-between gap-4">
         <h1 className="min-w-0 truncate text-[20px] font-semibold leading-7 tracking-[-0.02em] text-fg-primary">{form.name || 'Untitled template'}</h1>
-        <Button variant="primary" onClick={() => void handleSave()} loading={saving} disabled={!!schemaError}>
-          Save
-        </Button>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button icon={<Play size={13} aria-hidden />} loading={starting} onClick={() => void handleRunNow()}>
+            Run now
+          </Button>
+          <Button variant="primary" onClick={() => void handleSave()} loading={saving} disabled={!!schemaError}>
+            Save
+          </Button>
+        </div>
       </div>
 
       <div className="mt-5 flex flex-col gap-5 lg:flex-row lg:items-start">
@@ -182,6 +228,62 @@ export function TemplateEditor() {
               <Textarea id={fieldId} mono rows={10} aria-describedby={describedBy} aria-invalid={invalid} value={form.report_schema} onChange={(e) => update('report_schema', e.target.value)} />
             )}
           </Field>
+
+          <Card title="Loop" description="Runs again on the same session until the report's field is true.">
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <Field label="Until field" className="flex-1">
+                {({ id: fieldId }) => (
+                  <Select
+                    id={fieldId}
+                    aria-label="Until field"
+                    value={customUntil ? CUSTOM_FIELD : form.loop_until || NO_LOOP}
+                    onValueChange={(value) => {
+                      if (value === CUSTOM_FIELD) {
+                        setCustomUntil(true)
+                        return
+                      }
+                      setCustomUntil(false)
+                      update('loop_until', value === NO_LOOP ? '' : value)
+                      if (value !== NO_LOOP && !form.loop_max) update('loop_max', 5)
+                    }}
+                    options={[
+                      { value: NO_LOOP, label: 'No loop' },
+                      ...booleanProperties(form.report_schema).map((name) => ({ value: name, label: name })),
+                      { value: CUSTOM_FIELD, label: 'Another field…' },
+                    ]}
+                  />
+                )}
+              </Field>
+
+              <Field label="Max iterations" className="sm:w-[140px]">
+                {({ id: fieldId }) => (
+                  <Input
+                    id={fieldId}
+                    type="number"
+                    min={1}
+                    max={50}
+                    disabled={!form.loop_until}
+                    value={form.loop_max || ''}
+                    onChange={(e) => update('loop_max', Number(e.target.value) || 0)}
+                  />
+                )}
+              </Field>
+            </div>
+
+            {customUntil && (
+              <Field label="Field name" className="mt-4">
+                {({ id: fieldId }) => (
+                  <Input
+                    id={fieldId}
+                    mono
+                    placeholder="done"
+                    value={form.loop_until}
+                    onChange={(e) => update('loop_until', e.target.value)}
+                  />
+                )}
+              </Field>
+            )}
+          </Card>
         </div>
 
         <div className="flex w-full flex-col gap-4 lg:w-[360px] lg:shrink-0">

@@ -13,7 +13,10 @@ import { Runs } from './pages/Runs'
 import { RunDetail } from './pages/RunDetail'
 import { Triggers } from './pages/Triggers'
 import { TemplateEditor } from './pages/TemplateEditor'
-import type { RunOutcome } from './api/types'
+import { Schedules } from './pages/Schedules'
+import { Loops } from './pages/Loops'
+import { Costs } from './pages/Costs'
+import type { LoopState, RunOutcome } from './api/types'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
@@ -49,6 +52,10 @@ const inboxRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/i
 
 interface SessionsSearch {
   new?: number
+  // List or fleet Gantt, and the Gantt's window in hours (T49). Search
+  // params so a Gantt someone is watching is a link they can send.
+  view?: 'gantt'
+  window?: '1h' | '6h' | '24h'
 }
 
 const sessionsRoute = createRoute({
@@ -61,6 +68,8 @@ const sessionsRoute = createRoute({
   // each value, and a string value would round-trip as `new=%221%22`.)
   validateSearch: (search: Record<string, unknown>): SessionsSearch => ({
     new: search.new === 1 ? 1 : undefined,
+    view: search.view === 'gantt' ? 'gantt' : undefined,
+    window: search.window === '1h' || search.window === '6h' || search.window === '24h' ? search.window : undefined,
   }),
   component: Sessions,
 })
@@ -105,7 +114,27 @@ const runsRoute = createRoute({
   }),
   component: Runs,
 })
+// The two static children of /runs are declared before /runs/$id for
+// readability only - TanStack ranks a static segment above a param one
+// whatever the order, so /runs/loops is never read as a run id.
+interface LoopsSearch {
+  // Filter chip state (Loops.tsx), a search param for the same reason the
+  // runs list's outcome filter is one: a filtered view is a link.
+  state?: LoopState
+}
+
+const loopsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/runs/loops',
+  validateSearch: (search: Record<string, unknown>): LoopsSearch => ({
+    state: typeof search.state === 'string' ? (search.state as LoopState) : undefined,
+  }),
+  component: Loops,
+})
+const costsRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/runs/costs', component: Costs })
 const runDetailRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/runs/$id', component: RunDetail })
+
+const schedulesRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/schedules', component: Schedules })
 
 interface TriggersSearch {
   // Which of the Triggers|Templates tabs is active (Triggers.tsx).
@@ -142,7 +171,10 @@ const routeTree = rootRoute.addChildren([
     profileRoute,
     welcomeRoute,
     runsRoute,
+    loopsRoute,
+    costsRoute,
     runDetailRoute,
+    schedulesRoute,
     triggersRoute,
     templateEditorRoute,
   ]),
