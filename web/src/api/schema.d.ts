@@ -850,6 +850,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/templates/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a template by hand
+         * @description Starts a run of the template as the UI's "run this template now" does: origin ui. A template whose loop_until is set loops from here exactly as it would from a webhook or a schedule. vars is optional; an empty or missing body means no vars.
+         */
+        post: operations["runTemplate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/triggers": {
         parameters: {
             query?: never;
@@ -1019,9 +1039,212 @@ export interface paths {
         };
         /**
          * Get a run
-         * @description Includes the session, delivery and template it was started from, each null when unavailable.
+         * @description Includes the session, delivery, template and loop it was started from, each null when unavailable (or when the run belongs to no loop).
          */
         get: operations["getRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List schedules
+         * @description Every schedule visible to the current user (owned, shared, or — for an admin — all).
+         */
+        get: operations["listSchedules"];
+        put?: never;
+        /**
+         * Create a schedule
+         * @description shared marks the schedule as owned by nobody rather than the caller; only an admin may set it. next_run_at is computed from cron at creation time.
+         */
+        post: operations["createSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview a cron expression
+         * @description Validates cron and returns its next 5 fire times plus a human-readable description, without creating a schedule. This literal path is matched before /schedules/{id}, so "preview" is never mistaken for a schedule id.
+         */
+        post: operations["previewSchedule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a schedule */
+        get: operations["getSchedule"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete a schedule
+         * @description Its firing history is deleted too (cascade).
+         */
+        delete: operations["deleteSchedule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a schedule
+         * @description A full replace of the schedule's mutable configuration, same rule as PATCH /triggers/{id}. Changing cron recomputes next_run_at from now; leaving it unchanged leaves next_run_at (and therefore the schedule's cadence) alone.
+         */
+        patch: operations["patchSchedule"];
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run a schedule now
+         * @description Fires the schedule immediately, ignoring its cron and next_run_at (no overlap check, unlike a tick).
+         */
+        post: operations["runScheduleNow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/schedules/{id}/firings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List a schedule's firing history */
+        get: operations["listScheduleFirings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/loops": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List loops */
+        get: operations["listLoops"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/loops/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a loop
+         * @description Includes every iteration's run, in order, and the template they all render.
+         */
+        get: operations["getLoop"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/loops/{id}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stop a loop
+         * @description Ends a running loop and closes its session, so the iteration in flight stops costing anything.
+         */
+        post: operations["stopLoop"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stats/gantt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fleet Gantt of session activity
+         * @description One lane per session active in [from, to], with segments derived from that session's events (running, waiting or idle), capped at 200 lanes.
+         */
+        get: operations["statsGantt"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stats/costs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Cost dashboard
+         * @description Totals per day, per owning user, per origin and the top templates by spend, over a trailing window of days.
+         */
+        get: operations["statsCosts"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1392,6 +1615,10 @@ export interface components {
             system_prompt?: string;
             /** @description JSON schema text; empty means no structured report is expected. */
             report_schema?: string;
+            /** @description The report field that ends a loop started from this template; empty means it does not loop. */
+            loop_until?: string;
+            /** @description Iteration budget for a loop started from this template. */
+            loop_max?: number;
             /** @description Owned by nobody rather than the caller. Admin only. */
             shared?: boolean;
         };
@@ -1405,6 +1632,8 @@ export interface components {
             prompt_template: string;
             system_prompt: string;
             report_schema: string;
+            loop_until: string;
+            loop_max: number;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1473,6 +1702,10 @@ export interface components {
             trigger_id: string | null;
             delivery_id: string | null;
             origin: string;
+            /** @description The loop this run is an iteration of; empty for an ordinary one-shot run. */
+            loop_id: string;
+            /** @description 1-based iteration number within its loop; 0 when the run belongs to no loop. */
+            iteration: number;
             /** Format: date-time */
             started_at: string;
             /** Format: date-time */
@@ -1484,12 +1717,17 @@ export interface components {
             summary: string;
             cost_usd: number;
         };
-        /** @description A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted). */
+        /** @description The {run_id} shape every "start a run" endpoint answers with. */
+        RunID: {
+            run_id: string;
+        };
+        /** @description A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted, or the run belongs to no loop). */
         RunView: {
             run: components["schemas"]["Run"];
             session: components["schemas"]["Session"] | null;
             delivery: components["schemas"]["Delivery"] | null;
             template: components["schemas"]["Template"] | null;
+            loop: components["schemas"]["Loop"] | null;
         };
         /** @description Never includes the token — see token_present. */
         NotificationChannel: {
@@ -1503,6 +1741,118 @@ export interface components {
             enabled: boolean;
             /** Format: date-time */
             created_at: string;
+        };
+        /** @description The create/update request body for POST/PATCH /schedules(/{id}). */
+        ScheduleInput: {
+            name: string;
+            template_id: string;
+            /** @description A standard 5-field cron expression, or a descriptor (@hourly, @daily, @every 1h30m, ...). */
+            cron: string;
+            /** @description Fixed variables merged into every run this schedule starts, alongside the schedule key (name, fired_at). */
+            vars?: Record<string, never>;
+            /** @description Update only; omit to leave enabled state unchanged. Create treats omission as true. */
+            enabled?: boolean;
+            /** @description Owned by nobody rather than the caller. Admin only. */
+            shared?: boolean;
+        };
+        Schedule: {
+            id: string;
+            owner_id: string | null;
+            name: string;
+            template_id: string;
+            cron: string;
+            enabled: boolean;
+            vars: Record<string, never>;
+            /** Format: date-time */
+            last_run_at: string | null;
+            last_outcome: string;
+            /** Format: date-time */
+            next_run_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description One row in a schedule's firing history. */
+        ScheduleFiring: {
+            id: string;
+            schedule_id: string;
+            /** Format: date-time */
+            fired_at: string;
+            /** @enum {string} */
+            status: "started" | "skipped_overlap" | "failed";
+            reason: string;
+            run_id: string | null;
+        };
+        SchedulePreview: {
+            next: string[];
+            description: string;
+        };
+        /** @description One until-done repetition of a template: every iteration is a run, and all of them share the loop's session. */
+        Loop: {
+            id: string;
+            template_id: string;
+            /** @description Nullable because a session can be deleted while its loop record stays as history. */
+            session_id: string | null;
+            /** @description What started the loop (webhook, schedule or ui), carried onto every run the loop creates. */
+            origin: string;
+            origin_ref: string;
+            /** @description The report field whose truthiness ends the loop. */
+            until_field: string;
+            max_iterations: number;
+            /** @description The number of the run currently (or last) started, counting from 1. */
+            iteration: number;
+            /** @enum {string} */
+            state: "running" | "done" | "exhausted" | "failed" | "stopped";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description A Loop together with every iteration's run, in order, and the template they all render. */
+        LoopView: {
+            loop: components["schemas"]["Loop"];
+            runs: components["schemas"]["Run"][];
+            template: components["schemas"]["Template"] | null;
+        };
+        /** @description One span of a session's timeline in the fleet Gantt. */
+        Segment: {
+            /** @enum {string} */
+            kind: "running" | "waiting" | "idle";
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+        };
+        /** @description One session's row in the fleet Gantt. */
+        GanttLane: {
+            session_id: string;
+            title: string;
+            owner: string;
+            state: string;
+            segments: components["schemas"]["Segment"][];
+        };
+        DayCost: {
+            /** @description ISO date (YYYY-MM-DD). */
+            day: string;
+            usd: number;
+            sessions: number;
+        };
+        /** @description One row of a cost breakdown (by owning user, by origin, or the top templates by spend). */
+        NamedCost: {
+            name: string;
+            usd: number;
+            count: number;
+        };
+        /** @description The cost dashboard's payload for GET /stats/costs. */
+        Costs: {
+            days: components["schemas"]["DayCost"][];
+            by_user: components["schemas"]["NamedCost"][];
+            by_origin: components["schemas"]["NamedCost"][];
+            top_templates: components["schemas"]["NamedCost"][];
+            total_usd: number;
+            /** @description The trailing window size, in days, this dashboard was computed over. */
+            window: number;
         };
     };
     responses: {
@@ -3246,6 +3596,36 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    runTemplate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    vars?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted; the run has been started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunID"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
     listTriggers: {
         parameters: {
             query?: never;
@@ -3509,6 +3889,8 @@ export interface operations {
                 outcome?: "running" | "success" | "failed" | "timeout" | "needs_human";
                 /** @description Filter to runs started by this trigger id. */
                 trigger?: string;
+                /** @description Filter to runs that are an iteration of this loop. */
+                loop_id?: string;
                 limit?: number;
             };
             header?: never;
@@ -3549,6 +3931,342 @@ export interface operations {
                 };
             };
             404: components["responses"]["NotFound"];
+        };
+    };
+    listSchedules: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every visible schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"][];
+                };
+            };
+        };
+    };
+    createSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    previewSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    cron: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The next 5 fire times and a description */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SchedulePreview"];
+                };
+            };
+            /** @description The cron expression failed to parse */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    getSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deleteSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleInput"];
+            };
+        };
+        responses: {
+            /** @description The updated schedule */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Schedule"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    runScheduleNow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted; the run has been started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunID"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listScheduleFirings: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The schedule's firings, most recent first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleFiring"][];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listLoops: {
+        parameters: {
+            query?: {
+                state?: "running" | "done" | "exhausted" | "failed" | "stopped";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching loops, most recent first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Loop"][];
+                };
+            };
+        };
+    };
+    getLoop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The loop */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoopView"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    stopLoop: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted; the loop has been stopped */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The loop is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    statsGantt: {
+        parameters: {
+            query?: {
+                /** @description RFC3339 timestamp; defaults to 6 hours before now. */
+                from?: string;
+                /** @description RFC3339 timestamp; defaults to now. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Gantt lanes */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        lanes: components["schemas"]["GanttLane"][];
+                    };
+                };
+            };
+            /** @description from is not strictly before to, or the window exceeds 7 days */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    statsCosts: {
+        parameters: {
+            query?: {
+                /** @description Trailing window size; defaults to 30, capped at 365. */
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The cost dashboard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Costs"];
+                };
+            };
         };
     };
     listNotifications: {

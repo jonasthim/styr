@@ -348,7 +348,7 @@ export const runs: Run[] = [
     report: SUCCESS_REPORT,
     summary: 'prod-01 memory usage climbed past 90%; styr-api looks like a slow leak, not load.',
     cost_usd: 0.34,
-    loop_id: null,
+    loop_id: '',
     iteration: 0,
   },
   {
@@ -364,7 +364,7 @@ export const runs: Run[] = [
     report: null,
     summary: '',
     cost_usd: 0.06,
-    loop_id: null,
+    loop_id: '',
     iteration: 0,
   },
   {
@@ -381,7 +381,7 @@ export const runs: Run[] = [
     summary:
       "Investigation needs a decision only a human can make: the only fix available is restarting a service, which is outside the investigate profile's read-only tools.",
     cost_usd: 0.11,
-    loop_id: null,
+    loop_id: '',
     iteration: 0,
   },
 ]
@@ -556,7 +556,7 @@ export function startRun(
     report: null,
     summary: '',
     cost_usd: 0,
-    loop_id: null,
+    loop_id: '',
     iteration: 0,
   }
   runs.unshift(run)

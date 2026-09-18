@@ -190,7 +190,7 @@ const schedules: Schedule[] = [
     enabled: true,
     vars: { branch: 'main', depth: 'full' },
     last_run_at: iso(45),
-    last_outcome: 'success',
+    last_outcome: 'started',
     next_run_at: isoIn(60 * 7),
     created_at: iso(60 * 24 * 9),
     updated_at: iso(45),
@@ -376,7 +376,7 @@ function costStats(days: number): CostStats {
       total,
     ),
     total_usd: total,
-    window: { from: `${rows[0]?.day ?? dayKey(days - 1)}T00:00:00Z`, to: `${rows[rows.length - 1]?.day ?? dayKey(0)}T23:59:59Z` },
+    window: days,
   }
 }
 
@@ -400,7 +400,9 @@ function fireSchedule(schedule: Schedule): Run {
     run_id: run.id,
   })
   schedule.last_run_at = run.started_at
-  schedule.last_outcome = 'running'
+  // The scheduler stamps the firing's own word, not the run's outcome - the
+  // run it just started has not finished (internal/schedules/tick.go).
+  schedule.last_outcome = 'started'
   schedule.updated_at = iso(0)
   return run
 }
@@ -442,7 +444,14 @@ export const schedulesHandlers = [
 
   http.post('/api/v1/schedules/preview', async ({ request }) => {
     const body = (await request.json()) as { cron?: string }
-    return HttpResponse.json(previewCron(body.cron ?? ''))
+    const preview = previewCron(body.cron ?? '')
+    // The handler answers an unparseable expression with a 422 carrying the
+    // dedicated `invalid_cron` code, so the dialog can point the error at
+    // the cron field rather than at the form.
+    if (!preview) {
+      return HttpResponse.json(errorBody('invalid_cron', 'That is not a 5-field cron expression.'), { status: 422 })
+    }
+    return HttpResponse.json(preview)
   }),
 
   http.get('/api/v1/schedules/:id', ({ params }) => {

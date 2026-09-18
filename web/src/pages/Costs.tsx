@@ -13,6 +13,21 @@ function money(usd: number): string {
   return `$${usd.toFixed(2)}`
 }
 
+function shortDay(day: string): string {
+  return new Date(`${day}T12:00:00Z`).toLocaleDateString([], { month: 'short', day: 'numeric' })
+}
+
+/** The dates the window actually covers. GET /stats/costs reports `window`
+ * as the trailing window's size in days, not as a pair of timestamps, so
+ * the span shown here comes from the daily series itself - the same rows
+ * the chart plots, so the two can never disagree. */
+function windowSpan(stats: CostStats): string {
+  const first = stats.days[0]
+  const last = stats.days[stats.days.length - 1]
+  if (!first || !last) return 'the whole window'
+  return `${shortDay(first.day)} – ${shortDay(last.day)}`
+}
+
 /** The last `n` days of the window, summed. The API sends the daily series,
  * so the tiles are slices of it rather than three more round trips. */
 function sumLastDays(stats: CostStats, n: number): number {
@@ -91,7 +106,7 @@ export function Costs() {
             <Tile
               label="Last 30 days"
               value={money(costs.data.total_usd)}
-              note="the whole window"
+              note={windowSpan(costs.data)}
               testId="cost-total"
             />
           </div>

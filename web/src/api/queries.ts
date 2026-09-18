@@ -155,10 +155,13 @@ export const q = {
 
   /** The fleet Gantt for the `hours` ending now, refetched on the plan's
    * 30 s cadence. The window bounds are part of the key so switching
-   * 1 h/6 h/24 h refetches, but `to` is rounded down to the minute: an
-   * unrounded one would mint a new key - and a new request - every render. */
+   * 1 h/6 h/24 h refetches, but `to` is rounded to the minute: an unrounded
+   * one would mint a new key - and a new request - every render. Rounded
+   * *up*, not down: GET /stats/gantt only returns sessions with created_at
+   * <= to (internal/stats/gantt.go), so a `to` in the past would leave a
+   * session started in this minute out of the fleet for up to a minute. */
   gantt: (hours: number) => {
-    const to = new Date(Math.floor(Date.now() / 60_000) * 60_000)
+    const to = new Date(Math.ceil(Date.now() / 60_000) * 60_000)
     const from = new Date(to.getTime() - hours * 3_600_000)
     return queryOptions({
       queryKey: ['gantt', hours, to.toISOString()],

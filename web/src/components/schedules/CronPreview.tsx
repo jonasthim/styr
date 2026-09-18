@@ -5,7 +5,7 @@
 // second implementation in the browser - the scheduler's clock is the one
 // that matters.
 import { useQuery } from '@tanstack/react-query'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import type { CronPreview as CronPreviewResult } from '../../api/types'
 import { useDebounced } from '../../hooks/useDebounced'
 import { absoluteTime, previewTime, untilTime } from './chips'
@@ -26,10 +26,14 @@ export function CronPreview({ cron }: { cron: string }) {
     )
   }
 
-  if (preview.data?.error) {
+  // An expression the scheduler cannot parse is a 422 with code
+  // `invalid_cron` (internal/api/schedules_handlers.go), not a field on a
+  // 200 body - so the failed query, not its data, is what says so. 4xx is
+  // not retried (see app.tsx), so this shows as soon as the answer lands.
+  if (preview.error instanceof ApiError && preview.error.code === 'invalid_cron') {
     return (
-      <p role="alert" className="text-[12px] text-fg-danger">
-        {preview.data.error}
+      <p role="alert" data-testid="cron-preview-error" className="text-[12px] text-fg-danger">
+        That is not a cron expression Styr can run. Five fields, or a descriptor like @daily.
       </p>
     )
   }

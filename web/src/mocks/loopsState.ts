@@ -31,7 +31,9 @@ export const loops: Loop[] = [
   },
 ]
 
-export function findLoop(id: string | null): Loop | null {
+/** The loop a run belongs to, or null - a run outside a loop carries '',
+ * not null (the handler serves a plain Go string). */
+export function findLoop(id: string): Loop | null {
   if (!id) return null
   return loops.find((l) => l.id === id) ?? null
 }

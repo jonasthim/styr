@@ -1,8 +1,9 @@
 // A small standard-5-field cron parser for the mock's POST
 // /schedules/preview. The real backend uses robfig/cron with a hand-written
-// describer (plan, "API"); this is the same contract - the next five firing
-// times plus one human sentence - computed in the browser so the create
-// dialog's preview is exercisable before T50 lands.
+// describer (internal/schedules/cron.go); this is the same contract - the
+// next five firing times plus one human sentence - computed in the browser,
+// and `describeCron` below is a port of that describer's phrasing so the
+// mock says what the scheduler would say.
 //
 // Supported: `*`, `a`, `a-b`, `a,b`, `*/n` and `a-b/n` per field, plus the
 // `@hourly`/`@daily`/`@weekly`/`@monthly` descriptors. Day-of-month and
@@ -11,7 +12,6 @@
 export interface CronParseResult {
   next: string[]
   description: string
-  error?: string
 }
 
 const DESCRIPTORS: Record<string, string> = {
@@ -30,21 +30,8 @@ const FIELD_RANGES: Array<[number, number]> = [
   [0, 6], // day of week
 ]
 
+// Sunday first: a cron day-of-week field counts 0 (and 7) as Sunday.
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-]
 
 /** The set of values one field matches, or null when the field is invalid. */
 function parseField(raw: string, min: number, max: number): Set<number> | null {
@@ -79,9 +66,9 @@ export interface ParsedCron {
   dom: Set<number>
   month: Set<number>
   dow: Set<number>
-  /** Whether each field was written as a bare `*`, which the describer needs. */
+  /** Whether each field was written as a bare `*`, which cron's
+   * day-of-month/day-of-week OR rule needs. */
   wildcards: boolean[]
-  fields: string[]
 }
 
 export function parseCron(expression: string): ParsedCron | null {
@@ -102,7 +89,6 @@ export function parseCron(expression: string): ParsedCron | null {
     month: sets[3]!,
     dow: sets[4]!,
     wildcards: fields.map((f) => f === '*'),
-    fields,
   }
 }
 
@@ -138,70 +124,70 @@ export function nextRuns(cron: ParsedCron, from: Date, count = 5): Date[] {
   return out
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, '0')
+function pad2(field: string): string {
+  return String(Number(field)).padStart(2, '0')
 }
 
-function listPhrase(values: number[], label: (v: number) => string): string {
-  const names = values.map(label)
-  if (names.length === 1) return names[0]!
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+/** The step of a star-slash-N field (`*` `/` `15`), if that is its exact
+ * shape. */
+function everyN(field: string): number | null {
+  const match = /^\*\/(\d+)$/.exec(field)
+  if (!match) return null
+  const n = Number(match[1])
+  return Number.isInteger(n) && n > 0 ? n : null
 }
 
-/** One sentence for the expression, in the shape the plan asks for ("At
- * 07:30, every day"). Falls back to naming the fields it recognises rather
- * than trying to be exhaustive. */
-export function describeCron(cron: ParsedCron): string {
-  const [minuteField, hourField, domField, monthField, dowField] = cron.fields as [string, string, string, string, string]
-
-  const everyN = /^\*\/(\d+)$/
-  const minuteStep = everyN.exec(minuteField)
-  if (minuteStep && hourField === '*' && domField === '*' && monthField === '*' && dowField === '*') {
-    const n = Number(minuteStep[1])
-    return n === 1 ? 'Every minute' : `Every ${n} minutes`
-  }
-  if (minuteField === '*' && hourField === '*' && domField === '*' && monthField === '*' && dowField === '*') {
-    return 'Every minute'
-  }
-
-  const minutes = [...cron.minute].sort((a, b) => a - b)
-  const hours = [...cron.hour].sort((a, b) => a - b)
-
-  let when: string
-  if (hourField === '*' && minutes.length === 1) {
-    when = minutes[0] === 0 ? 'On the hour' : `At ${minutes[0]} minutes past every hour`
-  } else if (minutes.length === 1 && hours.length <= 3) {
-    when = `At ${listPhrase(hours, (h) => `${pad(h)}:${pad(minutes[0]!)}`)}`
-  } else {
-    when = `At ${listPhrase(minutes, (m) => `${pad(m)} past`)} of ${hourField === '*' ? 'every hour' : listPhrase(hours, (h) => `${pad(h)}:00`)}`
-  }
-
-  const parts: string[] = [when]
-  if (dowField !== '*') {
-    parts.push(`every ${listPhrase([...cron.dow].sort((a, b) => a - b), (d) => DAY_NAMES[d] ?? String(d))}`)
-  }
-  if (domField !== '*') {
-    const days = [...cron.dom].sort((a, b) => a - b)
-    parts.push(`on day ${listPhrase(days, String)} of the month`)
-  }
-  if (monthField !== '*') {
-    parts.push(`in ${listPhrase([...cron.month].sort((a, b) => a - b), (m) => MONTH_NAMES[m - 1] ?? String(m))}`)
-  }
-  // "every day" only earns its place when the time itself is a fixed one -
-  // "On the hour, every day" says the same thing twice.
-  if (hourField !== '*' && dowField === '*' && domField === '*' && monthField === '*') parts.push('every day')
-
-  return parts.join(', ')
+/** A single non-negative integer, with no range, list or step syntax. */
+function isPlainNumber(field: string): boolean {
+  return /^\d+$/.test(field)
 }
 
-/** The whole POST /schedules/preview answer for one expression. */
-export function previewCron(expression: string, from = new Date()): CronParseResult {
+const DESCRIPTOR_PHRASES: Record<string, string> = {
+  '@hourly': 'every hour',
+  '@daily': 'every day at 00:00',
+  '@midnight': 'every day at 00:00',
+  '@weekly': 'every Sunday at 00:00',
+  '@monthly': 'on the 1st of the month at 00:00',
+  '@yearly': 'once a year on Jan 1 at 00:00',
+  '@annually': 'once a year on Jan 1 at 00:00',
+}
+
+/** One sentence for the expression, word for word what internal/schedules/
+ * cron.go's describeCron answers: the common forms the Schedules UI cares
+ * about, and the raw expression for anything else. Takes the raw text, not
+ * the parsed form, because that is what the shape rules read. */
+export function describeCron(expression: string): string {
+  const trimmed = expression.trim()
+  const descriptor = DESCRIPTOR_PHRASES[trimmed.toLowerCase()]
+  if (descriptor) return descriptor
+  if (trimmed.toLowerCase().startsWith('@every ')) return `every ${trimmed.slice('@every '.length).trim()}`
+
+  const fields = trimmed.split(/\s+/)
+  if (fields.length !== 5) return trimmed
+  const [minute, hour, dom, month, dow] = fields as [string, string, string, string, string]
+  const rest = dom === '*' && month === '*' && dow === '*'
+
+  if (minute === '*' && hour === '*' && rest) return 'every minute'
+  if (rest && hour === '*') {
+    const step = everyN(minute)
+    if (step !== null) return `every ${step} minutes`
+    if (isPlainNumber(minute)) return `every hour at :${pad2(minute)}`
+  }
+  if (rest && isPlainNumber(minute) && isPlainNumber(hour)) return `every day at ${pad2(hour)}:${pad2(minute)}`
+  if (dom === '*' && month === '*' && isPlainNumber(minute) && isPlainNumber(hour) && isPlainNumber(dow)) {
+    return `every ${DAY_NAMES[Number(dow) % 7]} at ${pad2(hour)}:${pad2(minute)}`
+  }
+  return trimmed
+}
+
+/** The whole POST /schedules/preview answer for one expression, or null
+ * when it does not parse - which the handler answers as a 422 with code
+ * `invalid_cron`, not as a body field. */
+export function previewCron(expression: string, from = new Date()): CronParseResult | null {
   const cron = parseCron(expression)
-  if (!cron) {
-    return { next: [], description: '', error: 'That is not a 5-field cron expression.' }
-  }
+  if (!cron) return null
   return {
     next: nextRuns(cron, from).map((d) => d.toISOString()),
-    description: describeCron(cron),
+    description: describeCron(expression),
   }
 }
