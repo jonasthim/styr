@@ -64,17 +64,29 @@ function relativeTime(iso: string): string {
 }
 
 const GRID_COLS =
-  'grid-cols-[16px_minmax(0,1fr)_auto_auto] ' +
-  'sm:grid-cols-[16px_minmax(0,1fr)_88px_auto_auto] ' +
-  'md:grid-cols-[16px_minmax(0,1fr)_88px_minmax(0,1fr)_auto_auto] ' +
-  'lg:grid-cols-[16px_minmax(0,1fr)_88px_minmax(0,1fr)_48px_auto_auto]'
+  'grid-cols-[16px_minmax(0,1fr)_auto_auto_auto] ' +
+  'sm:grid-cols-[16px_minmax(0,1fr)_88px_auto_auto_auto] ' +
+  'md:grid-cols-[16px_minmax(0,1fr)_88px_minmax(0,1fr)_auto_auto_auto] ' +
+  'lg:grid-cols-[16px_minmax(0,1fr)_88px_minmax(0,1fr)_48px_auto_auto_auto]'
 
 export function SessionRow({ session, workspaceName }: { session: Session; workspaceName: string }) {
   const { values, flat } = useSparklineValues(session)
   const title = session.title || 'Untitled session'
   const turnsCost = `${session.num_turns} · $${session.cost_usd.toFixed(2)}`
   const ago = relativeTime(session.last_active_at)
-  const ariaLabel = [title, STATE_LABEL[session.state], workspaceName, turnsCost, ago && `${ago} ago`]
+  // Patched live by `session.stats` (hooks/useLiveEvents.ts merges the frame
+  // straight onto the cached row), so the badge moves while a turn runs.
+  const add = session.diff_add ?? 0
+  const del = session.diff_del ?? 0
+  const changed = add > 0 || del > 0
+  const ariaLabel = [
+    title,
+    STATE_LABEL[session.state],
+    workspaceName,
+    changed && `${add} added, ${del} removed`,
+    turnsCost,
+    ago && `${ago} ago`,
+  ]
     .filter(Boolean)
     .join(', ')
 
@@ -97,6 +109,14 @@ export function SessionRow({ session, workspaceName }: { session: Session; works
         {session.now_line}
       </span>
       <Sparkline className="hidden lg:block" values={values} flat={flat} />
+      <span aria-hidden data-testid={changed ? 'diff-badge' : undefined} className="shrink-0 font-mono text-[12px] tabular-nums">
+        {changed && (
+          <>
+            <span className="text-state-running">+{add}</span>{' '}
+            <span className="text-fg-danger">{'\u2212'}{del}</span>
+          </>
+        )}
+      </span>
       <span aria-hidden className="shrink-0 text-right font-mono text-[12px] tabular-nums text-fg-secondary">
         {turnsCost}
       </span>

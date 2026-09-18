@@ -9,6 +9,7 @@ import { q } from '../../api/queries'
 import { api } from '../../api/client'
 import type { Approval } from '../../api/types'
 import { Button, Kbd } from '../ui'
+import { PLAN_TOOL } from './planMarkdown'
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -32,7 +33,11 @@ export function PermissionCard({ sessionId }: { sessionId: string }) {
   const queryClient = useQueryClient()
   const approvalsQuery = useQuery(q.approvals())
   const [pending, setPending] = useState<'allow' | 'deny' | null>(null)
-  const approval = approvalsQuery.data?.find((a) => a.session_id === sessionId && a.state === 'pending')
+  // A plan approval is not a tool prompt: PlanCard.tsx renders it as the
+  // checklist it is, so this card steps aside for that one tool.
+  const approval = approvalsQuery.data?.find(
+    (a) => a.session_id === sessionId && a.state === 'pending' && a.tool !== PLAN_TOOL,
+  )
 
   const decide = useMutation({
     mutationFn: (input: { id: string; decision: 'allow' | 'deny' }) =>

@@ -1,6 +1,8 @@
 // Session view header: title, workspace/profile chips, state, the model and
-// effort selects (ModelSwitcher.tsx), running stats, and the
-// Interrupt/Close/copy-id actions.
+// effort selects (ModelSwitcher.tsx), running stats, the
+// Interrupt/Close/copy-id actions, and — for a session running in a worktree —
+// the v0.3 changes cluster (commit, PR, checkpoints, discard) on the stats
+// row, where the numbers it acts on already are.
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
@@ -9,6 +11,7 @@ import { api } from '../../api/client'
 import type { Session, SessionState } from '../../api/types'
 import { Badge, Button, Tooltip } from '../ui'
 import { ModelSwitcher } from './ModelSwitcher'
+import { ReviewActions } from '../review/ReviewActions'
 
 const STATE_LABEL: Record<SessionState, string> = {
   open: 'Open',
@@ -30,10 +33,13 @@ export function SessionHeader({
   session,
   workspaceName,
   profileName,
+  summary,
 }: {
   session: Session
   workspaceName: string
   profileName: string
+  /** The session's last reply, which the PR dialog prefills its body with. */
+  summary: string
 }) {
   const queryClient = useQueryClient()
   const [copied, setCopied] = useState(false)
@@ -132,6 +138,9 @@ export function SessionHeader({
         <span>
           {session.tokens_in.toLocaleString()}/{session.tokens_out.toLocaleString()} tokens
         </span>
+        <div className="ml-auto! font-sans">
+          <ReviewActions session={session} summary={summary} />
+        </div>
       </div>
     </div>
   )

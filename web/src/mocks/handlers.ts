@@ -9,6 +9,7 @@ import { http, HttpResponse } from 'msw'
 import type {
   Approval,
   ApiErrorBody,
+  DiffSummary,
   ClaudeTokenInfo,
   Effort,
   Me,
@@ -40,6 +41,19 @@ import {
   sessions,
 } from './sessionsState'
 import { triggersHandlers } from './triggersHandlers'
+// T43 (review): the seeded worktree diff, checkpoints, comment store and plan
+// approval live in their own module so this one only owns the routes.
+import {
+  checkpoints as reviewCheckpoints,
+  comments as reviewComments,
+  diffSummary,
+  fileDiffs,
+  ghState,
+  newComment,
+  planApproval,
+  PLAN_APPROVAL_ID,
+  reviewMessage,
+} from './reviewState'
 
 function iso(minutesAgo: number): string {
   return new Date(Date.now() - minutesAgo * 60_000).toISOString()
@@ -348,6 +362,11 @@ function createApiToken(name: string, expiresInDays?: number): ApiTokenCreated {
   apiTokens.unshift(token)
   return { id: token.id, name: token.name, prefix: token.prefix, token: secret }
 }
+
+// A per-page-load copy: commit clears `dirty`, discard empties the whole
+// thing, and a reload re-seeds both (the msw handlers module is evaluated in
+// the page, not the service worker).
+const reviewDiff: DiffSummary = { ...diffSummary, files: [...diffSummary.files] }
 
 export const handlers = [
   http.get('/healthz', () => HttpResponse.json({ ok: true })),
@@ -781,5 +800,161 @@ export const handlers = [
   // every route in docs/superpowers/plans/2026-09-18-styr-v0.2-triggers.md's
   // "API contract" plus the samples route T33 added to it (see this card's
   // report). See ./triggersHandlers.ts.
+  // ---- T43: review (diff, comments, commit, PR, checkpoints, rewind,
+  // discard, patch). Contract: docs/superpowers/plans/2026-09-18-styr-v0.3-review.md,
+  // "API". Only the fixture session carries a worktree, so every other session
+  // answers with an empty diff the way a non-worktree workspace does. -------
+  http.get('/api/v1/sessions/:id/diff', ({ params }) => {
+    if (params.id !== TOOL_FIXTURE_SESSION_ID) {
+      return HttpResponse.json({ base_ref: '', branch: '', files: [], total_add: 0, total_del: 0, dirty: false })
+    }
+    return HttpResponse.json(reviewDiff)
+  }),
+
+  http.get('/api/v1/sessions/:id/diff/file', ({ request, params }) => {
+    const path = new URL(request.url).searchParams.get('path') ?? ''
+    const file = params.id === TOOL_FIXTURE_SESSION_ID ? fileDiffs.find((f) => f.path === path) : undefined
+    if (!file) return HttpResponse.json(errorBody('not_found', 'file not in this diff'), { status: 404 })
+    return HttpResponse.json(file)
+  }),
+
+  http.get('/api/v1/sessions/:id/comments', ({ params }) =>
+    HttpResponse.json(reviewComments.filter((c) => c.session_id === params.id)),
+  ),
+
+  http.post('/api/v1/sessions/:id/comments', async ({ request, params }) => {
+    const body = (await request.json()) as { path: string; line: number; side: 'old' | 'new'; body: string }
+    if (!body.path || !body.body?.trim()) {
+      return HttpResponse.json(errorBody('invalid', 'path and body are required'), { status: 422 })
+    }
+    const comment = newComment({
+      sessionId: params.id as string,
+      path: body.path,
+      line: body.line,
+      side: body.side,
+      body: body.body,
+      authorId: DEV_USER_ID,
+    })
+    reviewComments.push(comment)
+    return HttpResponse.json(comment, { status: 201 })
+  }),
+
+  http.delete('/api/v1/sessions/:id/comments/:cid', ({ params }) => {
+    const index = reviewComments.findIndex((c) => c.id === params.cid)
+    if (index === -1) return HttpResponse.json(errorBody('not_found', 'comment not found'), { status: 404 })
+    reviewComments.splice(index, 1)
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  // Sends every unsent comment as one user message and marks them sent. The
+  // real service hands that message to the CLI; the mock appends the same
+  // `user` transcript event POST /messages does, so the composer shows it
+  // through the normal event flow.
+  http.post('/api/v1/sessions/:id/review', ({ params }) => {
+    const id = params.id as string
+    const unsent = reviewComments.filter((c) => c.session_id === id && !c.sent_at)
+    if (unsent.length === 0) {
+      return HttpResponse.json(errorBody('invalid', 'no unsent comments'), { status: 422 })
+    }
+    const text = reviewMessage(unsent)
+    for (const comment of unsent) comment.sent_at = iso(0)
+    const event = appendEvent(id, { Type: 'user', At: iso(0), Text: text })
+    const session = sessions.find((s) => s.id === id)
+    if (session) {
+      session.state = 'open'
+      session.last_active_at = iso(0)
+    }
+    emitFakeEvent('session.event', {
+      kind: 'session.event',
+      session_id: id,
+      owner_id: DEV_USER_ID,
+      seq: event.seq,
+      payload: event.payload,
+    })
+    return new HttpResponse(null, { status: 202 })
+  }),
+
+  http.post('/api/v1/sessions/:id/commit', async ({ request }) => {
+    const body = (await request.json()) as { message?: string }
+    if (!body.message?.trim()) return HttpResponse.json(errorBody('invalid', 'a message is required'), { status: 422 })
+    reviewDiff.dirty = false
+    return HttpResponse.json({ sha: '9f2c1ab7d4e60f13a8c2b95e17d0c4fa3b6e8210' })
+  }),
+
+  // `gh` is optional: POST /__mock/gh-unavailable flips this to the 409 the
+  // real handler answers with when gh is missing or unauthenticated.
+  http.post('/api/v1/sessions/:id/pr', async ({ request }) => {
+    const body = (await request.json()) as { title?: string; base?: string }
+    if (ghState.unavailable) {
+      return HttpResponse.json(
+        errorBody('gh_unavailable', 'gh is not installed or not authenticated on the machine running Styr.'),
+        { status: 409 },
+      )
+    }
+    if (!body.title?.trim()) return HttpResponse.json(errorBody('invalid', 'a title is required'), { status: 422 })
+    return HttpResponse.json({ url: 'https://github.com/jonasthim/styr/pull/42' })
+  }),
+
+  http.post('/__mock/gh-unavailable', () => {
+    ghState.unavailable = true
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.get('/api/v1/sessions/:id/checkpoints', ({ params }) =>
+    HttpResponse.json(params.id === TOOL_FIXTURE_SESSION_ID ? reviewCheckpoints : []),
+  ),
+
+  http.post('/api/v1/sessions/:id/rewind', async ({ request, params }) => {
+    const body = (await request.json()) as { checkpoint_id?: string }
+    const session = sessions.find((s) => s.id === params.id)
+    if (session && (session.state === 'running' || session.state === 'waiting')) {
+      return HttpResponse.json(errorBody('conflict', 'Wait for the session to finish its turn.'), { status: 409 })
+    }
+    const index = reviewCheckpoints.findIndex((c) => c.id === body.checkpoint_id)
+    if (index === -1) return HttpResponse.json(errorBody('not_found', 'checkpoint not found'), { status: 404 })
+    // Everything after the checkpoint is gone, checkpoints included.
+    reviewCheckpoints.splice(0, index)
+    return new HttpResponse(null, { status: 202 })
+  }),
+
+  http.post('/api/v1/sessions/:id/discard', ({ params }) => {
+    const session = sessions.find((s) => s.id === params.id)
+    if (session && session.state === 'running') {
+      return HttpResponse.json(errorBody('conflict', 'Interrupt the session before discarding its worktree.'), {
+        status: 409,
+      })
+    }
+    reviewDiff.files = []
+    reviewDiff.total_add = 0
+    reviewDiff.total_del = 0
+    reviewDiff.branch = ''
+    if (session) {
+      session.state = 'closed'
+      session.diff_add = 0
+      session.diff_del = 0
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.get('/api/v1/sessions/:id/patch', () =>
+    new HttpResponse('diff --git a/docs/REVIEW.md b/docs/REVIEW.md\n', {
+      status: 200,
+      headers: { 'Content-Type': 'text/x-diff' },
+    }),
+  ),
+
+  // Mock-only: seeds the plan-mode approval (tool ExitPlanMode, plan markdown
+  // in its input) that PlanCard.tsx and the inbox render as a checklist. Not
+  // part of the default seed because e2e/inbox.spec.ts asserts exact pending
+  // counts.
+  http.post('/__mock/plan-approval', () => {
+    if (!approvals.some((a) => a.id === PLAN_APPROVAL_ID)) {
+      const session = sessions.find((s) => s.id === TOOL_FIXTURE_SESSION_ID)
+      approvals.push(planApproval(TOOL_FIXTURE_SESSION_ID, session?.title ?? 'Plan'))
+    }
+    return new HttpResponse(null, { status: 204 })
+  }),
+  // ---- end T43 block -------------------------------------------------------
+
   ...triggersHandlers,
 ]
