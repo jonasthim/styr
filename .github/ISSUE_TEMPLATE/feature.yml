@@ -1,0 +1,37 @@
+name: Feature request
+description: Suggest something Styr should do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, a quick look at the roadmap in `README.md` and
+        `docs/specs/2026-09-18-styr-design.md` may save you a round trip — diff review, triggers,
+        schedules and pipelines are already planned for v0.2+.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that Styr doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: What would you like Styr to do instead? Sketch the UI or API if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you're using now, or other approaches you considered.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?

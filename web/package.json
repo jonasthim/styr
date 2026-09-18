@@ -11,7 +11,8 @@
     "lint": "oxlint src",
     "gen:api": "openapi-typescript ../docs/openapi.yaml -o src/api/schema.d.ts",
     "test:e2e": "playwright test",
-    "test:unit": "vitest run --exclude '**/e2e/**'"
+    "test:unit": "vitest run --exclude '**/e2e/**'",
+    "screenshots": "node scripts/screenshots.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.1.23",

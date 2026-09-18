@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in Styr isn't working as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Styr is early (pre/post-v0.1.0) — please
+        check open issues first in case this is already tracked.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, and what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The exact steps that trigger it.
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Styr version
+      description: Output of `styr version`, or the image tag if using Docker.
+      placeholder: v0.1.0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: deploy-method
+    attributes:
+      label: Deployment method
+      options:
+        - install.sh (systemd)
+        - Docker / docker compose
+        - Built from source
+    validations:
+      required: true
+
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: >
+        Anything unusual in config.yaml (remove secrets: client_secret, secret_key, tokens).
+        Leave blank if config isn't relevant.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant server log output (stderr). Redact anything sensitive.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
