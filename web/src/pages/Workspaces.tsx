@@ -3,13 +3,26 @@
 // the "Add workspace" dialog (POST /api/v1/workspaces, path errors inline).
 import { useState, type FormEvent } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import * as Dialog from '@radix-ui/react-dialog'
-import * as Switch from '@radix-ui/react-switch'
-import clsx from 'clsx'
+import { FolderKanban, Plus } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import { q } from '../api/queries'
 import { useMe } from '../hooks/useMe'
 import type { Workspace } from '../api/types'
+import {
+  Button,
+  Dialog,
+  DialogContent,
+  EmptyState,
+  Field,
+  Input,
+  PageHeader,
+  Select,
+  Switch,
+  TableFrame,
+  Td,
+  Th,
+  Tr,
+} from '../components/ui'
 
 function WorktreesSwitch({ workspace, editable }: { workspace: Workspace; editable: boolean }) {
   const queryClient = useQueryClient()
@@ -27,15 +40,12 @@ function WorktreesSwitch({ workspace, editable }: { workspace: Workspace; editab
   }
 
   return (
-    <Switch.Root
+    <Switch
       checked={workspace.worktrees}
       disabled={!editable || pending}
       onCheckedChange={(checked) => void handleChange(checked)}
       aria-label={`Worktrees for ${workspace.name}`}
-      className="relative h-5 w-9 rounded-full bg-surface-3 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1 data-[state=checked]:bg-accent disabled:opacity-50"
-    >
-      <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-[#0b0d10] transition-transform duration-150 will-change-transform data-[state=checked]:translate-x-[18px]" />
-    </Switch.Root>
+    />
   )
 }
 
@@ -73,92 +83,71 @@ function AddWorkspaceDialog({ open, onOpenChange }: { open: boolean; onOpenChang
   }
 
   return (
-    <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60" />
-        <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-full max-w-[420px] -translate-x-1/2 -translate-y-1/2 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4 shadow-2xl">
-          <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">
-            Add workspace
-          </Dialog.Title>
-          <Dialog.Description className="mt-1 text-[13px] text-fg-secondary">
-            Register a checkout Styr can start sessions against.
-          </Dialog.Description>
-
-          <form onSubmit={(e) => void handleSubmit(e)} className="mt-4 flex flex-col gap-3">
-            <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-              Name
-              <input
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        title="Add workspace"
+        description="Register a checkout Styr can start sessions against."
+        width={460}
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button variant="primary" type="submit" form="add-workspace-form" loading={submitting}>
+              Add workspace
+            </Button>
+          </>
+        }
+      >
+        <form id="add-workspace-form" onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-4">
+          <Field label="Name">
+            {({ id }) => <Input id={id} required value={name} onChange={(e) => setName(e.target.value)} />}
+          </Field>
+          <Field label="Path" hint="An absolute path on the machine running Styr.">
+            {({ id, 'aria-describedby': describedBy }) => (
+              <Input
+                id={id}
+                mono
                 required
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-              Path
-              <input
-                required
+                aria-describedby={describedBy}
                 value={path}
                 onChange={(e) => setPath(e.target.value)}
                 placeholder="/home/dev/project"
-                className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 font-mono text-[12px] text-fg-primary outline-none focus-visible:ring-2 focus-visible:ring-accent"
               />
-            </label>
-            <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-              Default profile
-              <select
-                value={resolvedProfileId}
-                onChange={(e) => setDefaultProfileId(e.target.value)}
-                className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none"
-              >
-                {profiles.data?.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center justify-between text-[13px] text-fg-primary">
-              Worktrees
-              <Switch.Root
-                checked={worktrees}
-                onCheckedChange={setWorktrees}
-                className="relative h-5 w-9 rounded-full bg-surface-3 outline-none transition-colors duration-150 focus-visible:ring-2 focus-visible:ring-accent data-[state=checked]:bg-accent"
-              >
-                <Switch.Thumb className="block h-4 w-4 translate-x-0.5 rounded-full bg-[#0b0d10] transition-transform duration-150 will-change-transform data-[state=checked]:translate-x-[18px]" />
-              </Switch.Root>
-            </label>
-
-            {errorMessage && (
-              <p role="alert" data-testid="add-workspace-error" className="text-[12px] text-state-failed">
-                {errorMessage}
-              </p>
             )}
+          </Field>
+          <Field label="Default profile">
+            {({ id }) => (
+              <Select
+                id={id}
+                value={resolvedProfileId}
+                onValueChange={setDefaultProfileId}
+                placeholder="Choose a profile"
+                options={(profiles.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
+              />
+            )}
+          </Field>
 
-            <div className="mt-1 flex justify-end gap-2">
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  className="h-8 rounded-[var(--radius-1)] px-3 text-[13px] font-medium text-fg-secondary transition-colors duration-150 hover:text-fg-primary"
-                >
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                type="submit"
-                disabled={submitting}
-                className={clsx(
-                  'h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10]',
-                  submitting && 'opacity-60',
-                )}
-              >
-                Add workspace
-              </button>
-            </div>
-          </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+          <div className="flex items-center justify-between gap-4 rounded-[var(--radius-control)] border border-hairline bg-surface-1 px-3 py-2.5">
+            <label htmlFor="add-workspace-worktrees" className="text-[13px] text-fg-primary">
+              Worktrees
+              <span className="mt-0.5 block text-[12px] text-fg-secondary">Give each session its own git worktree.</span>
+            </label>
+            <Switch id="add-workspace-worktrees" checked={worktrees} onCheckedChange={setWorktrees} />
+          </div>
+
+          {errorMessage && (
+            <p
+              role="alert"
+              data-testid="add-workspace-error"
+              className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
+            >
+              {errorMessage}
+            </p>
+          )}
+        </form>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -168,62 +157,73 @@ export function Workspaces() {
   const profiles = useQuery(q.profiles())
   const [dialogOpen, setDialogOpen] = useState(false)
   const isAdmin = me?.role === 'admin'
+  const isEmpty = workspaces.isSuccess && workspaces.data.length === 0
 
   function profileName(id: string): string {
     return profiles.data?.find((p) => p.id === id)?.name ?? id
   }
 
   return (
-    <main className="mx-auto max-w-[880px] px-4 py-8 sm:px-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-fg-primary">Workspaces</h1>
-        {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setDialogOpen(true)}
-            className="h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10]"
-          >
-            Add workspace
-          </button>
-        )}
-      </div>
+    <div className="mx-auto flex w-full max-w-[880px] flex-1 flex-col px-4 py-6 sm:px-6">
+      <PageHeader
+        title="Workspaces"
+        description="Checkouts on this machine that a session can run inside."
+        actions={
+          isAdmin && !isEmpty ? (
+            <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+              Add workspace
+            </Button>
+          ) : undefined
+        }
+      />
 
-      {workspaces.data && workspaces.data.length === 0 && (
-        <p className="mt-6 text-[13px] text-fg-muted">
-          No workspaces yet. {isAdmin ? 'Add one to start a session.' : 'Ask an admin to add one.'}
-        </p>
+      {isEmpty && (
+        <EmptyState
+          icon={<FolderKanban size={18} aria-hidden />}
+          title="No workspaces yet"
+          description={
+            isAdmin
+              ? 'Register a checkout and Styr can start sessions inside it.'
+              : 'Ask an admin to register a checkout, then you can start sessions in it.'
+          }
+          action={
+            isAdmin ? (
+              <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+                Add workspace
+              </Button>
+            ) : undefined
+          }
+        />
       )}
 
       {workspaces.data && workspaces.data.length > 0 && (
-        <div className="mt-5 overflow-x-auto rounded-[var(--radius-2)] border border-hairline">
-          <table className="w-full min-w-[560px] border-collapse text-left">
-            <thead>
-              <tr className="text-[12px] font-medium text-fg-muted">
-                <th className="px-3 py-2 font-medium">Name</th>
-                <th className="px-3 py-2 font-medium">Path</th>
-                <th className="px-3 py-2 font-medium">Default profile</th>
-                <th className="px-3 py-2 font-medium">Worktrees</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workspaces.data.map((workspace) => (
-                <tr key={workspace.id} className="border-t border-hairline" data-testid={`workspace-row-${workspace.id}`}>
-                  <td className="px-3 py-2 text-[13px] text-fg-primary">{workspace.name}</td>
-                  <td className="px-3 py-2 font-mono text-[12px] text-fg-secondary">{workspace.path}</td>
-                  <td className="px-3 py-2 text-[13px] text-fg-secondary">
-                    {profileName(workspace.default_profile_id)}
-                  </td>
-                  <td className="px-3 py-2">
+        <TableFrame className="mt-5">
+          <thead>
+            <tr>
+              <Th>Name</Th>
+              <Th>Path</Th>
+              <Th>Default profile</Th>
+              <Th className="text-right">Worktrees</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {workspaces.data.map((workspace) => (
+              <Tr key={workspace.id} data-testid={`workspace-row-${workspace.id}`}>
+                <Td className="font-medium">{workspace.name}</Td>
+                <Td className="font-mono text-[12px] text-fg-secondary">{workspace.path}</Td>
+                <Td className="text-fg-secondary">{profileName(workspace.default_profile_id)}</Td>
+                <Td className="text-right">
+                  <div className="flex justify-end">
                     <WorktreesSwitch workspace={workspace} editable={isAdmin} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </div>
+                </Td>
+              </Tr>
+            ))}
+          </tbody>
+        </TableFrame>
       )}
 
       <AddWorkspaceDialog open={dialogOpen} onOpenChange={setDialogOpen} />
-    </main>
+    </div>
   )
 }

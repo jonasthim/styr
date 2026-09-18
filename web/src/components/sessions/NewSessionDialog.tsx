@@ -1,16 +1,22 @@
-// Radix Dialog for starting a session (Task 19). Opened by the `n` shortcut
-// and the palette's "New session" action, both of which navigate to
-// /sessions?new=1 - Sessions.tsx owns that search param and passes `open`
-// down; onOpenChange(false) here is how this dialog asks the page to clear
-// it (Escape, backdrop click, Cancel and a successful submit all go through
-// the same path).
+// Dialog for starting a session (Task 19). Opened by the `n` shortcut and the
+// palette's "New session" action, both of which navigate to /sessions?new=1 -
+// Sessions.tsx owns that search param and passes `open` down;
+// onOpenChange(false) here is how this dialog asks the page to clear it
+// (Escape, backdrop click, Cancel and a successful submit all go through the
+// same path).
+//
+// First run: a server with no workspaces cannot start anything, so instead of
+// two empty selects and a Start button that 400s, the dialog says so and
+// points at the fix the viewer can actually apply.
 import { useEffect, useRef, useState } from 'react'
-import * as Dialog from '@radix-ui/react-dialog'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { FolderPlus } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api, ApiError } from '../../api/client'
 import type { Session } from '../../api/types'
+import { useMe } from '../../hooks/useMe'
+import { Button, Dialog, DialogContent, Field, Input, Kbd, MOD_KEY, Select, Textarea } from '../ui'
 
 const MAX_PROMPT_ROWS = 8
 
@@ -24,6 +30,7 @@ interface CreateSessionBody {
 export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
+  const { data: me } = useMe()
   const workspaces = useQuery({ ...q.workspaces(), enabled: open })
   const profiles = useQuery({ ...q.profiles(), enabled: open })
 
@@ -32,6 +39,9 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
   const [title, setTitle] = useState('')
   const [prompt, setPrompt] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  const noWorkspaces = workspaces.isSuccess && workspaces.data.length === 0
+  const isAdmin = me?.role === 'admin'
 
   // Default the workspace to the first one once the list loads, and the
   // profile to that workspace's default whenever the workspace changes -
@@ -76,9 +86,10 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
   })
 
   const tokenMissing = mutation.error instanceof ApiError && mutation.error.status === 422
+  const canSubmit = Boolean(workspaceId) && Boolean(profileId) && prompt.trim().length > 0 && !mutation.isPending
 
   function submit() {
-    if (!workspaceId || !profileId || prompt.trim().length === 0 || mutation.isPending) return
+    if (!canSubmit || noWorkspaces) return
     mutation.mutate()
   }
 
@@ -89,117 +100,162 @@ export function NewSessionDialog({ open, onOpenChange }: { open: boolean; onOpen
     onOpenChange(next)
   }
 
-  return (
-    <Dialog.Root open={open} onOpenChange={handleOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/60" />
-        <Dialog.Content
-          className="fixed left-1/2 top-[12vh] z-50 w-full max-w-[440px] -translate-x-1/2 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4 shadow-2xl"
-          onKeyDown={(event) => {
-            if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
-              event.preventDefault()
-              submit()
-            }
-          }}
-        >
-          <Dialog.Title className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">
-            New session
-          </Dialog.Title>
-          <Dialog.Description className="sr-only">Start a new Claude Code session</Dialog.Description>
+  const errorMessage = tokenMissing ? (
+    <>
+      {mutation.error?.message}{' '}
+      <Link to="/profile" className="underline underline-offset-2">
+        Add a Claude token
+      </Link>
+    </>
+  ) : mutation.isError ? (
+    mutation.error?.message
+  ) : undefined
 
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent
+        title="New session"
+        srOnlyDescription="Start a new Claude Code session"
+        width={480}
+        // Radix would focus the first tabbable control (the workspace
+        // select); the prompt is the only field anyone has to fill in.
+        onOpenAutoFocus={(event) => {
+          event.preventDefault()
+          textareaRef.current?.focus()
+        }}
+        onKeyDown={(event) => {
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+            event.preventDefault()
+            submit()
+          }
+        }}
+        footerLeft={
+          noWorkspaces ? null : (
+            <span className="inline-flex items-center gap-1">
+              <Kbd>{MOD_KEY}</Kbd>
+              <Kbd>↵</Kbd>
+              <span className="ml-0.5">to start</span>
+            </span>
+          )
+        }
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => handleOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              type="submit"
+              form="new-session-form"
+              disabled={!canSubmit || noWorkspaces}
+              loading={mutation.isPending}
+            >
+              {mutation.isPending ? 'Starting…' : 'Start session'}
+            </Button>
+          </>
+        }
+      >
+        {noWorkspaces ? (
+          <div
+            data-testid="no-workspaces-notice"
+            className="flex gap-3 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4"
+          >
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-control)] border border-hairline bg-surface-3 text-fg-secondary">
+              <FolderPlus size={15} aria-hidden />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium text-fg-primary">No workspaces yet</p>
+              <p className="mt-1 text-[13px] text-fg-secondary">
+                {isAdmin ? (
+                  <>
+                    A session runs inside a registered checkout.{' '}
+                    <Link
+                      to="/workspaces"
+                      onClick={() => handleOpenChange(false)}
+                      className="text-accent underline-offset-2 hover:underline"
+                    >
+                      Add a workspace
+                    </Link>{' '}
+                    to start one.
+                  </>
+                ) : (
+                  'Ask an admin to add a workspace, then start a session here.'
+                )}
+              </p>
+            </div>
+          </div>
+        ) : (
           <form
-            className="mt-3 flex flex-col gap-3"
+            id="new-session-form"
+            className="flex flex-col gap-4"
             onSubmit={(event) => {
               event.preventDefault()
               submit()
             }}
           >
-            <div className="flex gap-3">
-              <label className="flex flex-1 flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-                Workspace
-                <select
-                  value={workspaceId}
-                  onChange={(event) => setWorkspaceId(event.target.value)}
-                  className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none"
-                >
-                  {workspaces.data?.map((workspace) => (
-                    <option key={workspace.id} value={workspace.id}>
-                      {workspace.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="flex flex-1 flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-                Profile
-                <select
-                  value={profileId}
-                  onChange={(event) => setProfileId(event.target.value)}
-                  className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none"
-                >
-                  {profiles.data?.map((profile) => (
-                    <option key={profile.id} value={profile.id}>
-                      {profile.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+            <div className="flex flex-col gap-4 sm:flex-row">
+              <Field label="Workspace" className="flex-1">
+                {({ id }) => (
+                  <Select
+                    id={id}
+                    value={workspaceId}
+                    onValueChange={setWorkspaceId}
+                    placeholder="Choose a workspace"
+                    options={(workspaces.data ?? []).map((w) => ({ value: w.id, label: w.name }))}
+                  />
+                )}
+              </Field>
+              <Field label="Profile" className="flex-1">
+                {({ id }) => (
+                  <Select
+                    id={id}
+                    value={profileId}
+                    onValueChange={setProfileId}
+                    placeholder="Choose a profile"
+                    options={(profiles.data ?? []).map((p) => ({ value: p.id, label: p.name }))}
+                  />
+                )}
+              </Field>
             </div>
 
-            <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-              Title
-              <input
-                type="text"
-                value={title}
-                onChange={(event) => setTitle(event.target.value)}
-                placeholder="Untitled session"
-                className="h-8 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 text-[13px] text-fg-primary outline-none placeholder:text-fg-muted"
-              />
-            </label>
+            <Field label="Title" labelAside="optional">
+              {({ id }) => (
+                <Input
+                  id={id}
+                  type="text"
+                  value={title}
+                  onChange={(event) => setTitle(event.target.value)}
+                  placeholder="Untitled session"
+                />
+              )}
+            </Field>
 
-            <label className="flex flex-col gap-1 text-[12px] font-medium text-fg-secondary">
-              Prompt
-              <textarea
-                ref={textareaRef}
-                value={prompt}
-                onChange={(event) => setPrompt(event.target.value)}
-                rows={3}
-                placeholder="What should Claude do?"
-                className="resize-none rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 py-1.5 text-[13px] leading-5 text-fg-primary outline-none placeholder:text-fg-muted"
-              />
-            </label>
+            <Field label="Prompt">
+              {({ id }) => (
+                <Textarea
+                  id={id}
+                  ref={textareaRef}
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
+                  rows={3}
+                  placeholder="What should Claude do?"
+                />
+              )}
+            </Field>
 
-            {tokenMissing && (
-              <p className="text-[12px] text-state-failed">
-                {mutation.error?.message}{' '}
-                <Link to="/profile" className="underline">
-                  Add a Claude token
-                </Link>
+            {/* The request failed, not one field: this belongs to the form,
+                not under the prompt. */}
+            {errorMessage && (
+              <p
+                role="alert"
+                className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
+              >
+                {errorMessage}
               </p>
             )}
-            {mutation.isError && !tokenMissing && mutation.error && (
-              <p className="text-[12px] text-state-failed">{mutation.error.message}</p>
-            )}
-
-            <div className="mt-1 flex items-center justify-end gap-2">
-              <Dialog.Close asChild>
-                <button
-                  type="button"
-                  className="h-8 rounded-[var(--radius-1)] px-3 text-[13px] font-medium text-fg-secondary transition-colors duration-150 hover:bg-surface-2 hover:text-fg-primary"
-                >
-                  Cancel
-                </button>
-              </Dialog.Close>
-              <button
-                type="submit"
-                disabled={!workspaceId || !profileId || prompt.trim().length === 0 || mutation.isPending}
-                className="h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10] transition-opacity duration-150 disabled:opacity-50"
-              >
-                {mutation.isPending ? 'Starting…' : 'Start session'}
-              </button>
-            </div>
           </form>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+        )}
+      </DialogContent>
+    </Dialog>
   )
 }

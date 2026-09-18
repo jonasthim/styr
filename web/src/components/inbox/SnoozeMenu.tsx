@@ -43,14 +43,14 @@ export function SnoozeMenu({
       <DropdownMenu.Portal>
         <DropdownMenu.Content
           align="start"
-          sideOffset={4}
-          className="z-50 min-w-[160px] rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-1 shadow-2xl"
+          sideOffset={6}
+          className="styr-panel z-50 min-w-[168px] rounded-[var(--radius-2)] border border-hairline bg-surface-3 p-1 shadow-[var(--shadow-popover)]"
         >
           {OPTIONS.map((option) => (
             <DropdownMenu.Item
               key={option.value}
               onSelect={() => onSelect(option.value)}
-              className="flex h-8 cursor-pointer items-center rounded-[var(--radius-1)] px-2 text-[13px] text-fg-primary outline-none data-[highlighted]:bg-surface-2"
+              className="flex h-8 cursor-pointer items-center rounded-[var(--radius-control)] px-2 text-[13px] text-fg-primary outline-none data-[highlighted]:bg-accent-subtle"
             >
               {option.label}
             </DropdownMenu.Item>

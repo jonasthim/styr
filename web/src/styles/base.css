@@ -67,8 +67,35 @@
   }
 
   :focus-visible {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+
+  ::selection {
+    background-color: var(--accent-subtle);
+  }
+
+  /* Thin, token-coloured scrollbars: the default chrome is the loudest thing
+     on a dark dense page otherwise. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  *::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+
+  *::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -80,5 +107,68 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+  }
+}
+
+/* Overlay / panel motion. Transform and opacity only, 120-180ms; the
+   reduced-motion rule in @layer base neutralises all of it. Radix flips
+   data-state on the element, so open and close both get a frame. */
+@keyframes styr-overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes styr-overlay-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes styr-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes styr-panel-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@layer components {
+  .styr-overlay[data-state='open'] {
+    animation: styr-overlay-in var(--duration-base) var(--ease-out);
+  }
+
+  .styr-overlay[data-state='closed'] {
+    animation: styr-overlay-out var(--duration-fast) ease-in;
+  }
+
+  /* Panels are centred with a translate, so their own transform is the one
+     the keyframes animate; the wrapper handles the centring instead. */
+  .styr-panel[data-state='open'] {
+    animation: styr-panel-in var(--duration-base) var(--ease-out);
+  }
+
+  .styr-panel[data-state='closed'] {
+    animation: styr-panel-out var(--duration-fast) ease-in;
   }
 }

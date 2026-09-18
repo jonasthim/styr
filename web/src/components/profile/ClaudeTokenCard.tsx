@@ -4,11 +4,11 @@
 // docs/openapi.yaml, so `onRemove` is omitted there). Both endpoints verify
 // before they store: on 422 nothing changes server-side, so this component
 // never has to reconcile an optimistic write with a failed verify.
-import { useState, type FormEvent } from 'react'
-import { Check, Copy, Loader2 } from 'lucide-react'
-import clsx from 'clsx'
+import { useState, type FormEvent, type ReactNode } from 'react'
+import { Check, Copy } from 'lucide-react'
 import { ApiError } from '../../api/client'
 import type { ClaudeTokenInfo } from '../../api/types'
+import { Button, Card, Input, Skeleton } from '../ui'
 
 const SETUP_COMMAND = 'claude setup-token'
 
@@ -30,9 +30,13 @@ interface ClaudeTokenCardProps {
   /** Omit where the API has no delete route for this token (the service token). */
   onRemove?: () => Promise<void>
   testId: string
+  /** Inside onboarding this already sits in a card under its own heading, so
+   * it drops the frame and the duplicate title rather than nesting a panel
+   * of the same surface inside one. */
+  nested?: boolean
 }
 
-export function ClaudeTokenCard({ title, inputLabel, tokenInfo, onSave, onRemove, testId }: ClaudeTokenCardProps) {
+export function ClaudeTokenCard({ title, inputLabel, tokenInfo, onSave, onRemove, testId, nested }: ClaudeTokenCardProps) {
   const [editing, setEditing] = useState(false)
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
@@ -82,47 +86,45 @@ export function ClaudeTokenCard({ title, inputLabel, tokenInfo, onSave, onRemove
     }
   }
 
-  return (
-    <section
-      data-testid={testId}
-      className="rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4"
-    >
-      <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">{title}</h2>
+  const Frame = nested ? NestedFrame : Card
 
-      {loading && <p className="mt-2 text-[13px] text-fg-muted">Loading…</p>}
+  return (
+    <Frame data-testid={testId} title={nested ? undefined : title}>
+      {loading && (
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-3 w-56" />
+          <Skeleton className="h-3 w-40" />
+        </div>
+      )}
 
       {!loading && showForm && (
-        <div data-testid={`${testId}-absent`} className="mt-2 flex flex-col gap-3">
-          <p className="max-w-[52ch] text-[13px] text-fg-secondary">
-            Styr runs your sessions under your own Claude Code login rather than a shared API key. Run{' '}
-            <code className="rounded-[var(--radius-1)] bg-surface-2 px-1 py-0.5 font-mono text-[12px] text-fg-primary">
-              {SETUP_COMMAND}
-            </code>{' '}
-            on any machine where Claude Code is already logged in, then paste the token it prints below.
+        <div data-testid={`${testId}-absent`} className="flex flex-col gap-4">
+          <p className="max-w-[58ch] text-[13px] text-fg-secondary">
+            Styr runs your sessions under your own Claude Code login rather than a shared API key. Run the command below
+            on any machine where Claude Code is already signed in, then paste the token it prints.
           </p>
 
-          <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2.5 py-1.5 font-mono text-[12px] text-fg-primary">
-              {SETUP_COMMAND}
-            </code>
-            <button
-              type="button"
+          <div className="flex items-center gap-2 rounded-[var(--radius-control)] border border-hairline bg-surface-2 py-1 pl-3 pr-1">
+            <code className="flex-1 truncate font-mono text-[12px] text-fg-primary">{SETUP_COMMAND}</code>
+            <Button
+              size="sm"
+              variant="ghost"
               onClick={() => void copyCommand()}
               aria-label="Copy command"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-1)] border border-hairline text-fg-secondary transition-colors duration-150 hover:bg-surface-2 hover:text-fg-primary"
-            >
-              {copied ? <Check size={14} aria-hidden /> : <Copy size={14} aria-hidden />}
-            </button>
+              className="w-7 px-0"
+              icon={copied ? <Check size={13} aria-hidden /> : <Copy size={13} aria-hidden />}
+            />
           </div>
 
           <form onSubmit={(e) => void handleSubmit(e)} className="flex flex-col gap-2">
             <label htmlFor={`${testId}-input`} className="text-[12px] font-medium text-fg-secondary">
               {inputLabel}
             </label>
-            <div className="flex items-center gap-2">
-              <input
+            <div className="flex flex-wrap items-center gap-2">
+              <Input
                 id={`${testId}-input`}
                 data-testid={`${testId}-input`}
+                mono
                 type="password"
                 autoComplete="off"
                 spellCheck={false}
@@ -130,35 +132,31 @@ export function ClaudeTokenCard({ title, inputLabel, tokenInfo, onSave, onRemove
                 onChange={(e) => setValue(e.target.value)}
                 placeholder="sk-ant-oat01-…"
                 disabled={saving}
-                className="h-8 flex-1 rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2.5 font-mono text-[12px] text-fg-primary outline-none placeholder:text-fg-muted focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-surface-1"
+                aria-invalid={errorMessage ? true : undefined}
+                className="min-w-[200px] flex-1"
               />
-              <button
-                type="submit"
-                disabled={saving || !value}
-                className={clsx(
-                  'flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10] transition-opacity duration-150',
-                  (saving || !value) && 'opacity-60',
-                )}
-              >
-                {saving && <Loader2 size={14} className="animate-spin" aria-hidden />}
+              <Button variant="primary" type="submit" disabled={!value} loading={saving}>
                 Save and verify
-              </button>
+              </Button>
               {editing && !saving && (
-                <button
-                  type="button"
+                <Button
+                  variant="ghost"
                   onClick={() => {
                     setEditing(false)
                     setValue('')
                     setErrorMessage('')
                   }}
-                  className="h-8 shrink-0 rounded-[var(--radius-1)] px-2 text-[13px] text-fg-secondary transition-colors duration-150 hover:text-fg-primary"
                 >
                   Cancel
-                </button>
+                </Button>
               )}
             </div>
             {errorMessage && (
-              <p data-testid={`${testId}-error`} role="alert" className="text-[12px] text-state-failed">
+              <p
+                data-testid={`${testId}-error`}
+                role="alert"
+                className="rounded-[var(--radius-control)] border border-state-failed/30 bg-state-failed/10 px-3 py-2 text-[12px] text-fg-danger"
+              >
                 {errorMessage}
               </p>
             )}
@@ -167,35 +165,27 @@ export function ClaudeTokenCard({ title, inputLabel, tokenInfo, onSave, onRemove
       )}
 
       {!loading && !showForm && tokenInfo.present && (
-        <div data-testid={`${testId}-present`} className="mt-2 flex items-center justify-between gap-3">
-          <div>
-            <p className="font-mono text-[13px] text-fg-primary">{tokenInfo.label}</p>
-            <p className="mt-0.5 text-[12px] text-fg-muted">Verified {formatVerifiedAt(tokenInfo.verified_at)}</p>
+        <div data-testid={`${testId}-present`} className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="truncate font-mono text-[13px] text-fg-primary">{tokenInfo.label}</p>
+            <p className="mt-0.5 text-[12px] text-fg-secondary">Verified {formatVerifiedAt(tokenInfo.verified_at)}</p>
           </div>
           <div className="flex shrink-0 gap-2">
-            <button
-              type="button"
-              onClick={() => setEditing(true)}
-              className="h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2"
-            >
-              Replace
-            </button>
+            <Button onClick={() => setEditing(true)}>Replace</Button>
             {onRemove && (
-              <button
-                type="button"
-                onClick={() => void handleRemove()}
-                disabled={removing}
-                className={clsx(
-                  'h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-state-failed transition-colors duration-150 hover:bg-surface-2',
-                  removing && 'opacity-60',
-                )}
-              >
+              <Button variant="danger" onClick={() => void handleRemove()} loading={removing}>
                 Remove
-              </button>
+              </Button>
             )}
           </div>
         </div>
       )}
-    </section>
+    </Frame>
   )
+}
+
+/** Card's shape, no chrome: used when a heading and a panel already surround
+ * this component (the onboarding step). */
+function NestedFrame({ children, ...rest }: { children?: ReactNode; 'data-testid'?: string; title?: string }) {
+  return <div {...rest}>{children}</div>
 }

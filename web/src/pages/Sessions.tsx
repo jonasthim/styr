@@ -6,10 +6,12 @@
 import { useMemo } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
+import { MessagesSquare, Plus } from 'lucide-react'
 import { q } from '../api/queries'
 import type { Session, SessionState } from '../api/types'
 import { SessionRow } from '../components/sessions/SessionRow'
 import { NewSessionDialog } from '../components/sessions/NewSessionDialog'
+import { Badge, Button, EmptyState, PageHeader, Skeleton } from '../components/ui'
 
 type Group = 'needs-you' | 'running' | 'idle' | 'closed'
 
@@ -50,25 +52,10 @@ function groupSessions(sessions: Session[]): Map<Group, Session[]> {
 
 function SkeletonRow() {
   return (
-    <div className="flex h-[var(--row-h)] items-center gap-3 border-b border-hairline px-3">
-      <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-surface-3" />
-      <span className="h-3 w-40 max-w-[40%] animate-pulse rounded-[var(--radius-1)] bg-surface-3" />
-      <span className="ml-auto h-3 w-16 animate-pulse rounded-[var(--radius-1)] bg-surface-3" />
-    </div>
-  )
-}
-
-function EmptyState({ onNewSession }: { onNewSession: () => void }) {
-  return (
-    <div className="flex flex-col items-center gap-3 border-b border-hairline px-3 py-16 text-center">
-      <p className="text-[13px] text-fg-secondary">No sessions yet</p>
-      <button
-        type="button"
-        onClick={onNewSession}
-        className="h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10] transition-opacity duration-150 hover:opacity-90"
-      >
-        New session
-      </button>
+    <div className="flex h-[var(--row-h)] items-center gap-3 border-b border-hairline px-3 last:border-b-0">
+      <Skeleton className="h-2 w-2 shrink-0 rounded-full" />
+      <Skeleton className="h-3 w-40 max-w-[40%]" />
+      <Skeleton className="ml-auto h-3 w-16" />
     </div>
   )
 }
@@ -93,38 +80,59 @@ export function Sessions() {
 
   const grouped = useMemo(() => groupSessions(sessions.data ?? []), [sessions.data])
   const isEmpty = sessions.isSuccess && (sessions.data?.length ?? 0) === 0
+  const needsYou = grouped.get('needs-you')?.length ?? 0
+
+  function description(): string | undefined {
+    if (isEmpty || sessions.isLoading) return undefined
+    if (needsYou > 0) return `${needsYou} of ${sessions.data?.length ?? 0} are waiting on a decision from you.`
+    return 'Everything Claude Code is running for you on this box.'
+  }
 
   return (
-    <div className="mx-auto max-w-[1100px] px-4 py-6 sm:px-6">
-      <div className="mb-4 flex items-center justify-between">
-        <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-fg-primary">Sessions</h1>
-        <button
-          type="button"
-          onClick={() => setDialogOpen(true)}
-          className="h-8 rounded-[var(--radius-1)] bg-accent px-3 text-[13px] font-medium text-[#0b0d10] transition-opacity duration-150 hover:opacity-90"
-        >
-          New session
-        </button>
-      </div>
+    <div className="mx-auto flex w-full max-w-[1100px] flex-1 flex-col px-4 py-6 sm:px-6">
+      <PageHeader
+        title="Sessions"
+        description={description()}
+        actions={
+          <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+            New session
+          </Button>
+        }
+      />
 
-      <div className="overflow-hidden rounded-[var(--radius-2)] border border-hairline bg-surface-1">
-        {sessions.isLoading && (
-          <>
-            <SkeletonRow />
-            <SkeletonRow />
-            <SkeletonRow />
-          </>
-        )}
+      {sessions.isLoading && (
+        <div className="mt-5 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
+          <SkeletonRow />
+          <SkeletonRow />
+          <SkeletonRow />
+        </div>
+      )}
 
-        {isEmpty && <EmptyState onNewSession={() => setDialogOpen(true)} />}
+      {/* Centred in the content area rather than boxed at the top of the
+          page: an empty screen is the whole screen. */}
+      {isEmpty && (
+        <EmptyState
+          icon={<MessagesSquare size={18} aria-hidden />}
+          title="No sessions yet"
+          description="Start one and Styr streams every tool call, cost and permission prompt here as it happens."
+          action={
+            <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+              New session
+            </Button>
+          }
+        />
+      )}
 
-        {!sessions.isLoading &&
-          !isEmpty &&
-          GROUP_ORDER.filter(({ key }) => (grouped.get(key)?.length ?? 0) > 0).map(({ key, label }) => (
-            <div key={key} data-testid={`session-group-${key}`}>
-              <h2 className="border-b border-hairline bg-surface-2 px-3 py-1.5 text-[12px] font-medium text-fg-secondary">
-                {label}
-              </h2>
+      {!sessions.isLoading && !isEmpty && (
+        <div className="mt-5 overflow-hidden rounded-[var(--radius-panel)] border border-hairline bg-surface-1 shadow-[var(--shadow-card)]">
+          {GROUP_ORDER.filter(({ key }) => (grouped.get(key)?.length ?? 0) > 0).map(({ key, label }) => (
+            // The last row in the card drops its divider so the hairline
+            // doesn't double up with the card's own bottom edge.
+            <div key={key} data-testid={`session-group-${key}`} className="last:[&_a:last-child]:border-b-0">
+              <div className="flex h-8 items-center gap-2 border-b border-hairline bg-surface-2 px-3">
+                <h2 className="text-[12px] font-medium tracking-[-0.005em] text-fg-secondary">{label}</h2>
+                <Badge tone={key === 'needs-you' ? 'attention' : 'neutral'}>{grouped.get(key)!.length}</Badge>
+              </div>
               {grouped.get(key)!.map((session) => (
                 <SessionRow
                   key={session.id}
@@ -134,7 +142,8 @@ export function Sessions() {
               ))}
             </div>
           ))}
-      </div>
+        </div>
+      )}
 
       <NewSessionDialog open={dialogOpen} onOpenChange={setDialogOpen} />
     </div>

@@ -3,7 +3,11 @@
    live on :root only. The @theme block maps the color tokens to Tailwind
    colours so components reference tokens (via Tailwind classes) instead of
    raw hex values. This file is the Tailwind entry point (imported before
-   base.css) so the @theme block below is picked up by the Tailwind plugin. */
+   base.css) so the @theme block below is picked up by the Tailwind plugin.
+
+   Non-colour tokens (radii, shadows, motion) stay off @theme and are used as
+   `rounded-[var(--radius-control)]` / `shadow-[var(--shadow-dialog)]`, so a
+   theme override of a shadow lands the same way a colour override does. */
 
 @import 'tailwindcss';
 
@@ -13,19 +17,57 @@
   --bg-surface-2: #171b22;
   --bg-surface-3: #1e232c;
   --border-hairline: rgba(255, 255, 255, 0.08);
+  /* Hairline is right for a divider between rows; a control that has to read
+     as a control (input, secondary button, select trigger) needs a little
+     more edge than a divider does. */
+  --border-strong: rgba(255, 255, 255, 0.14);
   --fg-primary: #e6e8ec;
   --fg-secondary: #9aa3b2;
   --fg-muted: #6b7383;
+
   --accent: #7aa2ff;
+  /* Text and icons on a filled accent surface: near-black with a blue cast
+     rather than pure black. 7.4:1 on #7aa2ff, comfortably AA. */
+  --accent-fg: #07101f;
+  --accent-hover: #93b5ff;
+  --accent-active: #6a93f2;
+  /* Tint for selected rows, ghost hover and soft accent fills. */
+  --accent-subtle: rgba(122, 162, 255, 0.14);
+  --accent-border: rgba(122, 162, 255, 0.45);
+
   --state-running: #3ecf8e;
   --state-attention: #f5b544;
   --state-failed: #ff6b6b;
   --state-scheduled: #7aa2ff;
   --state-idle: #6b7383;
+  /* Text colour for an error message on a surface, and the ink that sits on
+     top of the filled attention / failed badges. The fills themselves stay
+     exactly as the spec pins them. */
+  --fg-danger: #ff8080;
+  --on-attention: #14100a;
+  --on-danger: #1a0606;
+
+  /* One focus-ring token so every primitive rings identically. */
+  --ring: var(--accent);
 
   --radius-1: 4px;
   --radius-2: 8px;
+  /* Controls sit between the two: 4px reads as a bare admin table, 8px is
+     too round on a 28px button. Panels get more. */
+  --radius-control: 6px;
+  --radius-panel: 12px;
   --row-h: 32px;
+
+  /* Elevation. The surface steps carry most of it; these add the lift that
+     something floating over the page needs. */
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.32);
+  --shadow-popover: 0 12px 32px -12px rgba(0, 0, 0, 0.72), 0 2px 8px -2px rgba(0, 0, 0, 0.44);
+  --shadow-dialog: 0 32px 72px -20px rgba(0, 0, 0, 0.82), 0 8px 24px -12px rgba(0, 0, 0, 0.6);
+  --overlay: rgba(5, 7, 10, 0.64);
+
+  --duration-fast: 120ms;
+  --duration-base: 160ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 
   --font-sans: 'Geist Sans', system-ui;
   --font-mono: 'Geist Mono', ui-monospace;
@@ -37,9 +79,28 @@
   --bg-surface-2: #f1f3f6;
   --bg-surface-3: #e8ebf0;
   --border-hairline: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
   --fg-primary: #111318;
   --fg-secondary: #4b5565;
   --fg-muted: #7a8494;
+
+  /* Same hue, deepened so it carries white text and passes AA as link text
+     on the light canvas, where #7aa2ff manages only 2.1:1. */
+  --accent: #2f5fd0;
+  --accent-fg: #ffffff;
+  --accent-hover: #2853bb;
+  --accent-active: #23499f;
+  --accent-subtle: rgba(47, 95, 208, 0.1);
+  --accent-border: rgba(47, 95, 208, 0.4);
+
+  --fg-danger: #c9372c;
+  --on-attention: #1a1206;
+  --on-danger: #ffffff;
+
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-popover: 0 12px 32px -12px rgba(16, 24, 40, 0.22), 0 2px 8px -2px rgba(16, 24, 40, 0.12);
+  --shadow-dialog: 0 32px 72px -20px rgba(16, 24, 40, 0.28), 0 8px 24px -12px rgba(16, 24, 40, 0.14);
+  --overlay: rgba(17, 19, 24, 0.36);
 }
 
 @theme {
@@ -48,10 +109,20 @@
   --color-surface-2: var(--bg-surface-2);
   --color-surface-3: var(--bg-surface-3);
   --color-hairline: var(--border-hairline);
+  --color-strong: var(--border-strong);
   --color-fg-primary: var(--fg-primary);
   --color-fg-secondary: var(--fg-secondary);
   --color-fg-muted: var(--fg-muted);
+  --color-fg-danger: var(--fg-danger);
   --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-active: var(--accent-active);
+  --color-accent-subtle: var(--accent-subtle);
+  --color-accent-border: var(--accent-border);
+  --color-ring: var(--ring);
+  --color-on-attention: var(--on-attention);
+  --color-on-danger: var(--on-danger);
   --color-state-running: var(--state-running);
   --color-state-attention: var(--state-attention);
   --color-state-failed: var(--state-failed);

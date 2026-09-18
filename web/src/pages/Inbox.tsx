@@ -18,6 +18,7 @@ import { ApprovalCard } from '../components/inbox/ApprovalCard'
 import { EmptyInbox } from '../components/inbox/EmptyInbox'
 import { FyiRow } from '../components/inbox/FyiRow'
 import { snoozeUntil, type SnoozeOption } from '../components/inbox/SnoozeMenu'
+import { Badge } from '../components/ui'
 
 const FYI_WINDOW_MS = 24 * 60 * 60 * 1000
 
@@ -226,17 +227,17 @@ export function Inbox() {
 
   return (
     <Toast.Provider swipeDirection="right">
-      <div className="mx-auto max-w-[720px]">
-        <header className="flex items-center gap-3 border-b border-hairline px-4 py-4 min-[640px]:px-6">
-          <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-fg-primary">Inbox</h1>
+      <div className="mx-auto flex w-full max-w-[720px] flex-1 flex-col">
+        <header className="flex items-center gap-3 px-4 pb-1 pt-6 min-[640px]:px-6">
+          <h1 className="text-[20px] font-semibold leading-7 tracking-[-0.02em] text-fg-primary">Inbox</h1>
           {sortedApprovals.length > 0 && (
-            <span className="rounded-full bg-state-attention px-2 py-0.5 font-mono text-[11px] font-semibold tabular-nums text-[#111318]">
+            <Badge tone="attention" variant="solid" className="font-mono font-semibold">
               {sortedApprovals.length}
-            </span>
+            </Badge>
           )}
         </header>
 
-        <section aria-labelledby="needs-you-heading" className="px-4 py-4 min-[640px]:px-6">
+        <section aria-labelledby="needs-you-heading" className="px-4 pb-2 pt-5 min-[640px]:px-6">
           <div className="mb-3 flex items-center gap-2">
             <h2 id="needs-you-heading" className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">
               Needs you
@@ -279,7 +280,7 @@ export function Inbox() {
           )}
         </section>
 
-        <section aria-labelledby="fyi-heading" className="px-4 py-4 min-[640px]:px-6">
+        <section aria-labelledby="fyi-heading" className="px-4 py-6 min-[640px]:px-6">
           <div className="mb-3 flex items-center gap-2">
             <h2 id="fyi-heading" className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">
               FYI
@@ -290,7 +291,7 @@ export function Inbox() {
           </div>
 
           {fyiSessions.length === 0 ? (
-            <p className="text-[13px] text-fg-muted">Nothing finished in the last 24 hours.</p>
+            <p className="text-[13px] text-fg-secondary">Nothing finished in the last 24 hours.</p>
           ) : (
             <ul data-testid="fyi-list" role="list" className="flex list-none flex-col gap-2">
               {fyiSessions.map((session) => (
@@ -309,7 +310,7 @@ export function Inbox() {
           if (!open) setToastMessage(null)
         }}
         duration={5000}
-        className="fixed bottom-4 right-4 z-50 rounded-[var(--radius-2)] border border-hairline bg-surface-2 px-4 py-3 text-[13px] text-fg-primary shadow-2xl"
+        className="styr-panel fixed bottom-4 right-4 z-50 rounded-[var(--radius-2)] border border-hairline bg-surface-3 px-4 py-3 text-[13px] text-fg-primary shadow-[var(--shadow-popover)]"
       >
         <Toast.Title>{toastMessage}</Toast.Title>
       </Toast.Root>

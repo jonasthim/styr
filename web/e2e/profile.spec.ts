@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { ensureRealToken, isReal, setClaudeTokenPresence } from './helpers/seed'
 
 // Runs against both backends. /api/v1/me starts logged in as the dev admin
@@ -68,19 +68,66 @@ test.describe('Profile - Claude token card', () => {
   })
 })
 
+/** Id of a profile whose mode select is editable, creating one if the backend
+ * under test has none. Builtin rows lock their mode (docs/openapi.yaml), and a
+ * disabled Radix Select cannot be opened - so the allowed modes can only be
+ * read off an editable row.
+ *
+ * Fetches from inside the page rather than through page.request: in mock mode
+ * the API only exists in the service worker (web/src/mocks/), which
+ * Playwright's own request context would bypass. Returns `created` so the
+ * caller can reload once when a profile had to be added - only ever the case
+ * against the real backend, whose state survives a reload (the mock seeds an
+ * editable profile, and reloading it would re-seed everything else too). */
+async function editableProfile(page: Page): Promise<{ id: string; created: boolean }> {
+  return page.evaluate(async () => {
+    const headers = { 'Content-Type': 'application/json', 'X-Requested-With': 'styr' }
+    const list = await fetch('/api/v1/profiles', { headers })
+    if (!list.ok) throw new Error(`list profiles failed: ${list.status}`)
+    const existing = ((await list.json()) as Array<{ id: string; builtin: boolean }>).find((p) => !p.builtin)
+    if (existing) return { id: existing.id, created: false }
+
+    const created = await fetch('/api/v1/profiles', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ name: 'styr-e2e-modes', mode: 'default' }),
+    })
+    if (!created.ok) throw new Error(`create profile failed: ${created.status}`)
+    return { id: ((await created.json()) as { id: string }).id, created: true }
+  })
+}
+
 test('/settings lists three builtin profiles and a five-option mode select', async ({ page }) => {
   await page.goto('/settings')
   await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
+  const { id: editableId, created } = await editableProfile(page)
+  if (created) {
+    await page.reload()
+    await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
+  }
 
   await expect(page.getByTestId('profile-row-interactive')).toBeVisible()
   await expect(page.getByTestId('profile-row-investigate')).toBeVisible()
   await expect(page.getByTestId('profile-row-remediate')).toBeVisible()
   await expect(page.locator('[data-testid^="profile-row-"]').filter({ hasText: 'builtin' })).toHaveCount(3)
 
-  const modeSelect = page.getByTestId('profile-row-interactive').getByRole('combobox')
-  const values = await modeSelect.locator('option').evaluateAll((opts) => opts.map((o) => (o as HTMLOptionElement).value))
-  expect(values).toHaveLength(5)
-  expect(values.sort()).toEqual(['acceptEdits', 'auto', 'default', 'dontAsk', 'plan'].sort())
+  // The mode select is a Radix Select now (role=combobox opening role=option
+  // items in a portal), not a native <select>, so its options only exist in
+  // the DOM while it is open - they can no longer be read off a closed,
+  // disabled builtin row the way <option> elements could.
+  const modeSelect = page.getByTestId(`profile-row-${editableId}`).getByRole('combobox')
+  await expect(modeSelect).toHaveText('Default')
+  await modeSelect.click()
+
+  const options = page.getByRole('option')
+  await expect(options).toHaveCount(5)
+  expect((await options.allInnerTexts()).sort()).toEqual(['Accept edits', 'Auto', 'Default', "Don't ask", 'Plan'].sort())
+
+  // A builtin's mode still shows its value, but cannot be changed.
+  await page.keyboard.press('Escape')
+  const builtinSelect = page.getByTestId('profile-row-interactive').getByRole('combobox')
+  await expect(builtinSelect).toHaveText('Default')
+  await expect(builtinSelect).toBeDisabled()
 })
 
 test('/workspaces lists at least the workspaces this run created', async ({ page }, testInfo) => {

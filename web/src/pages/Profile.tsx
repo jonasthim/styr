@@ -9,6 +9,7 @@ import { useMe } from '../hooks/useMe'
 import { useTheme } from '../hooks/useTheme'
 import { useUiStore } from '../store/ui'
 import { ClaudeTokenCard } from '../components/profile/ClaudeTokenCard'
+import { Badge, Button, Card, Kbd, PageHeader } from '../components/ui'
 
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
@@ -19,6 +20,8 @@ function initials(name: string): string {
     .join('')
 }
 
+// A segmented control rather than three loose buttons: the three options are
+// one choice, so they share one frame and only the chosen one is filled.
 function ThemeButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: string }) {
   return (
     <button
@@ -26,10 +29,11 @@ function ThemeButton({ active, onClick, children }: { active: boolean; onClick: 
       aria-pressed={active}
       onClick={onClick}
       className={clsx(
-        'h-8 rounded-[var(--radius-1)] border px-3 text-[13px] font-medium transition-colors duration-150',
+        'h-7 rounded-[var(--radius-1)] px-3 text-[13px] font-medium outline-none transition-colors duration-[var(--duration-fast)]',
+        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--ring)]',
         active
-          ? 'border-accent bg-surface-2 text-fg-primary'
-          : 'border-hairline text-fg-secondary hover:bg-surface-2 hover:text-fg-primary',
+          ? 'bg-surface-3 text-fg-primary shadow-[var(--shadow-card)]'
+          : 'text-fg-secondary hover:text-fg-primary',
       )}
     >
       {children}
@@ -46,7 +50,11 @@ function ThemeSelector() {
   // once, so it does show its own pressed state.
 
   return (
-    <div role="group" aria-label="Theme" className="flex gap-2">
+    <div
+      role="group"
+      aria-label="Theme"
+      className="inline-flex gap-1 rounded-[var(--radius-control)] border border-hairline bg-surface-2 p-1"
+    >
       <ThemeButton active={mode === 'system'} onClick={() => setMode('system')}>
         System
       </ThemeButton>
@@ -101,33 +109,34 @@ export function Profile() {
   }
 
   return (
-    <main className="mx-auto max-w-[640px] px-4 py-8 sm:px-6">
-      <h1 className="text-[18px] font-semibold tracking-[-0.01em] text-fg-primary">Profile</h1>
+    <div className="mx-auto flex w-full max-w-[640px] flex-1 flex-col px-4 py-6 sm:px-6">
+      <PageHeader title="Profile" />
 
-      <section className="mt-5 flex items-center gap-4 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-[15px] font-semibold text-[#0b0d10]">
-          {me?.avatar_url ? (
-            <img src={me.avatar_url} alt="" className="h-full w-full object-cover" />
-          ) : (
-            initials(me?.display_name ?? '?')
+      <Card className="mt-6">
+        <div className="flex items-center gap-4">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-full bg-accent text-[15px] font-semibold text-accent-fg">
+            {me?.avatar_url ? (
+              <img src={me.avatar_url} alt="" className="h-full w-full object-cover" />
+            ) : (
+              initials(me?.display_name ?? '?')
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">{me?.display_name}</p>
+            <p className="truncate text-[13px] text-fg-secondary">{me?.email}</p>
+          </div>
+          {me && (
+            <Badge
+              data-testid="role-chip"
+              tone={me.role === 'admin' ? 'accent' : 'neutral'}
+              variant="outline"
+              className="capitalize"
+            >
+              {me.role}
+            </Badge>
           )}
         </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-[15px] font-semibold text-fg-primary">{me?.display_name}</p>
-          <p className="truncate text-[13px] text-fg-secondary">{me?.email}</p>
-        </div>
-        {me && (
-          <span
-            data-testid="role-chip"
-            className={clsx(
-              'shrink-0 rounded-full border px-2 py-0.5 text-[11px] font-medium capitalize',
-              me.role === 'admin' ? 'border-accent text-accent' : 'border-hairline text-fg-secondary',
-            )}
-          >
-            {me.role}
-          </span>
-        )}
-      </section>
+      </Card>
 
       <div className="mt-4">
         <ClaudeTokenCard
@@ -140,53 +149,36 @@ export function Profile() {
         />
       </div>
 
-      <section className="mt-4 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">Appearance</h2>
-        <p className="mt-1 text-[13px] text-fg-secondary">Choose how Styr looks on this device.</p>
-        <div className="mt-3">
-          <ThemeSelector />
-        </div>
-      </section>
+      <Card
+        className="mt-4"
+        title="Appearance"
+        description="How Styr looks on this device."
+        actions={<ThemeSelector />}
+      />
 
-      <section className="mt-4 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">Keyboard shortcuts</h2>
-        <p className="mt-1 text-[13px] text-fg-secondary">See every shortcut, or press ? anywhere.</p>
-        <button
-          type="button"
-          onClick={() => setShortcutsOpen(true)}
-          className="mt-3 h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2"
-        >
-          Show shortcuts
-        </button>
-      </section>
+      <Card
+        className="mt-4"
+        title="Keyboard shortcuts"
+        description={
+          <>
+            Every shortcut, or press <Kbd>?</Kbd> anywhere.
+          </>
+        }
+        actions={
+          <Button onClick={() => setShortcutsOpen(true)}>Show shortcuts</Button>
+        }
+      />
 
-      <section className="mt-4 rounded-[var(--radius-2)] border border-hairline bg-surface-1 p-4">
-        <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">Session</h2>
-        <div className="mt-3 flex gap-2">
-          <button
-            type="button"
-            onClick={() => void handleSignOut()}
-            disabled={signingOut}
-            className={clsx(
-              'h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2',
-              signingOut && 'opacity-60',
-            )}
-          >
+      <Card className="mt-4" title="Session" description="End this browser's login, or every login you have.">
+        <div className="flex flex-wrap gap-2">
+          <Button onClick={() => void handleSignOut()} disabled={signingOut}>
             Sign out
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSignOutEverywhere()}
-            disabled={signingOut}
-            className={clsx(
-              'h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2',
-              signingOut && 'opacity-60',
-            )}
-          >
+          </Button>
+          <Button variant="ghost" onClick={() => void handleSignOutEverywhere()} disabled={signingOut}>
             Sign out everywhere
-          </button>
+          </Button>
         </div>
-      </section>
-    </main>
+      </Card>
+    </div>
   )
 }

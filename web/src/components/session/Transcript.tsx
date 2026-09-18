@@ -4,8 +4,10 @@
 // to and briefly highlights that block on mount or hash change.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { ArrowDown } from 'lucide-react'
+import { ArrowDown, MessagesSquare } from 'lucide-react'
 import type { Block } from '../../lib/blocks'
+import { usePartialsStore } from '../../store/partials'
+import { EmptyState } from '../ui'
 import { TextBlock } from './TextBlock'
 import { ToolBlock } from './ToolBlock'
 import { PartialText } from './PartialText'
@@ -68,6 +70,7 @@ export function Transcript({ blocks, sessionId }: { blocks: Block[]; sessionId: 
   const [showJump, setShowJump] = useState(false)
   const [highlightId, setHighlightId] = useState<string | null>(null)
   const prevCount = useRef(0)
+  const partial = usePartialsStore((s) => s.bySession[sessionId])
 
   const virtualizer = useVirtualizer({
     count: blocks.length,
@@ -142,7 +145,21 @@ export function Transcript({ blocks, sessionId }: { blocks: Block[]; sessionId: 
 
   return (
     <div className="relative min-h-0 flex-1">
-      <div ref={parentRef} onScroll={onScroll} data-testid="transcript" className="h-full overflow-y-auto px-4! py-3!">
+      <div
+        ref={parentRef}
+        onScroll={onScroll}
+        data-testid="transcript"
+        className="flex h-full flex-col overflow-y-auto px-4! py-3!"
+      >
+        {/* An empty transcript is most of the screen; say what will fill it
+            rather than leaving a void. */}
+        {blocks.length === 0 && !partial && (
+          <EmptyState
+            icon={<MessagesSquare size={18} aria-hidden />}
+            title="Nothing yet"
+            description="Replies and tool calls stream in here as the session works."
+          />
+        )}
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((row) => (
             <div
@@ -162,7 +179,7 @@ export function Transcript({ blocks, sessionId }: { blocks: Block[]; sessionId: 
         <button
           type="button"
           onClick={() => scrollToBottom('smooth')}
-          className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline bg-surface-2 px-3! py-1.5! text-[12px] font-medium text-fg-primary shadow-lg transition-transform duration-150 hover:-translate-y-0.5"
+          className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-hairline bg-surface-2 px-3! py-1.5! text-[12px] font-medium text-fg-primary shadow-[var(--shadow-popover)] transition-transform duration-150 hover:-translate-y-0.5"
         >
           <ArrowDown size={13} />
           Jump to latest

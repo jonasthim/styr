@@ -45,7 +45,7 @@ function RailLink({ item, expanded, active }: { item: NavItemDef; expanded: bool
       {!!item.badge && (
         <span
           data-testid="inbox-badge"
-          className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-state-attention px-1 font-mono text-[10px] font-semibold tabular-nums text-[#111318]"
+          className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-state-attention px-1 font-mono text-[10px] font-semibold tabular-nums text-on-attention"
         >
           {item.badge}
         </span>
@@ -72,7 +72,7 @@ function LiveDot() {
         <Tooltip.Content
           side="right"
           sideOffset={8}
-          className="rounded-[var(--radius-1)] border border-hairline bg-surface-2 px-2 py-1 text-[12px] text-fg-primary shadow-lg"
+          className="rounded-[var(--radius-1)] border border-hairline bg-surface-3 px-2 py-1 text-[12px] text-fg-primary shadow-[var(--shadow-popover)]"
         >
           {connected ? 'Live updates connected' : 'Reconnecting…'}
         </Tooltip.Content>
@@ -135,7 +135,7 @@ export function Rail() {
               to: '/profile',
               label: me?.display_name ?? 'Profile',
               icon: () => (
-                <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-accent text-[9px] font-semibold text-[#0b0d10]">
+                <span className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full bg-accent text-[9px] font-semibold text-accent-fg">
                   {initials(me?.display_name ?? '?')}
                 </span>
               ),

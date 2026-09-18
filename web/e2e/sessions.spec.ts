@@ -102,6 +102,58 @@ test('at 390 px the sessions list has no horizontal scroll', async ({ page }, te
   expect(overflow).toBeLessThanOrEqual(1)
 })
 
+// First run: a server with no workspaces registered yet. POST
+// /__mock/clear-workspaces and /__mock/set-role (src/mocks/handlers.ts) flip
+// the mock in place and the caches are refetched, rather than reloading the
+// page - a reload would re-evaluate the handlers module and re-seed both (the
+// same reason e2e/profile.spec.ts resets the Claude token this way).
+interface MockWindow {
+  __queryClient: { refetchQueries: (f: { queryKey: string[] }) => Promise<unknown> }
+}
+
+async function firstRun(page: Page, role: 'admin' | 'member') {
+  await page.evaluate(async (r) => {
+    const cleared = await fetch('/__mock/clear-workspaces', { method: 'POST' })
+    if (!cleared.ok) throw new Error(`clear-workspaces failed: ${cleared.status}`)
+    const roleSet = await fetch('/__mock/set-role', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: r }),
+    })
+    if (!roleSet.ok) throw new Error(`set-role failed: ${roleSet.status}`)
+    const client = (window as unknown as MockWindow).__queryClient
+    await client.refetchQueries({ queryKey: ['workspaces'] })
+    await client.refetchQueries({ queryKey: ['me'] })
+  }, role)
+}
+
+test('an admin with no workspaces gets a link to add one and cannot start', async ({ page }, testInfo) => {
+  // Mock only: emptying the real backend's workspace table would break the
+  // other real specs, which share one account and one serial run.
+  test.skip(isReal(testInfo), 'drives the mock backend in place')
+  await gotoReady(page, '/sessions', 'Sessions')
+  await firstRun(page, 'admin')
+
+  await page.getByRole('button', { name: 'New session' }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByTestId('no-workspaces-notice')).toBeVisible()
+  await expect(dialog.getByText('No workspaces yet')).toBeVisible()
+  await expect(dialog.getByRole('link', { name: 'Add a workspace' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled()
+})
+
+test('a member with no workspaces is told to ask an admin', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'drives the mock backend in place')
+  await gotoReady(page, '/sessions', 'Sessions')
+  await firstRun(page, 'member')
+
+  await page.getByRole('button', { name: 'New session' }).first().click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByText('Ask an admin to add a workspace, then start a session here.')).toBeVisible()
+  await expect(dialog.getByRole('link', { name: 'Add a workspace' })).toHaveCount(0)
+  await expect(dialog.getByRole('button', { name: 'Start session' })).toBeDisabled()
+})
+
 test('new session dialog closes and clears ?new=1', async ({ page }) => {
   await gotoReady(page, '/sessions', 'Sessions')
   await page.keyboard.press('n')

@@ -39,7 +39,7 @@ export function TabBar() {
               {to === '/inbox' && !!pendingCount && (
                 <span
                   data-testid="inbox-badge"
-                  className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-state-attention px-1 font-mono text-[9px] font-semibold tabular-nums text-[#111318]"
+                  className="absolute -right-2 -top-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-state-attention px-1 font-mono text-[9px] font-semibold tabular-nums text-on-attention"
                 >
                   {pendingCount}
                 </span>
