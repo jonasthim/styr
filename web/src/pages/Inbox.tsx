@@ -13,12 +13,28 @@ import { q } from '../api/queries'
 import { api, ApiError } from '../api/client'
 import type { Approval, Session } from '../api/types'
 import { useUiStore } from '../store/ui'
+import { useMe } from '../hooks/useMe'
 import { ApprovalCard } from '../components/inbox/ApprovalCard'
 import { EmptyInbox } from '../components/inbox/EmptyInbox'
 import { FyiRow } from '../components/inbox/FyiRow'
 import { snoozeUntil, type SnoozeOption } from '../components/inbox/SnoozeMenu'
 
 const FYI_WINDOW_MS = 24 * 60 * 60 * 1000
+
+// Same key components/onboarding/Onboarding.tsx writes via markWelcomed()
+// once a user has reached /welcome and finished or skipped it. Duplicated
+// (not imported) because that file is outside this card's own file list.
+const WELCOMED_KEY = 'styr.welcomed'
+
+function hasSeenOnboarding(): boolean {
+  try {
+    return sessionStorage.getItem(WELCOMED_KEY) != null
+  } catch {
+    // sessionStorage unavailable (private mode, disabled storage): treat as
+    // not seen, the same fallback Onboarding.tsx's markWelcomed() takes.
+    return false
+  }
+}
 
 function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false
@@ -41,6 +57,18 @@ export function Inbox() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const paletteOpen = useUiStore((s) => s.paletteOpen)
+  const { data: me } = useMe()
+
+  // First-run onboarding redirect (Task 22's card, out of this file's own
+  // scope, only owns what happens once a browser is already on /welcome —
+  // this is the "when" half): a user with no Claude token yet who hasn't
+  // been through /welcome this browser session gets sent there instead of
+  // seeing an empty Inbox. Re-checks whenever `me` changes (e.g. a token
+  // reset elsewhere), not just on the very first mount.
+  useEffect(() => {
+    if (!me || me.claude_token.present || hasSeenOnboarding()) return
+    void navigate({ to: '/welcome', replace: true })
+  }, [me, navigate])
 
   const approvalsQuery = useQuery(q.approvals())
   const sessionsQuery = useQuery(q.sessions())

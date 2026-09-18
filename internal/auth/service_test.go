@@ -297,6 +297,86 @@ func TestLogout_NoCookie_IsANoOp(t *testing.T) {
 	}
 }
 
+// TestLogoutAll_DeletesEveryLoginSessionForUser seeds two login sessions for
+// the same user (as if signed in on two devices), calls LogoutAll with a
+// request carrying only the first session's cookie and Principal, and
+// checks that both hashes are gone from db.LoginSessions afterwards.
+func TestLogoutAll_DeletesEveryLoginSessionForUser(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	usr, cookie1 := seedSession(t, svc, users, domain.RoleMember)
+
+	// A second session for the same user, as if signed in on another
+	// device/browser.
+	rec2 := httptest.NewRecorder()
+	req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+	if _, err := svc.createSession(t.Context(), rec2, usr.ID, req2); err != nil {
+		t.Fatalf("createSession (second session): %v", err)
+	}
+	var cookie2 *http.Cookie
+	for _, c := range rec2.Result().Cookies() {
+		if c.Name == sessionCookieName {
+			cookie2 = c
+		}
+	}
+	if cookie2 == nil {
+		t.Fatal("second createSession did not set the session cookie")
+	}
+
+	hash1 := hashToken(cookie1.Value)
+	hash2 := hashToken(cookie2.Value)
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash1); err != nil {
+		t.Fatalf("precondition: first session should exist: %v", err)
+	}
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash2); err != nil {
+		t.Fatalf("precondition: second session should exist: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout-all", nil)
+	req.AddCookie(cookie1)
+	req = req.WithContext(withPrincipal(req.Context(), &Principal{User: *usr}))
+	rec := httptest.NewRecorder()
+	if err := svc.LogoutAll(rec, req); err != nil {
+		t.Fatalf("LogoutAll: %v", err)
+	}
+
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash1); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("first session after LogoutAll = %v, want ErrNotFound", err)
+	}
+	if _, _, _, _, err := logins.GetByHash(t.Context(), hash2); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("second session after LogoutAll = %v, want ErrNotFound", err)
+	}
+
+	var cleared bool
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == sessionCookieName && c.MaxAge < 0 {
+			cleared = true
+		}
+	}
+	if !cleared {
+		t.Error("expected LogoutAll to clear the session cookie")
+	}
+}
+
+// TestLogoutAll_NoPrincipal_ReturnsError documents that LogoutAll refuses to
+// guess whose sessions to delete: without a Principal in the request
+// context (RequireUser normally guarantees one) it errors instead of
+// silently doing nothing or deleting the wrong user's rows.
+func TestLogoutAll_NoPrincipal_ReturnsError(t *testing.T) {
+	users, logins := newTestRepos(t)
+	svc, err := New(users, logins, nil, "http://localhost:8080", false, "")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout-all", nil)
+	if err := svc.LogoutAll(httptest.NewRecorder(), req); err == nil {
+		t.Fatal("expected an error with no principal in context")
+	}
+}
+
 func TestRequireUser_RejectsWithoutPrincipal(t *testing.T) {
 	handler := RequireUser(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("next handler should not run")
