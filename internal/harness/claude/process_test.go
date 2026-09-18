@@ -51,6 +51,25 @@ func TestBuildArgsWorktree(t *testing.T) {
 	}
 }
 
+func TestBuildArgsJSONSchemaAndSystemPromptPresentWhenSet(t *testing.T) {
+	s := spec()
+	s.JSONSchema = `{"type":"object"}`
+	s.SystemPrompt = "You are terse."
+	got := strings.Join(BuildArgs(s), " ")
+	for _, want := range []string{`--json-schema {"type":"object"}`, "--append-system-prompt You are terse."} {
+		if !strings.Contains(got, want) {
+			t.Errorf("args %q lack %q", got, want)
+		}
+	}
+}
+
+func TestBuildArgsJSONSchemaAndSystemPromptAbsentWhenEmpty(t *testing.T) {
+	got := strings.Join(BuildArgs(spec()), " ")
+	if strings.Contains(got, "--json-schema") || strings.Contains(got, "--append-system-prompt") {
+		t.Fatalf("args %q should not contain --json-schema or --append-system-prompt when unset", got)
+	}
+}
+
 func fakeBinary(t *testing.T) string {
 	t.Helper()
 	bin, err := filepath.Abs("../../../testdata/fake-claude/fake-claude.sh")

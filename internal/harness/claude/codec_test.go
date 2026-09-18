@@ -3,6 +3,7 @@ package claude
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -150,6 +151,38 @@ func TestMultiTurnFixtureHasTwoResults(t *testing.T) {
 	}
 	if got := results[len(results)-1].Result.Text; got != "41" {
 		t.Fatalf("last result text = %q, want %q", got, "41")
+	}
+}
+
+func TestJSONSchemaFixture(t *testing.T) {
+	evs := decodeFixture(t, "06_json_schema.jsonl")
+	var lastResult *harness.Event
+	for i := range evs {
+		if evs[i].Type == harness.EventResult {
+			lastResult = &evs[i]
+		}
+	}
+	if lastResult == nil {
+		t.Fatal("no result event decoded")
+	}
+	if len(lastResult.Result.StructuredOutput) == 0 {
+		t.Fatal("StructuredOutput is empty, want the schema-constrained report")
+	}
+	var report struct {
+		Severity   string  `json:"severity"`
+		Diagnosis  string  `json:"diagnosis"`
+		Confidence float64 `json:"confidence"`
+	}
+	if err := json.Unmarshal(lastResult.Result.StructuredOutput, &report); err != nil {
+		t.Fatalf("StructuredOutput does not parse as an object: %v (%s)", err, lastResult.Result.StructuredOutput)
+	}
+	if report.Diagnosis == "" {
+		t.Fatal("report.diagnosis is empty")
+	}
+	switch report.Severity {
+	case "info", "warning", "critical":
+	default:
+		t.Fatalf("report.severity = %q, want one of info|warning|critical", report.Severity)
 	}
 }
 

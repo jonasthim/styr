@@ -39,6 +39,16 @@ type StartSpec struct {
 	Env       map[string]string // extra env, e.g. CLAUDE_CODE_OAUTH_TOKEN
 	Profile   Profile
 	Worktree  string // optional --worktree name
+
+	// JSONSchema, when non-empty, is passed as --json-schema: the CLI constrains the model's
+	// final turn to a synthetic StructuredOutput tool call matching this schema, and the
+	// result's StructuredOutput field is populated (see testdata/PROTOCOL.md "structured
+	// output").
+	JSONSchema string
+	// SystemPrompt, when non-empty, is passed as --append-system-prompt and appended to the
+	// CLI's own system prompt. Not observable in the wire protocol; Styr never verifies it
+	// took effect beyond the flag being accepted.
+	SystemPrompt string
 }
 
 // validModes are the permission modes Styr is willing to pass to the CLI. Deliberately
@@ -124,6 +134,10 @@ type Result struct {
 	OutputTokens int
 	DurationMS   int
 	Text         string
+	// StructuredOutput is the parsed report the model produced via a JSON-schema-constrained
+	// turn (StartSpec.JSONSchema), observed on the CLI's result envelope as the top-level
+	// "structured_output" object field. Nil when the session did not use a schema.
+	StructuredOutput json.RawMessage
 }
 
 // Event is one decoded item from a harness Process's event stream.

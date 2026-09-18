@@ -125,6 +125,23 @@ func TestPermissionStepBlocksUntilDecide(t *testing.T) {
 	}
 }
 
+// Start keeps the spec's JSONSchema and SystemPrompt on Process.Spec so tests can assert
+// pass-through, mirroring how internal/harness/claude.BuildArgs consumes them.
+func TestStartKeepsJSONSchemaAndSystemPromptOnSpec(t *testing.T) {
+	s := testSpec()
+	s.JSONSchema = `{"type":"object"}`
+	s.SystemPrompt = "You are terse."
+	h := New()
+	p, err := h.Start(context.Background(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fp := p.(*Process)
+	if fp.Spec.JSONSchema != s.JSONSchema || fp.Spec.SystemPrompt != s.SystemPrompt {
+		t.Fatalf("Spec = %+v, want JSONSchema=%q SystemPrompt=%q", fp.Spec, s.JSONSchema, s.SystemPrompt)
+	}
+}
+
 // Close emits an exit event and closes the channel.
 func TestCloseEmitsExitAndClosesChannel(t *testing.T) {
 	h := New()

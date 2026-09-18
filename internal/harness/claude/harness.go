@@ -60,6 +60,12 @@ func BuildArgs(spec harness.StartSpec) []string {
 	if spec.Worktree != "" {
 		args = append(args, "--worktree", spec.Worktree)
 	}
+	if spec.JSONSchema != "" {
+		args = append(args, "--json-schema", spec.JSONSchema)
+	}
+	if spec.SystemPrompt != "" {
+		args = append(args, "--append-system-prompt", spec.SystemPrompt)
+	}
 	return args
 }
 
