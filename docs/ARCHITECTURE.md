@@ -160,6 +160,44 @@ minus that hidden set (and minus anything Styr already owns by name); selecting 
 inserts and sends it as an ordinary user turn — the CLI executes custom commands and skills in
 `-p` mode the same way it executes `/compact`.
 
+## Worktrees and the review flow (v0.3)
+
+A worktree-enabled workspace (`Workspace.Worktrees`) gives every session its own git worktree
+instead of running in the workspace's shared checkout, which is what makes a real per-session
+diff, checkpoint and commit possible without one session's edits colliding with another's or
+with a human's own working copy. `internal/gitops` is the only package that shells out to `git`
+and `gh` (argv-based `os/exec`, no shell, a whitelisted environment, a 60s timeout per call); it
+knows nothing about sessions or HTTP, and `internal/sessions` is its only caller.
+
+1. **Session create → `gitops.AddWorktree` → CLI cwd.** `Service.Create` inserts the session row
+   first, then — before starting the harness process at all — calls `s.createWorktree`
+   (`internal/sessions/worktree.go`), which resolves the workspace's base branch (its own
+   `base_branch`, or the checkout's current branch when that's empty), creates the worktree at
+   `<workspace path>/.styr/worktrees/<session id>` on a new `styr/<short id>-<slug>` branch via
+   `gitops.Repo.AddWorktree`, and records the resulting path, branch and starting commit
+   (`base_ref`) on the session row. `sessionCwd` then makes that path the harness process's
+   `cwd`, so the CLI's very first tool call already runs inside the worktree, never the shared
+   checkout.
+2. **Result → checkpoint + diff stats + `session.stats`.** `runner.go`'s `pump` goroutine calls
+   `s.afterResult` after every `result` event. For a worktree session with `auto_checkpoint` on,
+   that commits whatever the turn changed under a fixed `Styr <styr@local>` identity
+   (`gitops.Worktree.Checkpoint`, a no-op commit when the turn touched nothing) and records a
+   `checkpoints` row when it actually committed; either way it recomputes the diff against
+   `base_ref` (`gitops.Worktree.DiffSummary`) and persists the new add/del counts onto the
+   session row. `publishStats` then puts those same counts on the bus as part of the
+   `session.stats` message every open tab already listens for (turns/cost/tokens), which is how
+   the sessions list's `+42 −18` diff badge and the Review tab's file list stay live without a
+   dedicated event kind.
+3. **Review endpoints → gitops.** Every `/sessions/{id}/{diff,diff/file,comments,review,commit,
+   pr,checkpoints,rewind,discard,patch}` handler (`internal/api/review_handlers.go`,
+   `review_actions_handlers.go`) goes through `sessions.Service`'s review methods
+   (`review.go`, `review_actions.go`), which resolve the session's `gitops.Worktree` handle and
+   call straight into it — there is no intermediate cache or projection of git state in SQLite
+   beyond the `checkpoints` table and the session's own `diff_add`/`diff_del`/`branch`/`base_ref`
+   columns. A session with no worktree answers every one of these 422 (`sessions.ErrNoWorktree`).
+   Full behaviour (branch naming, checkpoint/rewind semantics, commit/PR requirements, plan
+   approval) is `docs/REVIEW.md`.
+
 ## What lives where
 
 ```
@@ -173,8 +211,12 @@ internal/domain/     core types: Session, Event, Approval, Workspace, Profile, U
 internal/db/         SQLite open + goose migrations + one repo file per table
 internal/crypto/     AES-GCM seal/open for tokens at rest
 internal/risk/       tool+input → risk tier classification
+internal/gitops/     git/gh worktrees, diffs, checkpoints, commit, push and PR — the only
+                     package that shells out to git or gh
 internal/sessions/   Service (create/send/decide/interrupt/close/list/get/switch-model), the
-                     per-session runner goroutine, the open-session slot scheduler and idle reaper
+                     per-session runner goroutine, the open-session slot scheduler and idle
+                     reaper, worktree lifecycle and review operations (worktree.go, review.go,
+                     review_actions.go)
 internal/templates/  Go text/template rendering of prompts/titles/dedupe keys from a trigger
                      payload, per-kind normalisation (generic/grafana/github), the seeded
                      Grafana template

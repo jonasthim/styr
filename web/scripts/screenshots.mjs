@@ -161,6 +161,31 @@ async function main() {
         await page.close()
         console.log('captured triggers.png (1280x800)')
       }
+
+      // 6. Session view with the Review tab open, desktop viewport: the
+      // fixture session's seeded diff (web/src/mocks/reviewState.ts), a
+      // modified file (internal/sessions/service.go) selected so its diff
+      // shows in the main pane, side panel switched to the Review tab.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        const diffPath = 'internal/sessions/service.go'
+        await page.goto(
+          `${BASE_URL}/sessions/${FIXTURE_SESSION_ID}?diff=${encodeURIComponent(diffPath)}`,
+          { waitUntil: 'networkidle' },
+        )
+        await page.waitForSelector('[data-testid="session-view"]', { timeout: 15_000 })
+        await page.getByRole('tab', { name: 'Review' }).click()
+        await page.waitForSelector('[data-testid="diff-view"]', { timeout: 15_000 })
+        await page.waitForSelector('[data-testid="diff-hunk"]', { timeout: 15_000 })
+
+        // See the sessions.png comment above: settle the hover-expanding
+        // rail before capturing.
+        await page.mouse.move(900, 700)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'review.png') })
+        await page.close()
+        console.log('captured review.png (1280x800)')
+      }
     } finally {
       await browser.close()
     }

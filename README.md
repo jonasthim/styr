@@ -21,9 +21,9 @@ matters from your phone, and keep every decision on your own box.
 
 ## Quick start
 
-Styr is early: v0.2.0 is the latest release, and it covers login, sessions, approvals, and now
-triggers, runs and unattended investigations — see [Features](#features) below for what's in and
-what's still to come.
+Styr is early: v0.3.0 is the latest release, and it covers login, sessions, approvals, triggers,
+runs and unattended investigations, and now review — worktrees, diffs, checkpoints, commit and
+PR — see [Features](#features) below for what's in and what's still to come.
 
 ### Install script (bare host, systemd)
 
@@ -79,13 +79,30 @@ v0.2 "Triggers":
 
 See [docs/TRIGGERS.md](docs/TRIGGERS.md) for the full trigger, run and notification setup guide.
 
+v0.3 "Review":
+
+![Styr review view](docs/screenshots/review.png)
+
+- Worktree per session on a worktree-enabled workspace: sessions run on their own branch,
+  never in the workspace's shared checkout
+- Diff review with inline comments that become the session's next prompt when you send the
+  review
+- Commit (folds the session's checkpoints into one commit) and Open PR (push plus `gh pr
+  create`) straight from the session view
+- Checkpoints after every turn, with rewind to any of them — files only, the chat is kept
+- Plan approval: a plan-mode session's finished plan renders as a checklist you approve or send
+  back with comments
+
+See [docs/REVIEW.md](docs/REVIEW.md) for the full worktree, review, checkpoint and plan-approval
+guide.
+
 ### Roadmap
 
 | Release | Contents |
 |---|---|
 | v0.1 Cockpit | OIDC login and profiles, sessions, session view with blocks and activity timeline, inbox with approvals, workspaces, profiles, palette and shortcuts, install script, Docker image, docs |
 | v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
-| v0.3 Review | Worktree per session, diff view, inline comments as prompts, commit and PR, plan approval checklist |
+| v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
 | v0.4 Schedules and loops | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
 | v1.0 | Second harness (Codex CLI), stable API |
