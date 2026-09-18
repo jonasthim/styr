@@ -9,6 +9,11 @@ import { Workspaces } from './pages/Workspaces'
 import { Settings } from './pages/Settings'
 import { Profile } from './pages/Profile'
 import { Onboarding } from './components/onboarding/Onboarding'
+import { Runs } from './pages/Runs'
+import { RunDetail } from './pages/RunDetail'
+import { Triggers } from './pages/Triggers'
+import { TemplateEditor } from './pages/TemplateEditor'
+import type { RunOutcome } from './api/types'
 
 const rootRoute = createRootRoute({ component: Outlet })
 
@@ -80,6 +85,41 @@ const workspacesRoute = createRoute({
 })
 const settingsRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/settings', component: Settings })
 const profileRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/profile', component: Profile })
+
+interface RunsSearch {
+  // Filter chip state (Runs.tsx); a search param rather than local state so
+  // a filtered view is a link someone can share or bookmark.
+  outcome?: RunOutcome
+}
+
+const runsRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/runs',
+  validateSearch: (search: Record<string, unknown>): RunsSearch => ({
+    outcome: typeof search.outcome === 'string' ? (search.outcome as RunOutcome) : undefined,
+  }),
+  component: Runs,
+})
+const runDetailRoute = createRoute({ getParentRoute: () => appLayoutRoute, path: '/runs/$id', component: RunDetail })
+
+interface TriggersSearch {
+  // Which of the Triggers|Templates tabs is active (Triggers.tsx).
+  tab?: 'triggers' | 'templates'
+}
+
+const triggersRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/triggers',
+  validateSearch: (search: Record<string, unknown>): TriggersSearch => ({
+    tab: search.tab === 'templates' ? 'templates' : undefined,
+  }),
+  component: Triggers,
+})
+const templateEditorRoute = createRoute({
+  getParentRoute: () => appLayoutRoute,
+  path: '/templates/$id',
+  component: TemplateEditor,
+})
 // Task 22 onboarding: shown after first login when `me.claude_token.present`
 // is false. The redirect itself lives on the Inbox route (outside this
 // card's files); this route just renders the three-step card when reached.
@@ -96,6 +136,10 @@ const routeTree = rootRoute.addChildren([
     settingsRoute,
     profileRoute,
     welcomeRoute,
+    runsRoute,
+    runDetailRoute,
+    triggersRoute,
+    templateEditorRoute,
   ]),
 ])
 

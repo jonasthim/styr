@@ -6,7 +6,7 @@ import { useState, type ComponentType } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { FolderKanban, Inbox as InboxIcon, MessagesSquare, Settings as SettingsIcon } from 'lucide-react'
+import { Activity, FolderKanban, Inbox as InboxIcon, MessagesSquare, Settings as SettingsIcon, Zap } from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
 import { useMe } from '../../hooks/useMe'
@@ -102,6 +102,8 @@ export function Rail() {
   const items: NavItemDef[] = [
     { to: '/inbox', label: 'Inbox', icon: InboxIcon, badge: pendingCount },
     { to: '/sessions', label: 'Sessions', icon: MessagesSquare },
+    { to: '/runs', label: 'Runs', icon: Activity },
+    { to: '/triggers', label: 'Triggers', icon: Zap },
     { to: '/workspaces', label: 'Workspaces', icon: FolderKanban },
   ]
   if (me?.role === 'admin') {

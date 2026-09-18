@@ -7,6 +7,7 @@ import clsx from 'clsx'
 import { useShortcuts } from '../../hooks/useShortcuts'
 import { useThemeSync } from '../../hooks/useTheme'
 import { useUiStore } from '../../store/ui'
+import { Toaster } from '../ui'
 import { Rail } from './Rail'
 import { TabBar } from './TabBar'
 import { Palette } from './Palette'
@@ -48,6 +49,7 @@ export function Shell({ children }: { children: ReactNode }) {
       <main className={clsx('flex min-h-screen min-w-0 flex-col', isDesktop ? 'pl-14' : 'pb-14')}>{children}</main>
       <Palette open={paletteOpen} onOpenChange={setPaletteOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <Toaster />
     </div>
   )
 }
