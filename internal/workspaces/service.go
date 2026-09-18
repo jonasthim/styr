@@ -86,6 +86,18 @@ type CreateInput struct {
 	Path             string
 	DefaultProfileID string
 	Worktrees        bool
+	// BaseBranch is the branch session worktrees are created from; empty
+	// means "the checkout's current branch at that moment".
+	BaseBranch string
+	// AutoCheckpoint turns on the per-turn checkpoint commit. nil means
+	// "the default", which is on.
+	AutoCheckpoint *bool
+}
+
+// autoCheckpoint resolves the create input's tri-state auto-checkpoint flag:
+// unset means on.
+func (in CreateInput) autoCheckpoint() bool {
+	return in.AutoCheckpoint == nil || *in.AutoCheckpoint
 }
 
 // UpdateInput describes a patch to an existing workspace; nil fields are
@@ -93,6 +105,8 @@ type CreateInput struct {
 type UpdateInput struct {
 	DefaultProfileID *string
 	Worktrees        *bool
+	BaseBranch       *string
+	AutoCheckpoint   *bool
 }
 
 // visible reports whether actor may see ws: admins see everything, and
@@ -178,6 +192,8 @@ func (s *Service) createPath(ctx context.Context, actor sessions.Actor, in Creat
 		State:            domain.WorkspaceReady,
 		DefaultProfileID: in.DefaultProfileID,
 		Worktrees:        in.Worktrees,
+		BaseBranch:       in.BaseBranch,
+		AutoCheckpoint:   in.autoCheckpoint(),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -209,6 +225,8 @@ func (s *Service) createEmpty(ctx context.Context, actor sessions.Actor, in Crea
 		State:            domain.WorkspaceReady,
 		DefaultProfileID: in.DefaultProfileID,
 		Worktrees:        in.Worktrees,
+		BaseBranch:       in.BaseBranch,
+		AutoCheckpoint:   in.autoCheckpoint(),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -274,6 +292,8 @@ func (s *Service) createGit(ctx context.Context, actor sessions.Actor, in Create
 		State:            domain.WorkspaceCloning,
 		DefaultProfileID: in.DefaultProfileID,
 		Worktrees:        in.Worktrees,
+		BaseBranch:       in.BaseBranch,
+		AutoCheckpoint:   in.autoCheckpoint(),
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -319,6 +339,12 @@ func (s *Service) Update(ctx context.Context, actor sessions.Actor, id string, i
 	}
 	if in.Worktrees != nil {
 		ws.Worktrees = *in.Worktrees
+	}
+	if in.BaseBranch != nil {
+		ws.BaseBranch = *in.BaseBranch
+	}
+	if in.AutoCheckpoint != nil {
+		ws.AutoCheckpoint = *in.AutoCheckpoint
 	}
 	ws.UpdatedAt = time.Now()
 	if err := s.repo.Update(ctx, ws); err != nil {

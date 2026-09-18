@@ -516,3 +516,57 @@ func TestCloneFailureMessage_RedactsCredentialsAndBounds(t *testing.T) {
 		t.Fatalf("truncated message len = %d, want %d", len(long), maxErrorLen)
 	}
 }
+
+// Create defaults auto_checkpoint on and carries base_branch through, and
+// Update patches both.
+func TestCreateAndUpdate_ReviewFields(t *testing.T) {
+	svc, repo, _, _ := newTestService(t)
+	ctx := context.Background()
+	actor := sessions.Actor{UserID: "u1"}
+
+	ws, err := svc.Create(ctx, actor, CreateInput{
+		Name: "review", Source: "empty", DefaultProfileID: "interactive",
+		Worktrees: true, BaseBranch: "main",
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ws.BaseBranch != "main" {
+		t.Fatalf("base branch = %q, want main", ws.BaseBranch)
+	}
+	if !ws.AutoCheckpoint {
+		t.Fatal("auto checkpoint = false, want the default on")
+	}
+	stored, err := repo.Get(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if stored.BaseBranch != "main" || !stored.AutoCheckpoint {
+		t.Fatalf("stored workspace = %+v", stored)
+	}
+
+	off := false
+	base := "develop"
+	updated, err := svc.Update(ctx, actor, ws.ID, UpdateInput{BaseBranch: &base, AutoCheckpoint: &off})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	if updated.BaseBranch != "develop" || updated.AutoCheckpoint {
+		t.Fatalf("updated workspace = %+v", updated)
+	}
+}
+
+// An explicit auto_checkpoint: false at create time is honoured.
+func TestCreate_AutoCheckpointExplicitlyOff(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	off := false
+	ws, err := svc.Create(context.Background(), sessions.Actor{UserID: "u1"}, CreateInput{
+		Name: "nocp", Source: "empty", DefaultProfileID: "interactive", AutoCheckpoint: &off,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ws.AutoCheckpoint {
+		t.Fatal("auto checkpoint = true, want false")
+	}
+}

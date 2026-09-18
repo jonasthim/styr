@@ -29,6 +29,9 @@ type approvalDTO struct {
 	SnoozedUntil *time.Time      `json:"snoozed_until"`
 	UpdatedInput json.RawMessage `json:"updated_input,omitempty"`
 	Message      string          `json:"message,omitempty"`
+	// Plan is the plan markdown an ExitPlanMode approval carries, so the
+	// inbox can render the plan card; empty for every other tool.
+	Plan string `json:"plan,omitempty"`
 }
 
 // handleApprovalsList is GET /api/v1/approvals?state=pending. Only
@@ -47,6 +50,7 @@ func handleApprovalsList(d *Deps) http.HandlerFunc {
 				ID: ap.ID, SessionID: ap.SessionID, RequestID: ap.RequestID, Tool: ap.Tool, Input: ap.Input,
 				Risk: string(ap.Risk), State: string(ap.State), CreatedAt: ap.CreatedAt,
 				SnoozedUntil: ap.SnoozedUntil, UpdatedInput: ap.UpdatedInput, Message: ap.Message,
+				Plan: ap.Plan,
 			}
 			// session_title and now_line go through the service so
 			// visibility applies the same way it does to every other read.
@@ -64,6 +68,9 @@ type approvalDecideInput struct {
 	Decision     string          `json:"decision"` // "allow" | "deny"
 	UpdatedInput json.RawMessage `json:"updated_input,omitempty"`
 	Message      string          `json:"message,omitempty"`
+	// Plan is the plan markdown an ExitPlanMode approval carries, so the
+	// inbox can render the plan card; empty for every other tool.
+	Plan string `json:"plan,omitempty"`
 }
 
 // handleApprovalsDecide is POST /api/v1/approvals/{id}.

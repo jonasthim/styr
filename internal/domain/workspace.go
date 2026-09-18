@@ -42,6 +42,12 @@ type Workspace struct {
 
 	DefaultProfileID string
 	Worktrees        bool
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// BaseBranch is the branch new session worktrees are created from; ""
+	// means "whatever the checkout's current branch is at that moment".
+	BaseBranch string
+	// AutoCheckpoint makes Styr commit the worktree after every turn, so
+	// the session can be rewound turn by turn.
+	AutoCheckpoint bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }

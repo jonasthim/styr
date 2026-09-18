@@ -70,7 +70,10 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 			}
 			_ = s.repos.Sessions.UpdateStats(ctx, sess.ID, turns, cost, tokensIn, tokensOut)
 			_ = s.repos.Sessions.UpdateNow(ctx, sess.ID, "")
-			s.publishStats(sess, turns, cost, tokensIn, tokensOut)
+			// A worktree session checkpoints the turn's changes and refreshes its diff
+			// counters before the stats go out, so session.stats carries both.
+			add, del := s.afterResult(ctx, sess, turns)
+			s.publishStats(sess, turns, cost, tokensIn, tokensOut, add, del)
 			_ = s.setState(ctx, sess.ID, sess.OwnerID, domain.SessionOpen)
 		case harness.EventExit:
 			s.handleExit(ctx, sess, ev)
@@ -99,6 +102,10 @@ func (s *Service) handlePermission(ctx context.Context, sess domain.Session, ev 
 		Risk:      risk.Classify(ev.Permission.ToolName, ev.Permission.Input),
 		State:     domain.ApprovalPending,
 		CreatedAt: time.Now(),
+		// An ExitPlanMode request carries the finished plan markdown; it is stored on the
+		// approval so the inbox and session view can render the plan card without a live
+		// process (see harness.PermissionRequest.Plan).
+		Plan: ev.Permission.Plan,
 	}
 	if err := s.repos.Approvals.Create(ctx, ap); err != nil {
 		s.logger.Error("record approval failed", "session_id", sess.ID, "request_id", ev.Permission.RequestID, "error", err)
@@ -115,14 +122,17 @@ func (s *Service) handlePermission(ctx context.Context, sess domain.Session, ev 
 	}
 }
 
-// publishStats publishes the cumulative turn/cost/token counters after a
-// result event.
-func (s *Service) publishStats(sess domain.Session, turns int, cost float64, tokensIn, tokensOut int) {
+// publishStats publishes the cumulative turn/cost/token counters and the worktree's diff
+// counters after a result event. A session without a worktree reports zero added and removed
+// lines.
+func (s *Service) publishStats(sess domain.Session, turns int, cost float64, tokensIn, tokensOut, diffAdd, diffDel int) {
 	payload, err := json.Marshal(map[string]any{
 		"num_turns":  turns,
 		"cost_usd":   cost,
 		"tokens_in":  tokensIn,
 		"tokens_out": tokensOut,
+		"diff_add":   diffAdd,
+		"diff_del":   diffDel,
 	})
 	if err != nil {
 		return

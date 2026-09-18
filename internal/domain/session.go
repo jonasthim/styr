@@ -25,16 +25,22 @@ const (
 
 // Session is one Claude Code run: its harness process, state and stats.
 type Session struct {
-	ID           string
-	OwnerID      *string
-	Title        string
-	WorkspaceID  string
-	ProfileID    string
-	Harness      string
-	State        SessionState
-	Origin       Origin
-	OriginRef    string
-	Worktree     string
+	ID          string
+	OwnerID     *string
+	Title       string
+	WorkspaceID string
+	ProfileID   string
+	Harness     string
+	State       SessionState
+	Origin      Origin
+	OriginRef   string
+	// Worktree is the absolute path of the git worktree this session runs
+	// in, "" for a session that runs directly in the workspace checkout.
+	Worktree string
+	// Branch is the branch the worktree is checked out on, and BaseRef the
+	// commit it started from; both empty without a worktree.
+	Branch       string
+	BaseRef      string
 	CreatedAt    time.Time
 	LastActiveAt time.Time
 	NumTurns     int
@@ -48,4 +54,8 @@ type Session struct {
 	// SlashCommands is the command list the CLI reported on its last init message, without
 	// the leading slash. Nil until a process has started.
 	SlashCommands []string
+	// DiffAdd and DiffDel are the worktree's line counts against BaseRef as
+	// of the last turn, for the sessions list's diff badge.
+	DiffAdd int
+	DiffDel int
 }

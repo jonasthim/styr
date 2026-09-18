@@ -70,19 +70,24 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	deliveriesRepo := db.NewDeliveries(d)
 	runsRepo := db.NewRuns(d)
 	channelsRepo := db.NewNotificationChannels(d)
+	reviewCommentsRepo := db.NewReviewComments(d)
+	checkpointsRepo := db.NewCheckpoints(d)
 
 	h := claude.New(cfg.ClaudeBin)
 
 	workspacesSvc := workspaces.New(workspacesRepo, sessionsRepo, bus, cfg.UsersDir(), nil)
 
 	svc := sessions.New(sessions.Repos{
-		Sessions:   sessionsRepo,
-		Events:     eventsRepo,
-		Approvals:  approvals,
-		Workspaces: workspacesRepo,
-		Profiles:   profiles,
-		Tokens:     tokens,
-		Audit:      audit,
+		Sessions:       sessionsRepo,
+		Events:         eventsRepo,
+		Approvals:      approvals,
+		Workspaces:     workspacesRepo,
+		Profiles:       profiles,
+		Tokens:         tokens,
+		Audit:          audit,
+		ReviewComments: reviewCommentsRepo,
+		Checkpoints:    checkpointsRepo,
+		Users:          users,
 	}, h, bus, box, sessions.Options{
 		MaxOpen:     cfg.MaxOpenSessions,
 		IdleTimeout: cfg.IdleTimeout,
