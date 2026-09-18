@@ -26,6 +26,7 @@ import (
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness/fake"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/workspaces"
 )
 
 const testSecret = "0123456789abcdef0123456789abcdef" // 32+ bytes, for crypto.NewBox
@@ -58,19 +59,21 @@ type testEnv struct {
 
 	ts *httptest.Server
 
-	users      *db.Users
-	tokens     *db.Tokens
-	workspaces *db.Workspaces
-	profiles   *db.Profiles
-	sessions   *db.Sessions
-	events     *db.Events
-	approvals  *db.Approvals
-	logins     *db.LoginSessions
-	box        *crypto.Box
-	bus        *events.Bus
-	harness    *fake.Harness
-	verifier   *stubVerifier
-	svc        *sessions.Service
+	users        *db.Users
+	tokens       *db.Tokens
+	workspaces   *db.Workspaces
+	workspaceSvc *workspaces.Service
+	profiles     *db.Profiles
+	sessions     *db.Sessions
+	events       *db.Events
+	approvals    *db.Approvals
+	logins       *db.LoginSessions
+	box          *crypto.Box
+	bus          *events.Bus
+	harness      *fake.Harness
+	verifier     *stubVerifier
+	svc          *sessions.Service
+	usersDir     string
 
 	adminClient *http.Client
 	adminID     string
@@ -116,7 +119,9 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		bus:        events.New(),
 		harness:    fake.New(steps...),
 		verifier:   &stubVerifier{},
+		usersDir:   t.TempDir(),
 	}
+	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
 
 	box, err := crypto.NewBox(testSecret)
 	if err != nil {
@@ -135,7 +140,7 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	}, e.harness, e.bus, box, sessions.Options{
 		MaxOpen:     4,
 		IdleTimeout: time.Hour,
-		UsersDir:    t.TempDir(),
+		UsersDir:    e.usersDir,
 		ServiceHome: t.TempDir(),
 	})
 
@@ -145,16 +150,17 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	}
 
 	d := &api.Deps{
-		Auth:       authSvc,
-		Sessions:   e.svc,
-		Users:      e.users,
-		Tokens:     e.tokens,
-		Workspaces: e.workspaces,
-		Profiles:   e.profiles,
-		Audit:      db.NewAudit(database),
-		Bus:        e.bus,
-		Box:        box,
-		Verifier:   e.verifier,
+		Auth:           authSvc,
+		Sessions:       e.svc,
+		Users:          e.users,
+		Tokens:         e.tokens,
+		Workspaces:     e.workspaceSvc,
+		WorkspacesRepo: e.workspaces,
+		Profiles:       e.profiles,
+		Audit:          db.NewAudit(database),
+		Bus:            e.bus,
+		Box:            box,
+		Verifier:       e.verifier,
 		Status: func() api.StatusInfo {
 			return api.StatusInfo{Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0}
 		},
@@ -235,7 +241,11 @@ func (e *testEnv) seedWorkspace(profileID string) domain.Workspace {
 	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
 		e.t.Fatalf("mkdir .git: %v", err)
 	}
-	ws := domain.Workspace{ID: "ws-" + profileID, Name: "ws-" + profileID, Path: dir, DefaultProfileID: profileID, CreatedAt: time.Now()}
+	now := time.Now()
+	ws := domain.Workspace{
+		ID: "ws-" + profileID, Name: "ws-" + profileID, Path: dir, DefaultProfileID: profileID,
+		Source: domain.WorkspaceSourcePath, State: domain.WorkspaceReady, CreatedAt: now, UpdatedAt: now,
+	}
 	if err := e.workspaces.Create(context.Background(), ws); err != nil {
 		e.t.Fatalf("create workspace: %v", err)
 	}

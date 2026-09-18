@@ -148,6 +148,12 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 	if err != nil {
 		return domain.Session{}, err
 	}
+	if !workspaceVisible(actor, *ws) {
+		return domain.Session{}, fmt.Errorf("workspace %s: %w", in.WorkspaceID, domain.ErrNotFound)
+	}
+	if ws.State != domain.WorkspaceReady {
+		return domain.Session{}, fmt.Errorf("%w: workspace is not ready", domain.ErrConflict)
+	}
 	profile, err := s.repos.Profiles.Get(ctx, in.ProfileID)
 	if err != nil {
 		return domain.Session{}, err
@@ -346,6 +352,14 @@ func (s *Service) Shutdown(ctx context.Context) error {
 // everyone can see sessions with no owner.
 func visible(actor Actor, sess domain.Session) bool {
 	return actor.IsAdmin || sess.OwnerID == nil || *sess.OwnerID == actor.UserID
+}
+
+// workspaceVisible reports whether actor may see ws, by the same rule as
+// visible above. Duplicated (rather than shared with internal/workspaces)
+// so internal/sessions never has to import internal/workspaces: see
+// Service.Create's visibility and readiness check.
+func workspaceVisible(actor Actor, ws domain.Workspace) bool {
+	return actor.IsAdmin || ws.OwnerID == nil || *ws.OwnerID == actor.UserID
 }
 
 // getVisible loads a session and enforces visibility, returning

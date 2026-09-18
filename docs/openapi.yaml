@@ -276,11 +276,15 @@ paths:
   /api/v1/workspaces:
     get:
       summary: List workspaces
+      description: >
+        Every workspace visible to the current user: workspaces they own,
+        shared (admin-registered) workspaces, and — for an admin — every
+        workspace.
       operationId: listWorkspaces
       tags: [workspaces]
       responses:
         "200":
-          description: Every workspace
+          description: Every visible workspace
           content:
             application/json:
               schema:
@@ -290,8 +294,17 @@ paths:
     post:
       summary: Create a workspace
       description: >
-        path must exist, be a directory, and contain a .git entry
-        (directory or file); otherwise 422 invalid_path.
+        Styr manages a workspace's directory unless source is "path". For
+        source "git" the workspace is created in state "cloning" and
+        cloned in the background (poll GET /workspaces/{id} or watch
+        "workspace.state" on the SSE stream for the transition to "ready"
+        or "failed"). For source "empty" a fresh directory is created and
+        `git init -b main` is run synchronously. For source "path" — an
+        existing absolute server path, shared by everyone — the caller
+        must be an admin, and path must exist, be a directory, and
+        contain a .git entry (directory or file); otherwise 422
+        invalid_path. default_profile_id defaults to "interactive" when
+        omitted.
       operationId: createWorkspace
       tags: [workspaces]
       requestBody:
@@ -303,13 +316,23 @@ paths:
               properties:
                 name:
                   type: string
+                source:
+                  type: string
+                  enum: [git, path, empty]
+                repo_url:
+                  type: string
+                  description: Required when source is "git".
+                branch:
+                  type: string
+                  description: Optional, source "git" only.
                 path:
                   type: string
+                  description: Required when source is "path".
                 default_profile_id:
                   type: string
                 worktrees:
                   type: boolean
-              required: [name, path, default_profile_id]
+              required: [name, source]
       responses:
         "201":
           description: Created
@@ -317,18 +340,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Workspace"
-        "422":
-          description: Invalid path
+        "403":
+          description: source "path" was requested by a non-admin
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorBody"
-        "403":
-          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: >
+            invalid_url (source "git", a malformed repo_url), invalid_path
+            (source "path", not an existing git directory), or name_taken
+            (the name is already used by another workspace owned by this
+            user, or by another shared workspace)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 
   /api/v1/workspaces/{id}:
+    get:
+      summary: Get a workspace
+      operationId: getWorkspace
+      tags: [workspaces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "404":
+          $ref: "#/components/responses/NotFound"
     patch:
       summary: Update a workspace
+      description: The owner or an admin may update default_profile_id and/or worktrees.
       operationId: patchWorkspace
       tags: [workspaces]
       parameters:
@@ -343,10 +394,6 @@ paths:
             schema:
               type: object
               properties:
-                name:
-                  type: string
-                path:
-                  type: string
                 default_profile_id:
                   type: string
                 worktrees:
@@ -358,8 +405,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Workspace"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
     delete:
       summary: Delete a workspace
+      description: >
+        The owner or an admin may delete a workspace. For a managed
+        workspace (source "git" or "empty") its directory is removed too;
+        a shared "path" workspace's directory is left alone.
       operationId: deleteWorkspace
       tags: [workspaces]
       parameters:
@@ -371,6 +426,48 @@ paths:
       responses:
         "204":
           description: Deleted
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: A session on this workspace is still open, running or waiting
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/workspaces/{id}/retry:
+    post:
+      summary: Retry a failed clone
+      description: >
+        Re-runs the clone for a source "git" workspace currently in state
+        "failed", transitioning it back to "cloning".
+      operationId: retryWorkspace
+      tags: [workspaces]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The workspace, now in state "cloning"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Workspace"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The workspace is not a failed git-source workspace
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
 
   /api/v1/profiles:
     get:
@@ -526,6 +623,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Session"
+        "404":
+          description: workspace_id is not visible to the current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "409":
+          description: The workspace is not yet ready (e.g. still cloning)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
         "422":
           description: >
             No Claude token available for the current user (add one in
@@ -863,15 +972,54 @@ components:
       properties:
         id:
           type: string
+        owner_id:
+          type: [string, "null"]
+          description: null for a shared, admin-registered "path" workspace.
         name:
           type: string
         path:
           type: string
+        source:
+          type: string
+          enum: [git, path, empty]
+        repo_url:
+          type: string
+        branch:
+          type: string
+        managed:
+          type: boolean
+          description: Whether Styr created path and may delete it.
+        state:
+          type: string
+          enum: [cloning, ready, failed]
+        error:
+          type: string
+          description: The last clone failure's message, when state is "failed".
         default_profile_id:
           type: string
         worktrees:
           type: boolean
-      required: [id, name, path, default_profile_id, worktrees]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - owner_id
+        - name
+        - path
+        - source
+        - repo_url
+        - branch
+        - managed
+        - state
+        - error
+        - default_profile_id
+        - worktrees
+        - created_at
+        - updated_at
 
     Profile:
       type: object

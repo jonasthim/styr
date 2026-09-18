@@ -76,7 +76,10 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 		t.Fatalf("set admin token: %v", err)
 	}
 
-	ws := domain.Workspace{ID: testWorkspaceID, Name: "test-ws", Path: t.TempDir(), DefaultProfileID: "interactive", CreatedAt: now}
+	ws := domain.Workspace{
+		ID: testWorkspaceID, Name: "test-ws", Path: t.TempDir(), DefaultProfileID: "interactive",
+		Source: domain.WorkspaceSourcePath, State: domain.WorkspaceReady, CreatedAt: now, UpdatedAt: now,
+	}
 	if err := repos.Workspaces.Create(ctx, ws); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
@@ -132,6 +135,60 @@ func TestCreate_OwnerWithoutTokenRefused(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "add a Claude token in your profile") {
 		t.Fatalf("unexpected message: %v", err)
+	}
+}
+
+// Create must refuse a workspace that is not yet ready (e.g. still
+// cloning), before ever starting a process for it.
+func TestCreate_WorkspaceNotReady_Refused(t *testing.T) {
+	svc, repos, h := newService(t)
+	owner := testMemberID
+
+	cloningWS := domain.Workspace{
+		ID: "ws-cloning", Name: "cloning-ws", Path: t.TempDir(), DefaultProfileID: "interactive",
+		Source: domain.WorkspaceSourceGit, State: domain.WorkspaceCloning, CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repos.Workspaces.Create(context.Background(), cloningWS); err != nil {
+		t.Fatalf("create cloning workspace: %v", err)
+	}
+
+	_, err := svc.Create(context.Background(), Actor{UserID: testMemberID}, CreateInput{
+		WorkspaceID: cloningWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &owner,
+	})
+	if !errors.Is(err, domain.ErrConflict) {
+		t.Fatalf("Create against cloning workspace: err = %v, want ErrConflict", err)
+	}
+	if !strings.Contains(err.Error(), "workspace is not ready") {
+		t.Fatalf("unexpected message: %v", err)
+	}
+	if len(h.Procs) != 0 {
+		t.Fatalf("expected no process started, got %d", len(h.Procs))
+	}
+}
+
+// Create must refuse a workspace the actor cannot see (owned by someone
+// else) as domain.ErrNotFound, before checking readiness.
+func TestCreate_WorkspaceNotVisible_NotFound(t *testing.T) {
+	svc, repos, _ := newService(t)
+	adminOwner := testAdminID
+
+	othersWS := domain.Workspace{
+		ID: "ws-others", Name: "others-ws", Path: t.TempDir(), DefaultProfileID: "interactive",
+		OwnerID: &adminOwner, Source: domain.WorkspaceSourceEmpty, Managed: true, State: domain.WorkspaceReady,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repos.Workspaces.Create(context.Background(), othersWS); err != nil {
+		t.Fatalf("create other's workspace: %v", err)
+	}
+
+	memberOwner := testMemberID
+	_, err := svc.Create(context.Background(), Actor{UserID: testMemberID}, CreateInput{
+		WorkspaceID: othersWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &memberOwner,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Create against invisible workspace: err = %v, want ErrNotFound", err)
 	}
 }
 
