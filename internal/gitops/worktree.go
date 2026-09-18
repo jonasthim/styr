@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,6 +12,10 @@ import (
 
 // branchRe matches an allowed Styr session branch name.
 var branchRe = regexp.MustCompile(`^styr/[a-z0-9-]{1,60}$`)
+
+// ErrNotWorktree is returned by WorktreeInfo when dir is not a worktree
+// currently registered on the repo.
+var ErrNotWorktree = errors.New("gitops: not a registered worktree")
 
 // CurrentBranch returns the repo's currently checked-out branch (e.g. for
 // use as AddWorktree's base when the caller wants "whatever HEAD is now").
@@ -149,4 +154,22 @@ func (r Repo) worktreeBranch(ctx context.Context, env []string, dir string) (str
 		}
 	}
 	return "", nil
+}
+
+// WorktreeInfo looks up dir among r's registered worktrees (git worktree
+// list --porcelain) and returns a Worktree carrying its path and branch.
+// It never sets BaseRef: git worktree list carries no record of the commit
+// a worktree started from, so a caller reusing an existing worktree (a
+// session created on another session's worktree) must recover that
+// separately, e.g. from the session row that first created it. Returns
+// ErrNotWorktree when dir is not currently registered.
+func (r Repo) WorktreeInfo(ctx context.Context, dir string) (Worktree, error) {
+	branch, err := r.worktreeBranch(ctx, r.env(), dir)
+	if err != nil {
+		return Worktree{}, err
+	}
+	if branch == "" {
+		return Worktree{}, fmt.Errorf("%w: %s", ErrNotWorktree, dir)
+	}
+	return Worktree{Path: dir, Branch: branch}, nil
 }

@@ -163,7 +163,10 @@ func (s *Service) refreshDiffStats(ctx context.Context, sess domain.Session, w g
 
 // Discard throws the session's work away: its process is closed, the worktree directory and
 // its branch are removed, the worktree fields are cleared and the session is closed. It
-// refuses while the session is running or waiting, like Rewind.
+// refuses while the session is running or waiting, like Rewind, and — since a pipeline's
+// "worktree: shared" step leaves several sessions pointing at the same worktree — while another
+// session is still open, running or waiting on that same worktree; it removes the worktree only
+// once this is the last such session.
 func (s *Service) Discard(ctx context.Context, actor Actor, id string) error {
 	sess, _, err := s.reviewTarget(ctx, actor, id)
 	if err != nil {
@@ -171,6 +174,13 @@ func (s *Service) Discard(ctx context.Context, actor Actor, id string) error {
 	}
 	if busy(sess.State) {
 		return fmt.Errorf("%w: the session is still working", domain.ErrConflict)
+	}
+	inUse, err := s.repos.Sessions.CountByWorktree(ctx, sess.Worktree, sess.ID, worktreeInUseStates)
+	if err != nil {
+		return err
+	}
+	if inUse > 0 {
+		return fmt.Errorf("%w: worktree in use by another session", domain.ErrConflict)
 	}
 	ws, err := s.repos.Workspaces.Get(ctx, sess.WorkspaceID)
 	if err != nil {

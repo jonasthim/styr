@@ -26,27 +26,30 @@ func registerSessionsRoutes(r chi.Router, d *Deps) {
 }
 
 type sessionDTO struct {
-	ID           string    `json:"id"`
-	OwnerID      *string   `json:"owner_id"`
-	Title        string    `json:"title"`
-	WorkspaceID  string    `json:"workspace_id"`
-	ProfileID    string    `json:"profile_id"`
-	Harness      string    `json:"harness"`
-	State        string    `json:"state"`
-	Origin       string    `json:"origin"`
-	OriginRef    string    `json:"origin_ref"`
-	Worktree     string    `json:"worktree"`
-	Branch       string    `json:"branch"`
-	BaseRef      string    `json:"base_ref"`
-	CreatedAt    time.Time `json:"created_at"`
-	LastActiveAt time.Time `json:"last_active_at"`
-	NumTurns     int       `json:"num_turns"`
-	CostUSD      float64   `json:"cost_usd"`
-	TokensIn     int       `json:"tokens_in"`
-	TokensOut    int       `json:"tokens_out"`
-	NowLine      string    `json:"now_line"`
-	Model        string    `json:"model"`
-	Effort       string    `json:"effort"`
+	ID          string  `json:"id"`
+	OwnerID     *string `json:"owner_id"`
+	Title       string  `json:"title"`
+	WorkspaceID string  `json:"workspace_id"`
+	ProfileID   string  `json:"profile_id"`
+	Harness     string  `json:"harness"`
+	State       string  `json:"state"`
+	Origin      string  `json:"origin"`
+	OriginRef   string  `json:"origin_ref"`
+	Worktree    string  `json:"worktree"`
+	Branch      string  `json:"branch"`
+	BaseRef     string  `json:"base_ref"`
+	// WorktreeShared reports whether this session's worktree started life as another
+	// session's (created with worktree_path), rather than being created fresh for it.
+	WorktreeShared bool      `json:"worktree_shared"`
+	CreatedAt      time.Time `json:"created_at"`
+	LastActiveAt   time.Time `json:"last_active_at"`
+	NumTurns       int       `json:"num_turns"`
+	CostUSD        float64   `json:"cost_usd"`
+	TokensIn       int       `json:"tokens_in"`
+	TokensOut      int       `json:"tokens_out"`
+	NowLine        string    `json:"now_line"`
+	Model          string    `json:"model"`
+	Effort         string    `json:"effort"`
 	// SlashCommands is what the CLI reported on its last init message, without the leading
 	// slash; the composer's slash menu is built from it.
 	SlashCommands []string `json:"slash_commands"`
@@ -60,7 +63,8 @@ func sessionDTOFrom(s domain.Session) sessionDTO {
 	return sessionDTO{
 		ID: s.ID, OwnerID: s.OwnerID, Title: s.Title, WorkspaceID: s.WorkspaceID, ProfileID: s.ProfileID,
 		Harness: s.Harness, State: string(s.State), Origin: string(s.Origin), OriginRef: s.OriginRef,
-		Worktree: s.Worktree, Branch: s.Branch, BaseRef: s.BaseRef, CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, NumTurns: s.NumTurns,
+		Worktree: s.Worktree, Branch: s.Branch, BaseRef: s.BaseRef, WorktreeShared: s.WorktreeShared,
+		CreatedAt: s.CreatedAt, LastActiveAt: s.LastActiveAt, NumTurns: s.NumTurns,
 		CostUSD: s.CostUSD, TokensIn: s.TokensIn, TokensOut: s.TokensOut, NowLine: s.NowLine, Model: s.Model,
 		Effort: s.Effort, SlashCommands: commandList(s.SlashCommands),
 		DiffAdd: s.DiffAdd, DiffDel: s.DiffDel,
@@ -112,6 +116,9 @@ type sessionCreateInput struct {
 	Prompt      string `json:"prompt"`
 	Model       string `json:"model"`
 	Effort      string `json:"effort"`
+	// WorktreePath starts the session on an existing worktree (another session's) instead of
+	// a fresh one; the workspace must have worktrees enabled. See sessions.CreateInput.
+	WorktreePath string `json:"worktree_path"`
 }
 
 // handleSessionsCreate is POST /api/v1/sessions: the session is owned by
@@ -126,14 +133,15 @@ func handleSessionsCreate(d *Deps) http.HandlerFunc {
 		actor := actorFrom(r)
 		ownerID := actor.UserID
 		sess, err := d.Sessions.Create(r.Context(), actor, sessions.CreateInput{
-			WorkspaceID: in.WorkspaceID,
-			ProfileID:   in.ProfileID,
-			Title:       in.Title,
-			Prompt:      in.Prompt,
-			Origin:      domain.OriginUI,
-			Owner:       &ownerID,
-			Model:       in.Model,
-			Effort:      in.Effort,
+			WorkspaceID:  in.WorkspaceID,
+			ProfileID:    in.ProfileID,
+			Title:        in.Title,
+			Prompt:       in.Prompt,
+			Origin:       domain.OriginUI,
+			Owner:        &ownerID,
+			Model:        in.Model,
+			Effort:       in.Effort,
+			WorktreePath: in.WorktreePath,
 		})
 		if err != nil {
 			WriteError(w, err)

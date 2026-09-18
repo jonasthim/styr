@@ -229,3 +229,115 @@ func TestSessions_UpdateEffortNotFound(t *testing.T) {
 		t.Fatalf("UpdateEffort on a missing session = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSessions_SetWorktreeShared(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	ws := sessionsTestFixture(t, ctx, d)
+	sessions := NewSessions(d)
+
+	sess := newTestSession(ws.ID, nil, domain.SessionOpen)
+	if err := sessions.Create(ctx, sess); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.WorktreeShared {
+		t.Fatalf("WorktreeShared = true on a fresh session, want false")
+	}
+
+	if err := sessions.SetWorktreeShared(ctx, sess.ID, true); err != nil {
+		t.Fatalf("SetWorktreeShared: %v", err)
+	}
+	got, err = sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("Get after SetWorktreeShared: %v", err)
+	}
+	if !got.WorktreeShared {
+		t.Fatalf("WorktreeShared = false after SetWorktreeShared(true)")
+	}
+
+	if err := sessions.SetWorktreeShared(ctx, "missing", true); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("SetWorktreeShared(missing) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSessions_GetByWorktree(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	ws := sessionsTestFixture(t, ctx, d)
+	sessions := NewSessions(d)
+
+	owner := newTestSession(ws.ID, nil, domain.SessionOpen)
+	if err := sessions.Create(ctx, owner); err != nil {
+		t.Fatalf("Create owner: %v", err)
+	}
+	if err := sessions.SetWorktree(ctx, owner.ID, "/wt/shared", "styr/owner", "deadbeef"); err != nil {
+		t.Fatalf("SetWorktree owner: %v", err)
+	}
+
+	got, err := sessions.GetByWorktree(ctx, "/wt/shared")
+	if err != nil {
+		t.Fatalf("GetByWorktree: %v", err)
+	}
+	if got.ID != owner.ID || got.BaseRef != "deadbeef" {
+		t.Fatalf("GetByWorktree = %+v, want the owning session with base_ref deadbeef", got)
+	}
+
+	if _, err := sessions.GetByWorktree(ctx, "/wt/nope"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetByWorktree(unknown path) = %v, want ErrNotFound", err)
+	}
+}
+
+func TestSessions_CountByWorktree(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	ws := sessionsTestFixture(t, ctx, d)
+	sessions := NewSessions(d)
+
+	a := newTestSession(ws.ID, nil, domain.SessionOpen)
+	b := newTestSession(ws.ID, nil, domain.SessionRunning)
+	c := newTestSession(ws.ID, nil, domain.SessionClosed)
+	for _, s := range []domain.Session{a, b, c} {
+		if err := sessions.Create(ctx, s); err != nil {
+			t.Fatalf("Create %q: %v", s.ID, err)
+		}
+		if err := sessions.SetWorktree(ctx, s.ID, "/wt/shared", "styr/shared", "deadbeef"); err != nil {
+			t.Fatalf("SetWorktree %q: %v", s.ID, err)
+		}
+	}
+
+	liveStates := []domain.SessionState{domain.SessionOpen, domain.SessionRunning, domain.SessionWaiting}
+
+	// From a's point of view, b (running) is another live user; c (closed) is not.
+	n, err := sessions.CountByWorktree(ctx, "/wt/shared", a.ID, liveStates)
+	if err != nil {
+		t.Fatalf("CountByWorktree: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("CountByWorktree(exclude a) = %d, want 1 (only b)", n)
+	}
+
+	// Once b closes, nobody else is using the worktree.
+	if err := sessions.UpdateState(ctx, b.ID, domain.SessionClosed); err != nil {
+		t.Fatalf("close b: %v", err)
+	}
+	n, err = sessions.CountByWorktree(ctx, "/wt/shared", a.ID, liveStates)
+	if err != nil {
+		t.Fatalf("CountByWorktree after close: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("CountByWorktree(exclude a) after b closed = %d, want 0", n)
+	}
+
+	// A different path has no users at all.
+	n, err = sessions.CountByWorktree(ctx, "/wt/other", a.ID, liveStates)
+	if err != nil {
+		t.Fatalf("CountByWorktree other path: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("CountByWorktree(other path) = %d, want 0", n)
+	}
+}

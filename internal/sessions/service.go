@@ -165,6 +165,14 @@ type CreateInput struct {
 	// without a second table; OriginRef keeps its existing meaning for
 	// every other origin.
 	RunID string
+
+	// WorktreePath starts the session in an existing git worktree —
+	// another session's, under <workspace>/.styr/worktrees/ — instead of
+	// creating a fresh one, so a pipeline's "worktree: shared" step can
+	// continue where the previous step left off. Empty (the default) gets
+	// a fresh worktree as before. The workspace must have worktrees
+	// enabled; otherwise Create returns domain.ErrInvalid.
+	WorktreePath string
 }
 
 // startOptions carries the per-session harness extras supplied at Create
@@ -242,8 +250,20 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 	}
 
 	// A worktree-enabled workspace gets one git worktree per session, created before the
-	// process starts so the CLI's cwd is the worktree from its very first turn.
-	if ws.Worktrees {
+	// process starts so the CLI's cwd is the worktree from its very first turn — unless the
+	// caller names an existing worktree to continue in (a pipeline's "worktree: shared" step).
+	switch {
+	case in.WorktreePath != "" && !ws.Worktrees:
+		_ = s.repos.Sessions.UpdateState(ctx, sess.ID, domain.SessionFailed)
+		return domain.Session{}, fmt.Errorf("%w: workspace does not have worktrees enabled", domain.ErrInvalid)
+	case in.WorktreePath != "":
+		withWorktree, err := s.attachWorktree(ctx, sess, *ws, in.WorktreePath)
+		if err != nil {
+			_ = s.repos.Sessions.UpdateState(ctx, sess.ID, domain.SessionFailed)
+			return domain.Session{}, err
+		}
+		sess = withWorktree
+	case ws.Worktrees:
 		withWorktree, err := s.createWorktree(ctx, sess, *ws)
 		if err != nil {
 			_ = s.repos.Sessions.UpdateState(ctx, sess.ID, domain.SessionFailed)

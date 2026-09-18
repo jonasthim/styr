@@ -6,7 +6,9 @@ package sessions
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -29,6 +31,12 @@ const branchSlugMax = 40
 // shortIDLen is how many leading characters of the session id go into its
 // branch name.
 const shortIDLen = 8
+
+// worktreeInUseStates are the session states that count as "still using its
+// worktree" for Discard's shared-worktree conflict check (see
+// review_actions.go): a session in any other state (closed, failed) is
+// done with its worktree even though the row still names it.
+var worktreeInUseStates = []domain.SessionState{domain.SessionOpen, domain.SessionRunning, domain.SessionWaiting}
 
 // repoFor returns the gitops handle for a workspace's own checkout.
 func repoFor(ws domain.Workspace) gitops.Repo { return gitops.Repo{Path: ws.Path} }
@@ -126,6 +134,67 @@ func baseCommitOf(ctx context.Context, dir, branch string) (string, error) {
 		return "", fmt.Errorf("resolve worktree base commit: %w", err)
 	}
 	return sha, nil
+}
+
+// attachWorktree records sess as running in path, an existing git worktree
+// another session already created, instead of making a fresh one: the
+// "worktree: shared" step of a pipeline continuing the previous step's
+// work (see CreateInput.WorktreePath). path must already exist as a
+// registered worktree under ws's worktrees root; its branch comes from
+// git, and its base commit from the session that originally created it
+// (git worktree list carries no base information of its own).
+func (s *Service) attachWorktree(ctx context.Context, sess domain.Session, ws domain.Workspace, path string) (domain.Session, error) {
+	if err := validateWorktreePath(ws, path); err != nil {
+		return sess, err
+	}
+	info, err := repoFor(ws).WorktreeInfo(ctx, path)
+	if err != nil {
+		if errors.Is(err, gitops.ErrNotWorktree) {
+			return sess, fmt.Errorf("%w: %s is not a git worktree of this workspace", domain.ErrInvalid, path)
+		}
+		return sess, fmt.Errorf("attach worktree: %w", err)
+	}
+	owner, err := s.repos.Sessions.GetByWorktree(ctx, path)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return sess, fmt.Errorf("%w: %s has no owning session to take a base commit from", domain.ErrInvalid, path)
+		}
+		return sess, fmt.Errorf("attach worktree: %w", err)
+	}
+	if err := s.repos.Sessions.SetWorktree(ctx, sess.ID, path, info.Branch, owner.BaseRef); err != nil {
+		return sess, err
+	}
+	if err := s.repos.Sessions.SetWorktreeShared(ctx, sess.ID, true); err != nil {
+		return sess, err
+	}
+	sess.Worktree, sess.Branch, sess.BaseRef, sess.WorktreeShared = path, info.Branch, owner.BaseRef, true
+	return sess, nil
+}
+
+// validateWorktreePath rejects a CreateInput.WorktreePath that is not a
+// directory strictly inside ws's own worktrees root
+// (<workspace>/.styr/worktrees/): outside that root entirely (an escape,
+// or an unrelated absolute path), the root itself, or a path that simply
+// does not exist. It does not check with git; attachWorktree's
+// gitops.Repo.WorktreeInfo call does that.
+func validateWorktreePath(ws domain.Workspace, path string) error {
+	root, err := filepath.Abs(filepath.Join(ws.Path, filepath.FromSlash(worktreesSubdir)))
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve the workspace's worktrees directory", domain.ErrInvalid)
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("%w: cannot resolve worktree path %q", domain.ErrInvalid, path)
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return fmt.Errorf("%w: worktree path %q is not under the workspace's worktrees directory", domain.ErrInvalid, path)
+	}
+	info, err := os.Stat(abs)
+	if err != nil || !info.IsDir() {
+		return fmt.Errorf("%w: worktree path %q does not exist", domain.ErrInvalid, path)
+	}
+	return nil
 }
 
 // afterResult runs the per-turn worktree bookkeeping once a turn has finished: an optional
