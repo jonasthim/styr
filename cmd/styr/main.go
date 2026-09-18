@@ -21,9 +21,12 @@ func run(args []string, stdout io.Writer) int {
 	case "version":
 		fmt.Fprintf(stdout, "styr %s (%s)\n", version, commit)
 		return 0
-	case "serve", "migrate", "doctor":
-		fmt.Fprintf(stdout, "%s: not implemented yet\n", args[0])
-		return 1
+	case "serve":
+		return runServe(stdout)
+	case "migrate":
+		return runMigrate(stdout)
+	case "doctor":
+		return runDoctor(stdout)
 	default:
 		fmt.Fprintf(stdout, "unknown command %q\nusage: styr [serve|migrate|doctor|version]\n", args[0])
 		return 2
