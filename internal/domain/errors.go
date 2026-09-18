@@ -12,3 +12,12 @@ var (
 	ErrForbidden = errors.New("forbidden")
 	ErrInvalid   = errors.New("invalid")
 )
+
+// Sentinel errors returned by the inbound trigger router
+// (internal/triggers), mapped by the HTTP layer to 404, 401 and 413
+// respectively.
+var (
+	ErrUnknownTrigger = errors.New("unknown trigger")
+	ErrBadSecret      = errors.New("bad secret")
+	ErrTooLarge       = errors.New("payload too large")
+)

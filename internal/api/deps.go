@@ -12,7 +12,9 @@ import (
 	"github.com/jonasthim/styr/internal/crypto"
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/events"
+	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/triggers"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
 
@@ -42,15 +44,20 @@ type Deps struct {
 	Workspaces     *workspaces.Service
 	WorkspacesRepo *db.Workspaces
 	Sessions       *sessions.Service
-	Users          *db.Users
-	Tokens         *db.Tokens
-	Profiles       *db.Profiles
-	Audit          *db.Audit
-	Bus            *events.Bus
-	Box            *crypto.Box
-	Verifier       TokenVerifier
-	Status         func() StatusInfo
-	Version        string
+	// Triggers owns templates, trigger endpoints and the inbound
+	// `/hooks/{slug}` pipeline; Runs is the unattended run engine behind
+	// it, serving the /runs routes.
+	Triggers *triggers.Service
+	Runs     *runs.Engine
+	Users    *db.Users
+	Tokens   *db.Tokens
+	Profiles *db.Profiles
+	Audit    *db.Audit
+	Bus      *events.Bus
+	Box      *crypto.Box
+	Verifier TokenVerifier
+	Status   func() StatusInfo
+	Version  string
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not

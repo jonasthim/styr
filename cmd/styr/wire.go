@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -16,13 +18,26 @@ import (
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness/claude"
+	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/triggers"
 	"github.com/jonasthim/styr/internal/workspaces"
 )
 
 // probeVersionTimeout bounds the one-time `claude --version` call at
 // startup used to populate the status endpoint.
 const probeVersionTimeout = 10 * time.Second
+
+// runTimeout is how long an unattended run may stay running before the run
+// engine closes it out as timed out. Not configurable yet: the v0.2 plan
+// fixes it at 30 minutes, matching the unattended profiles' approval
+// timeout budget.
+const runTimeout = 30 * time.Minute
+
+// notifyTimeout bounds one outbound notification HTTP attempt; notify
+// applies its own per-attempt timeout on top, this is the client ceiling.
+const notifyTimeout = 30 * time.Second
 
 // wireServices is Styr's composition root: it builds every repository and
 // service from a loaded config, an already-open database and a shared event
@@ -43,6 +58,11 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	eventsRepo := db.NewEvents(d)
 	approvals := db.NewApprovals(d)
 	audit := db.NewAudit(d)
+	templatesRepo := db.NewTemplates(d)
+	triggersRepo := db.NewTriggers(d)
+	deliveriesRepo := db.NewDeliveries(d)
+	runsRepo := db.NewRuns(d)
+	channelsRepo := db.NewNotificationChannels(d)
 
 	h := claude.New(cfg.ClaudeBin)
 
@@ -62,6 +82,24 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		UsersDir:    cfg.UsersDir(),
 		ServiceHome: filepath.Join(cfg.UsersDir(), "__service__"),
 	})
+
+	// The run engine turns a rendered template into an unattended session
+	// and follows it to an outcome; the trigger router is the inbound side
+	// that feeds it. notify is the outbound side both share.
+	notifier := notify.New(&http.Client{Timeout: notifyTimeout}, slog.Default())
+	runsEngine := runs.New(runs.Repos{
+		Runs:       runsRepo,
+		Templates:  templatesRepo,
+		Sessions:   sessionsRepo,
+		Channels:   channelsRepo,
+		Deliveries: deliveriesRepo,
+		Events:     eventsRepo,
+	}, svc, bus, notifier, box, cfg.BaseURL, runTimeout, slog.Default())
+	triggersSvc := triggers.New(triggers.Repos{
+		Templates:  templatesRepo,
+		Triggers:   triggersRepo,
+		Deliveries: deliveriesRepo,
+	}, runsEngine, box, slog.Default(), nil)
 
 	// devUser only enables the dev auto-login bypass when the server is
 	// actually running in dev mode, even if a stale dev_user lingers in a
@@ -92,6 +130,8 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	deps := &api.Deps{
 		Auth:           authSvc,
 		Sessions:       svc,
+		Triggers:       triggersSvc,
+		Runs:           runsEngine,
 		Users:          users,
 		Tokens:         tokens,
 		Workspaces:     workspacesSvc,

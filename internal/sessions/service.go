@@ -139,6 +139,42 @@ type CreateInput struct {
 	Origin      domain.Origin
 	OriginRef   string
 	Owner       *string // nil for an unattended session, run under the service token
+
+	// JSONSchema and SystemPrompt are passed straight through to
+	// harness.StartSpec (--json-schema and --append-system-prompt): an
+	// unattended run started from a template constrains its final turn to
+	// the template's report schema and appends the template's extra
+	// instructions. Both are optional.
+	JSONSchema   string
+	SystemPrompt string
+
+	// RunID is the internal/runs run this session belongs to. For an
+	// unattended origin (webhook, schedule, pipeline) it becomes the
+	// session's OriginRef, so a session can be traced back to its run
+	// without a second table; OriginRef keeps its existing meaning for
+	// every other origin.
+	RunID string
+}
+
+// startOptions carries the per-session harness extras supplied at Create
+// time down to startProcess. A resume (Send on a closed session) passes the
+// zero value: the schema and the appended system prompt only shape the
+// first process, and sessions does not persist them.
+type startOptions struct {
+	JSONSchema   string
+	SystemPrompt string
+}
+
+// originRef returns the OriginRef to persist for in: an unattended origin
+// records its run id, every other origin keeps the caller's OriginRef.
+func (in CreateInput) originRef() string {
+	switch in.Origin {
+	case domain.OriginWebhook, domain.OriginSchedule, domain.OriginPipeline:
+		if in.RunID != "" {
+			return in.RunID
+		}
+	}
+	return in.OriginRef
 }
 
 // Create persists a new session, starts its harness process and sends the
@@ -173,7 +209,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		Harness:      string(s.h.Kind()),
 		State:        domain.SessionRunning,
 		Origin:       in.Origin,
-		OriginRef:    in.OriginRef,
+		OriginRef:    in.originRef(),
 		CreatedAt:    now,
 		LastActiveAt: now,
 	}
@@ -181,7 +217,8 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		return domain.Session{}, err
 	}
 
-	if err := s.startProcess(ctx, sess, *ws, *profile, false, in.Prompt); err != nil {
+	opts := startOptions{JSONSchema: in.JSONSchema, SystemPrompt: in.SystemPrompt}
+	if err := s.startProcess(ctx, sess, *ws, *profile, false, in.Prompt, opts); err != nil {
 		_ = s.repos.Sessions.UpdateState(ctx, sess.ID, domain.SessionFailed)
 		return domain.Session{}, err
 	}
@@ -238,7 +275,7 @@ func (s *Service) Send(ctx context.Context, actor Actor, id, text string) error 
 	if err != nil {
 		return err
 	}
-	if err := s.startProcess(ctx, sess, *ws, *profile, true, text); err != nil {
+	if err := s.startProcess(ctx, sess, *ws, *profile, true, text, startOptions{}); err != nil {
 		return err
 	}
 	return nil
@@ -420,7 +457,7 @@ func (s *Service) homeDir(ownerID *string) (string, error) {
 // process for sess, registers it, launches its pump goroutine and sends the
 // first message. On any failure before the process starts, the slot is
 // released.
-func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws domain.Workspace, profile domain.Profile, resume bool, firstMessage string) error {
+func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws domain.Workspace, profile domain.Profile, resume bool, firstMessage string, opts startOptions) error {
 	token, err := s.resolveToken(ctx, sess.OwnerID)
 	if err != nil {
 		return err
@@ -448,6 +485,8 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 			DisallowedTools: profile.DisallowedTools,
 			MaxTurns:        profile.MaxTurns,
 		},
+		JSONSchema:   opts.JSONSchema,
+		SystemPrompt: opts.SystemPrompt,
 	}
 	p, err := s.h.Start(ctx, spec)
 	if err != nil {
