@@ -1,0 +1,31 @@
+# Installed by deploy/install.sh to /etc/systemd/system/styr.service
+[Unit]
+Description=Styr
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=styr
+Environment=STYR_CONFIG=/etc/styr/config.yaml
+EnvironmentFile=/etc/styr/env
+ExecStart=/usr/local/bin/styr serve
+Restart=always
+RestartSec=3
+
+# Hardening. ProtectHome is intentionally NOT set: the Claude Code CLI and
+# styr both write under the styr user's HOME, which lives inside
+# /var/lib/styr (ReadWritePaths below), so ProtectHome would not need to
+# deny anything extra here -- it is left off to match the deploy card
+# exactly and because outbound network access (to the OIDC issuer, GitHub,
+# and wherever the user's workspaces point) must not be restricted.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/styr
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
