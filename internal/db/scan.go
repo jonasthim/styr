@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -55,4 +56,22 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+// marshalStringList encodes a string slice as a JSON array for a TEXT
+// column, treating nil as an empty array.
+func marshalStringList(items []string) string {
+	if items == nil {
+		items = []string{}
+	}
+	b, _ := json.Marshal(items)
+	return string(b)
+}
+
+// unmarshalStringList decodes a JSON array TEXT column back into a string
+// slice, treating an unparsable value as empty.
+func unmarshalStringList(s string) []string {
+	var out []string
+	_ = json.Unmarshal([]byte(s), &out)
+	return out
 }
