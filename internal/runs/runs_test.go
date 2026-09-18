@@ -119,6 +119,7 @@ func newEnv(t *testing.T, timeout time.Duration, notifier Notifier, steps ...fak
 		Channels:   channelsRepo,
 		Deliveries: db.NewDeliveries(database),
 		Events:     eventsRepo,
+		Loops:      db.NewLoops(database),
 	}
 	engine := New(repos, sessionsSvc, bus, notifier, box, "https://styr.test/", timeout, slog.New(slog.DiscardHandler))
 

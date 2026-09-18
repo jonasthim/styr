@@ -26,6 +26,12 @@ type Run struct {
 	DeliveryID *string
 	Origin     string
 
+	// LoopID is the loop this run is an iteration of ("" for an ordinary
+	// one-shot run), and Iteration is its 1-based number within that loop
+	// (0 when the run belongs to no loop).
+	LoopID    string
+	Iteration int
+
 	StartedAt  time.Time
 	FinishedAt *time.Time
 	Outcome    RunOutcome
@@ -39,5 +45,6 @@ type Run struct {
 type RunFilter struct {
 	Outcome   string
 	TriggerID string
+	LoopID    string
 	Limit     int
 }

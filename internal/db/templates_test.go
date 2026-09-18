@@ -139,3 +139,44 @@ func TestTemplates_ListVisible(t *testing.T) {
 		t.Fatalf("ListVisible admin len = %d, want 3", len(adminList))
 	}
 }
+
+func TestTemplates_LoopFieldsRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+	seedTemplateFixtures(t, database)
+	templates := NewTemplates(database)
+
+	tpl := newTestTemplate("until done")
+	if err := templates.Create(ctx, tpl); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := templates.Get(ctx, tpl.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.LoopUntil != "" || got.LoopMax != 0 {
+		t.Fatalf("a template with no loop = %q/%d, want ''/0", got.LoopUntil, got.LoopMax)
+	}
+
+	tpl.LoopUntil = "done"
+	tpl.LoopMax = 4
+	tpl.UpdatedAt = time.Now()
+	if err := templates.Update(ctx, tpl); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err = templates.Get(ctx, tpl.ID)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if got.LoopUntil != "done" || got.LoopMax != 4 {
+		t.Fatalf("loop fields = %q/%d", got.LoopUntil, got.LoopMax)
+	}
+
+	listed, err := templates.ListVisible(ctx, "", false)
+	if err != nil {
+		t.Fatalf("ListVisible: %v", err)
+	}
+	if len(listed) != 1 || listed[0].LoopUntil != "done" || listed[0].LoopMax != 4 {
+		t.Fatalf("listed = %+v", listed)
+	}
+}

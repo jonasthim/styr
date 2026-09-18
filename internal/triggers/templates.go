@@ -28,6 +28,8 @@ func (s *Service) CreateTemplate(ctx context.Context, actor Actor, in domain.Tem
 		PromptTemplate: in.PromptTemplate,
 		SystemPrompt:   in.SystemPrompt,
 		ReportSchema:   in.ReportSchema,
+		LoopUntil:      strings.TrimSpace(in.LoopUntil),
+		LoopMax:        in.LoopMax,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -81,6 +83,8 @@ func (s *Service) UpdateTemplate(ctx context.Context, actor Actor, id string, in
 	updated.PromptTemplate = in.PromptTemplate
 	updated.SystemPrompt = in.SystemPrompt
 	updated.ReportSchema = in.ReportSchema
+	updated.LoopUntil = strings.TrimSpace(in.LoopUntil)
+	updated.LoopMax = in.LoopMax
 	updated.UpdatedAt = s.now()
 
 	if err := s.repos.Templates.Update(ctx, updated); err != nil {
@@ -200,6 +204,9 @@ func validateTemplate(in domain.TemplateInput) error {
 		return fmt.Errorf("%w: profile_id is required", domain.ErrInvalid)
 	case strings.TrimSpace(in.PromptTemplate) == "":
 		return fmt.Errorf("%w: prompt_template is required", domain.ErrInvalid)
+	case strings.TrimSpace(in.LoopUntil) != "" && in.LoopMax < 1:
+		// A looping template without a budget would iterate forever.
+		return fmt.Errorf("%w: loop_max must be at least 1 when loop_until is set", domain.ErrInvalid)
 	}
 	return nil
 }

@@ -19,6 +19,8 @@ type TemplateInput struct {
 	PromptTemplate string
 	SystemPrompt   string
 	ReportSchema   string
+	LoopUntil      string
+	LoopMax        int
 	Shared         bool
 }
 
@@ -56,6 +58,9 @@ type RunView struct {
 	Session  *Session
 	Delivery *Delivery
 	Template *Template
+	// Loop is the loop this run is an iteration of, nil for an ordinary
+	// one-shot run (or when the loop row could not be read).
+	Loop *Loop
 }
 
 // Inbound is one inbound call to POST /hooks/{slug}. It carries transport

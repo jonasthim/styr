@@ -184,3 +184,69 @@ func TestRuns_ListRunningOlderThan(t *testing.T) {
 		t.Fatalf("ListRunningOlderThan = %+v, want only %s", stale, old.ID)
 	}
 }
+
+func TestRuns_LoopColumnsListByLoopAndFilter(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+	templateID, sessID := seedLoopFixtures(t, database)
+	loops := NewLoops(database)
+	runs := NewRuns(database)
+
+	now := time.Now()
+	loopID := uuid.NewString()
+	if err := loops.Create(ctx, domain.Loop{ID: loopID, TemplateID: templateID, SessionID: &sessID,
+		Origin: "webhook", UntilField: "done", MaxIterations: 3, Iteration: 1,
+		State: domain.LoopRunning, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create loop: %v", err)
+	}
+
+	// Two iterations of the loop on one session, plus one unrelated run.
+	second := newTestRun(sessID, domain.RunRunning, now.Add(time.Second))
+	second.LoopID, second.Iteration = loopID, 2
+	first := newTestRun(sessID, domain.RunSuccess, now)
+	first.LoopID, first.Iteration = loopID, 1
+	other := newTestRun(sessID, domain.RunSuccess, now.Add(-time.Hour))
+
+	for _, r := range []domain.Run{second, first, other} {
+		if err := runs.Create(ctx, r); err != nil {
+			t.Fatalf("create run: %v", err)
+		}
+	}
+
+	got, err := runs.Get(ctx, first.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.LoopID != loopID || got.Iteration != 1 {
+		t.Fatalf("Get = loop %q iteration %d", got.LoopID, got.Iteration)
+	}
+	if got, err := runs.Get(ctx, other.ID); err != nil || got.LoopID != "" || got.Iteration != 0 {
+		t.Fatalf("a run outside a loop = %+v (err %v)", got, err)
+	}
+
+	chain, err := runs.ListByLoop(ctx, loopID)
+	if err != nil {
+		t.Fatalf("ListByLoop: %v", err)
+	}
+	if len(chain) != 2 || chain[0].ID != first.ID || chain[1].ID != second.ID {
+		t.Fatalf("ListByLoop = %+v, want the two iterations in order", chain)
+	}
+
+	filtered, err := runs.List(ctx, domain.RunFilter{LoopID: loopID})
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("List by loop = %d runs, want 2", len(filtered))
+	}
+
+	// All three runs share a session; the newest iteration is the one a
+	// live session event belongs to.
+	bySession, err := runs.GetBySession(ctx, sessID)
+	if err != nil {
+		t.Fatalf("GetBySession: %v", err)
+	}
+	if bySession.ID != second.ID {
+		t.Fatalf("GetBySession = %q, want the newest iteration %q", bySession.ID, second.ID)
+	}
+}

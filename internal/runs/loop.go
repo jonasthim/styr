@@ -269,6 +269,9 @@ func (e *Engine) finish(ctx context.Context, run domain.Run, outcome domain.RunO
 	}
 	e.notified.forget(run.ID)
 	e.logger.Info("runs: finished", "run_id", run.ID, "outcome", outcome)
+	// Every path that closes a run out goes through finish, so this is the
+	// one place a loop has to learn that one of its iterations ended.
+	e.advance(ctx, run, outcome, report)
 	return true
 }
 

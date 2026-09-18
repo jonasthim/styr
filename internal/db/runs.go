@@ -19,7 +19,7 @@ type Runs struct{ d *DB }
 func NewRuns(d *DB) *Runs { return &Runs{d: d} }
 
 const runColumns = `id, session_id, template_id, trigger_id, delivery_id, origin, started_at, finished_at,
-	outcome, report, summary, cost_usd`
+	outcome, report, summary, cost_usd, loop_id, iteration`
 
 // defaultRunListLimit caps List when the caller passes a non-positive
 // RunFilter.Limit.
@@ -29,10 +29,10 @@ const defaultRunListLimit = 100
 func (rp *Runs) Create(ctx context.Context, r domain.Run) error {
 	_, err := rp.d.ExecContext(ctx, `
 		INSERT INTO runs (`+runColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.SessionID, optionalString(r.TemplateID), optionalString(r.TriggerID), optionalString(r.DeliveryID),
 		r.Origin, nowString(r.StartedAt), optionalTime(r.FinishedAt), string(r.Outcome), string(r.Report),
-		r.Summary, r.CostUSD)
+		r.Summary, r.CostUSD, emptyToNull(r.LoopID), r.Iteration)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create run: %w", domain.ErrConflict)
@@ -49,6 +49,16 @@ func optionalString(s *string) any {
 	return *s
 }
 
+// emptyToNull stores an empty optional id (runs.loop_id) as SQL NULL, so
+// the column's foreign key to loops(id) is only checked for a run that
+// really belongs to a loop.
+func emptyToNull(s string) any {
+	if s == "" {
+		return nil
+	}
+	return s
+}
+
 func scanRun(row interface{ Scan(dest ...any) error }) (*domain.Run, error) {
 	var (
 		r                     domain.Run
@@ -57,11 +67,13 @@ func scanRun(row interface{ Scan(dest ...any) error }) (*domain.Run, error) {
 		startedAt             string
 		finishedAt            sql.NullString
 		outcome, report       string
+		loopID                sql.NullString
 	)
 	if err := row.Scan(&r.ID, &r.SessionID, &templateID, &triggerID, &deliveryID, &r.Origin,
-		&startedAt, &finishedAt, &outcome, &report, &r.Summary, &r.CostUSD); err != nil {
+		&startedAt, &finishedAt, &outcome, &report, &r.Summary, &r.CostUSD, &loopID, &r.Iteration); err != nil {
 		return nil, err
 	}
+	r.LoopID = loopID.String
 	r.TemplateID = nullString(templateID)
 	r.TriggerID = nullString(triggerID)
 	r.DeliveryID = nullString(deliveryID)
@@ -94,9 +106,13 @@ func (rp *Runs) Get(ctx context.Context, id string) (*domain.Run, error) {
 	return r, nil
 }
 
-// GetBySession loads the run tied to sessionID.
+// GetBySession loads the run tied to sessionID. A loop's iterations all
+// share one session, so the most recent run wins: that is the iteration a
+// live event belongs to.
 func (rp *Runs) GetBySession(ctx context.Context, sessionID string) (*domain.Run, error) {
-	row := rp.d.QueryRowContext(ctx, `SELECT `+runColumns+` FROM runs WHERE session_id = ?`, sessionID)
+	row := rp.d.QueryRowContext(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE session_id = ? ORDER BY iteration DESC, started_at DESC LIMIT 1`,
+		sessionID)
 	r, err := scanRun(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -121,6 +137,10 @@ func (rp *Runs) List(ctx context.Context, filter domain.RunFilter) ([]domain.Run
 		query += ` AND trigger_id = ?`
 		args = append(args, filter.TriggerID)
 	}
+	if filter.LoopID != "" {
+		query += ` AND loop_id = ?`
+		args = append(args, filter.LoopID)
+	}
 	limit := filter.Limit
 	if limit <= 0 {
 		limit = defaultRunListLimit
@@ -131,6 +151,26 @@ func (rp *Runs) List(ctx context.Context, filter domain.RunFilter) ([]domain.Run
 	rows, err := rp.d.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []domain.Run
+	for rows.Next() {
+		r, err := scanRun(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan run: %w", err)
+		}
+		out = append(out, *r)
+	}
+	return out, rows.Err()
+}
+
+// ListByLoop returns every run belonging to loopID in iteration order, so a
+// loop view reads as the chain of turns it is.
+func (rp *Runs) ListByLoop(ctx context.Context, loopID string) ([]domain.Run, error) {
+	rows, err := rp.d.QueryContext(ctx,
+		`SELECT `+runColumns+` FROM runs WHERE loop_id = ? ORDER BY iteration ASC, started_at ASC`, loopID)
+	if err != nil {
+		return nil, fmt.Errorf("list runs by loop: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var out []domain.Run
