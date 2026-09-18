@@ -38,25 +38,22 @@ function ThemeButton({ active, onClick, children }: { active: boolean; onClick: 
 }
 
 function ThemeSelector() {
-  const { theme, setTheme } = useTheme()
-  // The theme store only persists "dark" or "light" (see useTheme.ts); there
-  // is no third stored value for "system". Choosing System here just applies
-  // the OS preference once, the same as Dark/Light would - it doesn't keep
-  // tracking future OS changes, so it isn't shown as its own pressed state.
-  function chooseSystem() {
-    const prefersDark = window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? true
-    setTheme(prefersDark ? 'dark' : 'light')
-  }
+  const { mode, setTheme, setMode } = useTheme()
+  // "System" is the one mode Profile's selector can put the store into -
+  // ThemeToggle, the `t` shortcut and the palette action only ever cycle
+  // between the two explicit themes (see useTheme.ts). Picking it here
+  // keeps tracking OS-level changes rather than applying the preference
+  // once, so it does show its own pressed state.
 
   return (
     <div role="group" aria-label="Theme" className="flex gap-2">
-      <ThemeButton active={false} onClick={chooseSystem}>
+      <ThemeButton active={mode === 'system'} onClick={() => setMode('system')}>
         System
       </ThemeButton>
-      <ThemeButton active={theme === 'dark'} onClick={() => setTheme('dark')}>
+      <ThemeButton active={mode === 'dark'} onClick={() => setTheme('dark')}>
         Dark
       </ThemeButton>
-      <ThemeButton active={theme === 'light'} onClick={() => setTheme('light')}>
+      <ThemeButton active={mode === 'light'} onClick={() => setTheme('light')}>
         Light
       </ThemeButton>
     </div>
@@ -80,15 +77,23 @@ export function Profile() {
     await queryClient.invalidateQueries({ queryKey: ['me'] })
   }
 
-  // "Sign out everywhere" also posts to /api/v1/auth/logout: v0.1's API
-  // (docs/openapi.yaml) has one logout route and no per-device session
-  // list to revoke individually, so both actions end the one session a
-  // browser can have. The two buttons stay in case a later API version
-  // adds real multi-device revocation.
   async function handleSignOut() {
     setSigningOut(true)
     try {
       await api('/api/v1/auth/logout', { method: 'POST' })
+    } catch {
+      // Best-effort: navigate away regardless.
+    }
+    void navigate({ to: '/login' })
+  }
+
+  // "Sign out everywhere" ends every login session for this user
+  // (docs/openapi.yaml POST /auth/logout-all -> db.LoginSessions.
+  // DeleteAllForUser), not just the one behind this browser's own cookie.
+  async function handleSignOutEverywhere() {
+    setSigningOut(true)
+    try {
+      await api('/api/v1/auth/logout-all', { method: 'POST' })
     } catch {
       // Best-effort: navigate away regardless.
     }
@@ -171,7 +176,7 @@ export function Profile() {
           </button>
           <button
             type="button"
-            onClick={() => void handleSignOut()}
+            onClick={() => void handleSignOutEverywhere()}
             disabled={signingOut}
             className={clsx(
               'h-8 rounded-[var(--radius-1)] border border-hairline px-3 text-[13px] font-medium text-fg-primary transition-colors duration-150 hover:bg-surface-2',

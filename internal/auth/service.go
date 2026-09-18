@@ -282,6 +282,24 @@ func (s *Service) Logout(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// LogoutAll clears the styr_session cookie and deletes every login_sessions
+// row belonging to the signed-in caller, ending every browser session for
+// that user — not just the one behind this request's own cookie. Unlike
+// Logout, it needs a Principal (the target of "every session" is the
+// caller, not whoever a cookie happens to name), so it must run behind
+// RequireUser; called without one it returns an error and deletes nothing.
+func (s *Service) LogoutAll(w http.ResponseWriter, r *http.Request) error {
+	defer clearSessionCookie(w, s.secure)
+	p, ok := PrincipalFrom(r.Context())
+	if !ok {
+		return errors.New("logout-all: no authenticated principal")
+	}
+	if err := s.logins.DeleteAllForUser(r.Context(), p.User.ID); err != nil {
+		return fmt.Errorf("logout-all: %w", err)
+	}
+	return nil
+}
+
 // ---- context / role checks --------------------------------------------------
 
 type principalCtxKey struct{}

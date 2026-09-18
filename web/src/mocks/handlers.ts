@@ -358,6 +358,14 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // Gap 2: "Sign out everywhere" (Profile.tsx). The mock has no per-device
+  // session list to revoke individually, so this just ends the one session
+  // a browser can have, same as /auth/logout.
+  http.post('/api/v1/auth/logout-all', () => {
+    loggedOut = true
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   // Mock-only control route: flips the same "logged out" flag as the real
   // logout endpoint, so tests can force /api/v1/me to 401.
   http.post('/__mock/logout', () => {
