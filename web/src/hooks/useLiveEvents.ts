@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient, type QueryClient } from '@tanstack/react-query'
 import type { Approval, Session, SessionEvent } from '../api/types'
 import { usePartialsStore } from '../store/partials'
+import { useLiveStatusStore } from '../store/live'
 
 const isMock = import.meta.env.VITE_MOCK === '1'
 
@@ -132,9 +133,11 @@ export function useLiveEvents() {
       source.onopen = () => {
         attempt = 0
         setConnected(true)
+        useLiveStatusStore.getState().setConnected(true)
       }
       source.onerror = () => {
         setConnected(false)
+        useLiveStatusStore.getState().setConnected(false)
         source.close()
         if (cancelled) return
         const delay = Math.min(30_000, 1000 * 2 ** attempt)
@@ -160,6 +163,7 @@ export function useLiveEvents() {
       if (retryTimer) clearTimeout(retryTimer)
       sourceRef.current?.close()
       sourceRef.current = null
+      useLiveStatusStore.getState().setConnected(false)
     }
   }, [queryClient])
 
