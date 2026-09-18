@@ -1,0 +1,60 @@
+/* Design tokens. Dark is the default palette on :root; [data-theme="light"]
+   overrides the color tokens. Sizing/type tokens are theme-invariant and
+   live on :root only. The @theme block maps the color tokens to Tailwind
+   colours so components reference tokens (via Tailwind classes) instead of
+   raw hex values. This file is the Tailwind entry point (imported before
+   base.css) so the @theme block below is picked up by the Tailwind plugin. */
+
+@import 'tailwindcss';
+
+:root {
+  --bg-canvas: #0b0d10;
+  --bg-surface-1: #11141a;
+  --bg-surface-2: #171b22;
+  --bg-surface-3: #1e232c;
+  --border-hairline: rgba(255, 255, 255, 0.08);
+  --fg-primary: #e6e8ec;
+  --fg-secondary: #9aa3b2;
+  --fg-muted: #6b7383;
+  --accent: #7aa2ff;
+  --state-running: #3ecf8e;
+  --state-attention: #f5b544;
+  --state-failed: #ff6b6b;
+  --state-scheduled: #7aa2ff;
+  --state-idle: #6b7383;
+
+  --radius-1: 4px;
+  --radius-2: 8px;
+  --row-h: 32px;
+
+  --font-sans: 'Geist Sans', system-ui;
+  --font-mono: 'Geist Mono', ui-monospace;
+}
+
+[data-theme='light'] {
+  --bg-canvas: #f7f8fa;
+  --bg-surface-1: #ffffff;
+  --bg-surface-2: #f1f3f6;
+  --bg-surface-3: #e8ebf0;
+  --border-hairline: rgba(0, 0, 0, 0.08);
+  --fg-primary: #111318;
+  --fg-secondary: #4b5565;
+  --fg-muted: #7a8494;
+}
+
+@theme {
+  --color-canvas: var(--bg-canvas);
+  --color-surface-1: var(--bg-surface-1);
+  --color-surface-2: var(--bg-surface-2);
+  --color-surface-3: var(--bg-surface-3);
+  --color-hairline: var(--border-hairline);
+  --color-fg-primary: var(--fg-primary);
+  --color-fg-secondary: var(--fg-secondary);
+  --color-fg-muted: var(--fg-muted);
+  --color-accent: var(--accent);
+  --color-state-running: var(--state-running);
+  --color-state-attention: var(--state-attention);
+  --color-state-failed: var(--state-failed);
+  --color-state-scheduled: var(--state-scheduled);
+  --color-state-idle: var(--state-idle);
+}
