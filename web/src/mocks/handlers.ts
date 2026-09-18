@@ -9,6 +9,7 @@ import { http, HttpResponse } from 'msw'
 import type {
   Approval,
   ApiErrorBody,
+  ClaudeTokenInfo,
   Me,
   Profile,
   Provider,
@@ -26,6 +27,18 @@ function iso(minutesAgo: number): string {
 
 function errorBody(code: string, message: string): ApiErrorBody {
   return { error: { code, message } }
+}
+
+// The dev verifier: accepts anything starting with "sk-ant-" (real Claude
+// tokens' prefix), rejects everything else with 422 token_invalid. Shared by
+// PUT /me/claude-token and PUT /settings/service-token, which both follow
+// the same verify-then-store rule (docs/openapi.yaml).
+export const TOKEN_INVALID_MESSAGE =
+  "That token wasn't accepted. Run claude setup-token on a machine where Claude Code is already logged in, then paste the token it prints here."
+
+function verifyToken(token: string): ClaudeTokenInfo | null {
+  if (!token.startsWith('sk-ant-')) return null
+  return { present: true, label: `…${token.slice(-6)}`, verified_at: iso(0) }
 }
 
 const DEV_USER_ID = '00000000-0000-4000-8000-000000000001'
@@ -219,6 +232,27 @@ const providers: Provider[] = [{ name: 'Authentik', slug: 'authentik' }]
 // AuthGate's 401 -> /login redirect without a real session cookie.
 let loggedOut = false
 
+// Mutable so PUT/DELETE /me/claude-token (Task 22's ClaudeTokenCard) can
+// flip presence; GET /api/v1/me reads this live rather than a frozen
+// literal. Seeded present, matching the "Dev Admin" persona already being
+// logged in with a working token; profile.spec.ts flips it absent via
+// POST /__mock/reset-claude-token for the absent-state test.
+let devClaudeToken: ClaudeTokenInfo = { present: true, label: '…a1b2c3', verified_at: iso(60 * 24) }
+
+// Mirrors GET /api/v1/settings's shape (docs/openapi.yaml): idle_timeout is
+// a Go duration string, not a number of seconds.
+interface MockSettings {
+  max_open_sessions: number
+  idle_timeout: string
+  service_token: ClaudeTokenInfo
+}
+
+let settings: MockSettings = {
+  max_open_sessions: 4,
+  idle_timeout: '15m0s',
+  service_token: { present: false, label: '', verified_at: null },
+}
+
 export const handlers = [
   http.get('/healthz', () => HttpResponse.json({ ok: true })),
 
@@ -246,6 +280,14 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 })
   }),
 
+  // Mock-only control route (Task 22): puts the dev user's Claude token back
+  // to absent, so profile.spec.ts can exercise ClaudeTokenCard's absent
+  // state without a fresh page load re-seeding every other flag too.
+  http.post('/__mock/reset-claude-token', () => {
+    devClaudeToken = { present: false, label: '', verified_at: null }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   http.get('/api/v1/me', () => {
     if (loggedOut) return HttpResponse.json(errorBody('unauthorized', 'not logged in'), { status: 401 })
     const me: Me = {
@@ -255,38 +297,62 @@ export const handlers = [
       avatar_url: '',
       role: 'admin',
       prefs: { theme: 'dark' },
-      claude_token: { present: true, label: '…a1b2c3', verified_at: iso(60 * 24) },
+      claude_token: devClaudeToken,
     }
     return HttpResponse.json(me)
   }),
 
   http.patch('/api/v1/me', () => new HttpResponse(null, { status: 204 })),
 
-  http.put('/api/v1/me/claude-token', () => new HttpResponse(null, { status: 204 })),
+  http.put('/api/v1/me/claude-token', async ({ request }) => {
+    const body = (await request.json()) as { token?: string }
+    const verified = verifyToken(body.token ?? '')
+    if (!verified) return HttpResponse.json(errorBody('token_invalid', TOKEN_INVALID_MESSAGE), { status: 422 })
+    devClaudeToken = verified
+    return new HttpResponse(null, { status: 204 })
+  }),
 
-  http.delete('/api/v1/me/claude-token', () => new HttpResponse(null, { status: 204 })),
+  http.delete('/api/v1/me/claude-token', () => {
+    devClaudeToken = { present: false, label: '', verified_at: null }
+    return new HttpResponse(null, { status: 204 })
+  }),
 
   http.get('/api/v1/users', () => HttpResponse.json(users)),
 
-  http.patch('/api/v1/users/:id', () => new HttpResponse(null, { status: 204 })),
+  http.patch('/api/v1/users/:id', async ({ request, params }) => {
+    const body = (await request.json()) as { role?: User['role'] }
+    const user = users.find((u) => u.id === params.id)
+    if (!user) return HttpResponse.json(errorBody('not_found', 'user not found'), { status: 404 })
+    if (body.role) user.role = body.role
+    return HttpResponse.json(user)
+  }),
 
-  http.get('/api/v1/settings', () =>
-    HttpResponse.json({
-      max_open_sessions: 4,
-      idle_timeout: 1800,
-      service_token: { present: false, label: '' },
-    }),
-  ),
+  http.get('/api/v1/settings', () => HttpResponse.json(settings)),
 
-  http.put('/api/v1/settings/service-token', () => new HttpResponse(null, { status: 204 })),
+  http.put('/api/v1/settings/service-token', async ({ request }) => {
+    const body = (await request.json()) as { token?: string }
+    const verified = verifyToken(body.token ?? '')
+    if (!verified) return HttpResponse.json(errorBody('token_invalid', TOKEN_INVALID_MESSAGE), { status: 422 })
+    settings = { ...settings, service_token: verified }
+    return new HttpResponse(null, { status: 204 })
+  }),
 
   http.get('/api/v1/workspaces', () => HttpResponse.json(workspaces)),
   http.post('/api/v1/workspaces', async ({ request }) => {
     const body = (await request.json()) as Partial<Workspace>
+    // Real validation is "exists, is a directory, contains .git"
+    // (docs/openapi.yaml); the mock can't stat a filesystem, so it checks
+    // the one thing it can: an absolute path. Enough to exercise the "Add
+    // workspace" dialog's inline-error path in Task 22.
+    if (!body.path || !body.path.startsWith('/')) {
+      return HttpResponse.json(errorBody('invalid_path', 'Path must be an absolute path to a git repository.'), {
+        status: 422,
+      })
+    }
     const ws: Workspace = {
       id: `w${workspaces.length + 1}`,
       name: body.name ?? 'untitled',
-      path: body.path ?? '',
+      path: body.path,
       default_profile_id: body.default_profile_id ?? 'interactive',
       worktrees: body.worktrees ?? false,
       created_at: iso(0),
@@ -294,8 +360,18 @@ export const handlers = [
     workspaces.push(ws)
     return HttpResponse.json(ws, { status: 201 })
   }),
-  http.patch('/api/v1/workspaces/:id', () => new HttpResponse(null, { status: 204 })),
-  http.delete('/api/v1/workspaces/:id', () => new HttpResponse(null, { status: 204 })),
+  http.patch('/api/v1/workspaces/:id', async ({ request, params }) => {
+    const body = (await request.json()) as Partial<Workspace>
+    const ws = workspaces.find((w) => w.id === params.id)
+    if (!ws) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    Object.assign(ws, body)
+    return HttpResponse.json(ws)
+  }),
+  http.delete('/api/v1/workspaces/:id', ({ params }) => {
+    const index = workspaces.findIndex((w) => w.id === params.id)
+    if (index !== -1) workspaces.splice(index, 1)
+    return new HttpResponse(null, { status: 204 })
+  }),
 
   http.get('/api/v1/profiles', () => HttpResponse.json(profiles)),
   http.post('/api/v1/profiles', async ({ request }) => {
@@ -315,17 +391,34 @@ export const handlers = [
     return HttpResponse.json(p, { status: 201 })
   }),
   http.patch('/api/v1/profiles/:id', async ({ request, params }) => {
-    const body = (await request.json()) as { mode?: string }
+    const body = (await request.json()) as Partial<Profile>
     // Reject by allow-list rather than naming the forbidden mode: the
     // Global Constraints CI gate greps the whole repo for that literal
     // string (never passed to the CLI, anywhere), so mock validation must
     // not spell it out either. See docs/superpowers/plans/2026-09-18-styr-v0.1.md.
     const validModes = new Set<Profile['mode']>(['default', 'acceptEdits', 'plan', 'dontAsk', 'auto'])
-    if (body.mode !== undefined && !validModes.has(body.mode as Profile['mode'])) {
+    if (body.mode !== undefined && !validModes.has(body.mode)) {
       return HttpResponse.json(errorBody('invalid', 'unsupported permission mode'), { status: 422 })
     }
     const p = profiles.find((x) => x.id === params.id)
-    return HttpResponse.json(p ?? {}, { status: 200 })
+    if (!p) return HttpResponse.json(errorBody('not_found', 'profile not found'), { status: 404 })
+    if (p.builtin) {
+      // "Builtin profiles only allow max_turns and approval_timeout to
+      // change" (docs/openapi.yaml) - reject any other field that would
+      // actually change the stored value.
+      const editableKeys = new Set(['max_turns', 'approval_timeout'])
+      const offending = (Object.keys(body) as Array<keyof Profile>).some(
+        (key) => !editableKeys.has(key) && body[key] !== undefined && body[key] !== p[key],
+      )
+      if (offending) {
+        return HttpResponse.json(
+          errorBody('immutable_field', 'Builtin profiles only allow max turns and approval timeout to change.'),
+          { status: 422 },
+        )
+      }
+    }
+    Object.assign(p, body)
+    return HttpResponse.json(p, { status: 200 })
   }),
 
   http.get('/api/v1/sessions', () => HttpResponse.json(sessions)),
