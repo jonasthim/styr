@@ -145,3 +145,45 @@ leaked one. Secrets in URLs can land in proxy and access logs, which is why the 
 stay the documented default for everything that can send them. The scheme is uniform, so the
 router has one code path and the UI has one setup story; if a future kind genuinely needs
 signature verification, it gets a sealed secret column of its own rather than changing this one.
+
+## ADR-011: Per-session model and effort, hidden built-ins
+Date: 2026-09-18. Status: accepted.
+
+Context: v0.2 lets a profile default a session's model and reasoning effort, and lets an operator
+change either mid-session from the session header, but the CLI only accepts `--model`/`--effort`
+as start-up flags — nothing in the wire protocol changes them on a running process. Separately,
+the composer's `/` menu needed to know which of the CLI's own `slash_commands` (the init
+message's flat, undifferentiated list of custom commands, plugin skills and built-ins) are safe
+to offer in Styr's headless (`-p`) pipe rather than an interactive terminal. Card T38 spiked both
+questions against the real CLI 2.1.276 (three short recorded sessions, one command each,
+documented in `internal/harness/claude/testdata/PROTOCOL.md`'s "Built-in slash commands in `-p`
+mode").
+
+Findings: `/compact` and `/cost` are answered directly by the CLI as a synthetic assistant text
+block plus a zero-turn, zero-cost `result` — the session id and transcript are untouched, so
+both work over the pipe exactly like a normal turn. `/clear`, by contrast, resets the
+conversation and re-inits under a **new** session id (a `conversation_reset` message the codec
+doesn't model, followed by a second `system`/`init`); since Styr resumes a session by its own
+stored id and keeps its own event log keyed to it, a `/clear` would silently orphan both with no
+signal the UI could show. `doctor`, `color` and `reload-plugins` are reported by the CLI itself as
+terminal-only, via the init message's separate `terminal_slash_commands` array.
+
+Decision: sessions gain a per-session `model`/`effort` (profiles gain matching defaults,
+migration `00004_model_effort.sql`); switching either (`POST /sessions/{id}/model`) closes the
+live process and resumes the same session id under the new flags rather than attempting an
+in-place change. `internal/harness/claude/builtins.go` hard-codes two classifications rather than
+inferring them from the init message: `HeadlessBuiltins()` (`compact`, `cost`, safe to offer) and
+`HiddenBuiltins()` (`clear`, `doctor`, `color`, `reload-plugins`, plus `model` and `effort`
+themselves — hidden not because they fail over the pipe but because Styr already owns them
+through the header selects, and letting the CLI change them behind Styr's back would desync the
+stored values). `GET /status` exposes `hidden_commands` so the composer's slash menu
+(`web/src/components/session/slashCommands.ts`) can filter the session's own `slash_commands`
+list without re-deriving the spike's findings client-side.
+
+Consequences: the menu is built from real, CLI-reported command names rather than a maintained
+allowlist, so a newly installed plugin skill or custom command shows up automatically — at the
+cost of trusting a hard-coded hidden-set that only a future spike (re-run when the CLI's headless
+behaviour for these commands changes) can safely update. A model or effort switch always pays the
+cost of a process restart (no first message is sent until the operator's next turn), which is
+accepted as the price of the CLI's start-up-flags-only design rather than attempting a live
+in-process reconfiguration the protocol doesn't support.

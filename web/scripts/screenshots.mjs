@@ -131,6 +131,36 @@ async function main() {
         await page.close()
         console.log('captured session.png (1280x800)')
       }
+
+      // 4. Runs list, desktop viewport: every unattended run a trigger
+      // started (RunRow.tsx), seeded by web/src/mocks/triggersHandlers.ts.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/runs`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid="run-row"]', { timeout: 15_000 })
+
+        // See the sessions.png comment above: settle the hover-expanding
+        // rail before capturing.
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'runs.png') })
+        await page.close()
+        console.log('captured runs.png (1280x800)')
+      }
+
+      // 5. Triggers list, desktop viewport: the Triggers tab (default tab
+      // of TriggerRow.tsx's table), also seeded by triggersHandlers.ts.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/triggers`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid^="trigger-row-"]', { timeout: 15_000 })
+
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'triggers.png') })
+        await page.close()
+        console.log('captured triggers.png (1280x800)')
+      }
     } finally {
       await browser.close()
     }

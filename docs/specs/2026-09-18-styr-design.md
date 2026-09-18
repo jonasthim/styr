@@ -117,8 +117,8 @@ palette reaches every object and action. `?` shows shortcuts.
 | Release | Contents |
 |---|---|
 | v0.1 Cockpit | OIDC login and profiles, sessions, session view with blocks and activity timeline, inbox with approvals, workspaces, profiles, palette and shortcuts, install script, Docker image, docs |
-| v0.2 Review | Worktree per session, diff view, inline comments as prompts, commit and PR, plan approval checklist |
-| v0.3 Triggers | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens |
+| v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
+| v0.3 Review | Worktree per session, diff view, inline comments as prompts, commit and PR, plan approval checklist |
 | v0.4 Schedules and loops | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
 | v1.0 | Second harness (Codex CLI), stable API |

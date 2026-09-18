@@ -24,10 +24,10 @@ This creates a system user `styr` (HOME `/var/lib/styr`), installs the
    setup-token` and paste the token into the Styr UI under your profile
    (each user brings their own token; it bills their own Claude plan).
 
-Re-run the installer to upgrade. `install.sh --check` reports what would
-change, with no changes made; `--uninstall` removes the service and binary
-but keeps `/var/lib/styr` and `/etc/styr`. See `install.sh --help` for
-`--version`, `--binary` and `--listen`.
+`install.sh --check` reports what would change, with no changes made;
+`--uninstall` removes the service and binary but keeps `/var/lib/styr` and
+`/etc/styr`. See `install.sh --help` for `--version`, `--binary` and
+`--listen`, and [Upgrading](#upgrading) below to update an existing install.
 
 ## Option 2: Docker
 
@@ -49,9 +49,22 @@ non-root `styr` user, uid 1000), mounts a named volume at `/var/lib/styr`
 plus a bind mount at `/var/lib/styr/workspaces`, and publishes the app on
 `127.0.0.1:8080` only -- put a TLS reverse proxy in front for remote access.
 
+## Upgrading
+
+There is no self-upgrade: re-run the installer (`curl ... | sudo bash`, same
+as a first install) to fetch and install the latest `styr` binary, or pull a
+new image tag and re-run `docker compose up -d` for Docker. Either way,
+`styr` applies every pending database migration itself as part of opening
+`styr.db` at startup (`goose` migrations embedded in the binary), so a
+version bump never needs a separate migrate step -- just restart the
+service (`systemctl restart styr`) or recreate the container. `styr
+migrate` exists to apply migrations without starting the server (e.g. ahead
+of a maintenance window); it is never required for an ordinary upgrade.
+Config and data under `/etc/styr` and `/var/lib/styr` (or the Docker
+volume) are untouched by either upgrade path.
+
 ## Both paths
 
 `styr doctor` (installer) or `docker compose exec styr styr doctor` checks
 the config, the database, the `claude` binary and OIDC discovery. Zero
-telemetry, no login wall beyond OIDC, no self-upgrade in v0.1 -- re-run the
-installer, or pull a new image tag, to upgrade.
+telemetry, no login wall beyond OIDC.
