@@ -1,0 +1,5 @@
+name: bad-unknown-template
+workspace: styr
+steps:
+  - id: triage
+    template: "Does Not Exist"

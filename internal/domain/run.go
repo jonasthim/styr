@@ -26,6 +26,10 @@ type Run struct {
 	DeliveryID *string
 	Origin     string
 
+	// StepRunID is set when this run is one attempt of a pipeline step
+	// (origin "pipeline"), nil for every other run.
+	StepRunID *string
+
 	// LoopID is the loop this run is an iteration of ("" for an ordinary
 	// one-shot run), and Iteration is its 1-based number within that loop
 	// (0 when the run belongs to no loop).

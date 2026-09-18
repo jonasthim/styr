@@ -1,0 +1,9 @@
+name: bad-cycle
+workspace: styr
+steps:
+  - id: a
+    needs: [b]
+    template: "CI failure triage"
+  - id: b
+    needs: [a]
+    template: "Apply fix"

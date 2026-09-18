@@ -1,0 +1,6 @@
+name: bad-with-template
+workspace: styr
+steps:
+  - id: triage
+    template: "CI failure triage"
+    with: { alert: "{{ .payload.title" }

@@ -19,7 +19,7 @@ type Runs struct{ d *DB }
 func NewRuns(d *DB) *Runs { return &Runs{d: d} }
 
 const runColumns = `id, session_id, template_id, trigger_id, delivery_id, origin, started_at, finished_at,
-	outcome, report, summary, cost_usd, loop_id, iteration`
+	outcome, report, summary, cost_usd, loop_id, iteration, step_run_id`
 
 // defaultRunListLimit caps List when the caller passes a non-positive
 // RunFilter.Limit.
@@ -29,10 +29,10 @@ const defaultRunListLimit = 100
 func (rp *Runs) Create(ctx context.Context, r domain.Run) error {
 	_, err := rp.d.ExecContext(ctx, `
 		INSERT INTO runs (`+runColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		r.ID, r.SessionID, optionalString(r.TemplateID), optionalString(r.TriggerID), optionalString(r.DeliveryID),
 		r.Origin, nowString(r.StartedAt), optionalTime(r.FinishedAt), string(r.Outcome), string(r.Report),
-		r.Summary, r.CostUSD, emptyToNull(r.LoopID), r.Iteration)
+		r.Summary, r.CostUSD, emptyToNull(r.LoopID), r.Iteration, optionalString(r.StepRunID))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create run: %w", domain.ErrConflict)
@@ -68,15 +68,17 @@ func scanRun(row interface{ Scan(dest ...any) error }) (*domain.Run, error) {
 		finishedAt            sql.NullString
 		outcome, report       string
 		loopID                sql.NullString
+		stepRunID             sql.NullString
 	)
 	if err := row.Scan(&r.ID, &r.SessionID, &templateID, &triggerID, &deliveryID, &r.Origin,
-		&startedAt, &finishedAt, &outcome, &report, &r.Summary, &r.CostUSD, &loopID, &r.Iteration); err != nil {
+		&startedAt, &finishedAt, &outcome, &report, &r.Summary, &r.CostUSD, &loopID, &r.Iteration, &stepRunID); err != nil {
 		return nil, err
 	}
 	r.LoopID = loopID.String
 	r.TemplateID = nullString(templateID)
 	r.TriggerID = nullString(triggerID)
 	r.DeliveryID = nullString(deliveryID)
+	r.StepRunID = nullString(stepRunID)
 	r.StartedAt = parseTime(startedAt)
 	r.FinishedAt = nullTime(finishedAt)
 	r.Outcome = domain.RunOutcome(outcome)

@@ -193,3 +193,43 @@ func TestTriggers_SetSecretAndTouchDelivery(t *testing.T) {
 		t.Fatalf("TouchDelivery unknown id: err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestTriggers_PipelineIDRoundTrip checks the pipeline_id column T53 added
+// alongside template_id (the eventual "template or pipeline" selector is a
+// service-layer rule, not enforced by the schema): nil by default, and
+// settable via Create/Update like any other field.
+func TestTriggers_PipelineIDRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+	tplID := seedTriggerFixtures(t, database)
+	pl := newTestPipeline("ws1", "fix-ci")
+	if err := NewPipelines(database).Create(ctx, pl); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	triggers := NewTriggers(database)
+
+	tr := newTestTrigger(tplID, "pipeline trigger", "pipeline-trigger")
+	if err := triggers.Create(ctx, tr); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := triggers.Get(ctx, tr.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PipelineID != nil {
+		t.Fatalf("PipelineID = %v, want nil by default", got.PipelineID)
+	}
+
+	tr.PipelineID = &pl.ID
+	tr.UpdatedAt = time.Now()
+	if err := triggers.Update(ctx, tr); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err = triggers.Get(ctx, tr.ID)
+	if err != nil {
+		t.Fatalf("Get after Update: %v", err)
+	}
+	if got.PipelineID == nil || *got.PipelineID != pl.ID {
+		t.Fatalf("PipelineID after Update = %v, want %q", got.PipelineID, pl.ID)
+	}
+}

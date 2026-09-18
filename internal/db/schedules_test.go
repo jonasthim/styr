@@ -239,3 +239,43 @@ func TestSchedules_SetNextRunAndRecordRun(t *testing.T) {
 		t.Fatalf("RecordRun unknown id: err = %v, want ErrNotFound", err)
 	}
 }
+
+// TestSchedules_PipelineIDRoundTrip checks the pipeline_id column T53
+// added alongside template_id (the eventual "template or pipeline"
+// selector is a service-layer rule, not enforced by the schema): nil by
+// default, and settable via Create/Update like any other field.
+func TestSchedules_PipelineIDRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+	tplID := seedScheduleFixtures(t, database)
+	pl := newTestPipeline("ws1", "fix-ci")
+	if err := NewPipelines(database).Create(ctx, pl); err != nil {
+		t.Fatalf("seed pipeline: %v", err)
+	}
+	schedules := NewSchedules(database)
+
+	sc := newTestSchedule(tplID, "pipeline schedule")
+	if err := schedules.Create(ctx, sc); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := schedules.Get(ctx, sc.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.PipelineID != nil {
+		t.Fatalf("PipelineID = %v, want nil by default", got.PipelineID)
+	}
+
+	sc.PipelineID = &pl.ID
+	sc.UpdatedAt = time.Now()
+	if err := schedules.Update(ctx, sc); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err = schedules.Get(ctx, sc.ID)
+	if err != nil {
+		t.Fatalf("Get after Update: %v", err)
+	}
+	if got.PipelineID == nil || *got.PipelineID != pl.ID {
+		t.Fatalf("PipelineID after Update = %v, want %q", got.PipelineID, pl.ID)
+	}
+}

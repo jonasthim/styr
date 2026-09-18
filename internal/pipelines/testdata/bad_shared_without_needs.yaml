@@ -1,0 +1,6 @@
+name: bad-shared-without-needs
+workspace: styr
+steps:
+  - id: triage
+    template: "CI failure triage"
+    worktree: shared

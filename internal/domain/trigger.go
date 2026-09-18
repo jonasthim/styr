@@ -27,6 +27,10 @@ type Trigger struct {
 	SecretHint string
 
 	TemplateID string
+	// PipelineID is the alternative to TemplateID: a trigger starts either
+	// a template run or a pipeline run, exactly one of the two set (a rule
+	// the service layer enforces, not the schema).
+	PipelineID *string
 	Enabled    bool
 
 	DedupeKeyTemplate string
