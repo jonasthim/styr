@@ -59,9 +59,18 @@ const sessionsRoute = createRoute({
   }),
   component: Sessions,
 })
+interface SessionDetailSearch {
+  // Set by ChangesList.tsx when a file row is clicked; SessionDetail.tsx
+  // filters the transcript to blocks touching this path (Task 21).
+  file?: string
+}
+
 const sessionDetailRoute = createRoute({
   getParentRoute: () => appLayoutRoute,
   path: '/sessions/$id',
+  validateSearch: (search: Record<string, unknown>): SessionDetailSearch => ({
+    file: typeof search.file === 'string' ? search.file : undefined,
+  }),
   component: SessionDetail,
 })
 const workspacesRoute = createRoute({
