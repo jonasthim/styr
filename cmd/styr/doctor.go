@@ -56,6 +56,7 @@ func doctorChecks(cfg config.Config) []check {
 		}},
 		{"data dir writable", func() error { return checkDataDirWritable(cfg.DataDir) }},
 		{"claude binary found and --version runs", func() error { return checkClaudeBinary(cfg.ClaudeBin) }},
+		{"codex binary found (optional)", func() error { return checkCodexBinary(cfg.CodexBin) }},
 		{"git on PATH", func() error {
 			if _, err := exec.LookPath("git"); err != nil {
 				return fmt.Errorf("git not found on PATH: %w", err)
@@ -296,6 +297,25 @@ func checkClaudeBinary(bin string) error {
 	return nil
 }
 
+// checkCodexBinary is checkClaudeBinary for the optional Codex CLI: a
+// binary that is not on PATH is a skip (Codex sessions are simply
+// unavailable, which /api/v1/status also reports), while one that is
+// present but cannot answer --version is a FAIL.
+func checkCodexBinary(bin string) error {
+	if bin == "" {
+		return fmt.Errorf("%w: codex_bin not configured; Codex sessions unavailable", errSkip)
+	}
+	if _, err := exec.LookPath(bin); err != nil {
+		return fmt.Errorf("%w: %s not found; Codex sessions unavailable until it is installed", errSkip, bin)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), checkTimeout)
+	defer cancel()
+	if err := exec.CommandContext(ctx, bin, "--version").Run(); err != nil {
+		return fmt.Errorf("%s --version: %w", bin, err)
+	}
+	return nil
+}
+
 // checkDatabaseOpens opens (creating and migrating if needed) the database
 // at path and closes it again.
 func checkDatabaseOpens(path string) error {
@@ -334,44 +354,6 @@ func checkOIDCDiscovery(cfg config.Config) error {
 // runDoctor loads the configuration (best effort: a load error is reported
 // as its own FAIL line rather than aborting) and prints one line per check:
 // "ok", "FAIL" or "skip". It returns 1 when any check fails, 0 otherwise.
-// defaultEnvFile is what the systemd unit passes as EnvironmentFile. When
-// doctor runs by hand the secrets in it are not in the environment, so doctor
-// loads it itself (without overriding variables that are already set).
-const defaultEnvFile = "/etc/styr/env"
-
-// loadEnvFile sets KEY=VALUE pairs from path for keys not already set. It
-// returns the number of keys it set; a missing or unreadable file is not an
-// error. Values may be wrapped in single or double quotes.
-func loadEnvFile(path string) int {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return 0
-	}
-	n := 0
-	for _, line := range strings.Split(string(data), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		line = strings.TrimPrefix(line, "export ")
-		k, v, ok := strings.Cut(line, "=")
-		if !ok || k == "" {
-			continue
-		}
-		v = strings.TrimSpace(v)
-		if len(v) >= 2 && ((v[0] == '"' && v[len(v)-1] == '"') || (v[0] == '\'' && v[len(v)-1] == '\'')) {
-			v = v[1 : len(v)-1]
-		}
-		if _, exists := os.LookupEnv(k); exists {
-			continue
-		}
-		if os.Setenv(k, v) == nil {
-			n++
-		}
-	}
-	return n
-}
-
 func runDoctor(stdout io.Writer, args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -380,17 +362,7 @@ func runDoctor(stdout io.Writer, args []string) int {
 		return 2
 	}
 
-	envFile := os.Getenv("STYR_ENV_FILE")
-	if envFile == "" {
-		envFile = defaultEnvFile
-	}
-	if n := loadEnvFile(envFile); n > 0 {
-		fmt.Fprintf(stdout, "note loaded %d variable(s) from %s\n", n, envFile)
-	} else if _, statErr := os.Stat(envFile); statErr == nil {
-		if _, readErr := os.ReadFile(envFile); readErr != nil {
-			fmt.Fprintf(stdout, "warn %s exists but is not readable by this user (%v); secrets from it are missing below, run doctor as root or as a member of the file's group\n", envFile, readErr)
-		}
-	}
+	loadEnv(stdout)
 	cfg, _ := config.Load(os.Getenv("STYR_CONFIG"))
 
 	if *prune {

@@ -12,6 +12,7 @@ import (
 // runMigrate loads the configuration, opens the database (which applies
 // every pending goose migration as a side effect of db.Open) and exits.
 func runMigrate(stdout io.Writer) int {
+	loadEnv(stdout)
 	cfg, err := config.Load(os.Getenv("STYR_CONFIG"))
 	if err != nil {
 		fmt.Fprintf(stdout, "migrate: %v\n", err)

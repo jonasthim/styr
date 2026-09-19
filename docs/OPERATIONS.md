@@ -4,6 +4,20 @@ Backup, restore, upgrade, downgrade, orphan worktrees and the pid file `styr ser
 it runs. `cmd/styr/{backup,restore,pidfile}.go` and `cmd/styr/doctor.go` are the source of truth
 if anything here and the code disagree.
 
+## Running a subcommand by hand
+
+Every subcommand that loads the configuration (`serve`, `migrate`, `doctor`, `backup`,
+`restore`) first loads `/etc/styr/env` (or the file named by `STYR_ENV_FILE`) into its
+environment, without overriding variables that are already set. That is where the installer
+puts `STYR_SECRET_KEY` and the OIDC client secret; the systemd unit passes the same file as
+`EnvironmentFile=`, so under systemd the load is a no-op. Run by hand as the `styr` user
+(`sudo -u styr env STYR_CONFIG=/etc/styr/config.yaml styr backup ...`) it is what makes the
+command find the secret key without a `set -a; . /etc/styr/env` first. The command prints
+`note loaded N variable(s) from /etc/styr/env` when it did, and a `warn ... exists but is not
+readable by this user` line when the file is there but the calling user cannot read it (it is
+`root:styr 0640`) — the usual cause of a puzzling `secret_key must be at least 32 bytes` from a
+correctly installed host.
+
 ## Backup
 
 ```

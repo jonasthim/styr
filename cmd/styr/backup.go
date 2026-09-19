@@ -56,6 +56,7 @@ func runBackup(stdout io.Writer, args []string) int {
 	}
 	out := args[0]
 
+	loadEnv(stdout)
 	cfg, err := config.Load(os.Getenv("STYR_CONFIG"))
 	if err != nil {
 		fmt.Fprintf(stdout, "backup: %v\n", err)

@@ -70,6 +70,25 @@ func TestDoctorChecks_ClaudeBinaryMissing(t *testing.T) {
 	}
 }
 
+func TestDoctorChecks_CodexBinaryFound(t *testing.T) {
+	cfg := baseTestConfig(t, writeFakeClaude(t))
+	cfg.CodexBin = writeFakeClaude(t) // any executable answering --version will do
+	c := findCheck(t, doctorChecks(cfg), "codex binary found (optional)")
+	if err := c.run(); err != nil {
+		t.Fatalf("run() = %v, want nil", err)
+	}
+}
+
+func TestDoctorChecks_CodexBinaryMissingIsSkip(t *testing.T) {
+	cfg := baseTestConfig(t, writeFakeClaude(t))
+	cfg.CodexBin = filepath.Join(t.TempDir(), "does-not-exist")
+	c := findCheck(t, doctorChecks(cfg), "codex binary found (optional)")
+	err := c.run()
+	if !errors.Is(err, errSkip) {
+		t.Fatalf("run() = %v, want errSkip: Codex is optional", err)
+	}
+}
+
 func TestDoctorChecks_DataDirWritable(t *testing.T) {
 	cfg := baseTestConfig(t, writeFakeClaude(t))
 	c := findCheck(t, doctorChecks(cfg), "data dir writable")

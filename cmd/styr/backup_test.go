@@ -28,6 +28,7 @@ const testSecretKey = "this-is-a-32-plus-byte-secret-key!!"
 func setBackupTestEnv(t *testing.T, dataDir string) {
 	t.Helper()
 	t.Setenv("STYR_CONFIG", "")
+	t.Setenv("STYR_ENV_FILE", filepath.Join(dataDir, "no-such-env")) // never read the host's /etc/styr/env
 	t.Setenv("STYR_ENV", "dev")
 	t.Setenv("STYR_DATA_DIR", dataDir)
 	t.Setenv("STYR_SECRET_KEY", testSecretKey)

@@ -7,6 +7,24 @@ starting at `1.0.0`.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-19
+
+### Fixed
+
+- `styr backup`, `styr restore` and `styr migrate` now load `/etc/styr/env` (or `STYR_ENV_FILE`)
+  before reading the configuration, the way `styr doctor` already did, so a hand-run
+  `sudo -u styr ... styr backup` on an installed host no longer fails with
+  `secret_key must be at least 32 bytes`. `styr serve` does the same, which is a no-op under
+  systemd. All of them print the same `note loaded N variable(s)` / `warn ... not readable`
+  lines as `doctor`.
+
+### Added
+
+- `styr doctor` reports the Codex CLI as its own check, `codex binary found (optional)`: `skip`
+  when the binary is not installed (Codex sessions are simply unavailable), `FAIL` only when it
+  is present but cannot answer `--version`. Previously an absent Codex binary produced no line at
+  all.
+
 ## [1.0.0] - 2026-09-19
 
 "Boring and durable": a second harness, a stable and versioned API, an upgrade and backup

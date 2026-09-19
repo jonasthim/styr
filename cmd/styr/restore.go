@@ -37,6 +37,7 @@ func runRestore(stdout io.Writer, args []string) int {
 	}
 	archivePath := fs.Arg(0)
 
+	loadEnv(stdout)
 	cfg, err := config.Load(os.Getenv("STYR_CONFIG"))
 	if err != nil {
 		fmt.Fprintf(stdout, "restore: %v\n", err)

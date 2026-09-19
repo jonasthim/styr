@@ -35,6 +35,7 @@ const shutdownTimeout = 15 * time.Second
 // SIGTERM. All logging goes to stderr; stdout is reserved for a fatal
 // startup error message, matching the other subcommands.
 func runServe(stdout io.Writer) int {
+	loadEnv(os.Stderr) // a no-op under systemd, which passes the env file itself
 	cfg, err := config.Load(os.Getenv("STYR_CONFIG"))
 	if err != nil {
 		fmt.Fprintf(stdout, "serve: %v\n", err)
