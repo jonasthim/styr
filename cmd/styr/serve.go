@@ -48,6 +48,21 @@ func runServe(stdout io.Writer) int {
 		return 1
 	}
 
+	// The pid file is how `styr backup`/`restore`/`doctor` tell, without a
+	// network call or a database lock, whether a serve process is up
+	// against this data_dir; it is removed again on every return path
+	// below, including a signal-driven graceful shutdown.
+	pidPath := pidFilePath(cfg.DataDir)
+	if err := writePIDFile(pidPath); err != nil {
+		log.Error("write pid file", "path", pidPath, "error", err)
+		return 1
+	}
+	defer func() {
+		if err := removePIDFile(pidPath); err != nil {
+			log.Error("remove pid file", "path", pidPath, "error", err)
+		}
+	}()
+
 	d, err := db.Open(cfg.DBPath())
 	if err != nil {
 		log.Error("open database", "error", err)

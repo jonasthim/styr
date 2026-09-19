@@ -42,9 +42,24 @@ LISTEN="127.0.0.1:8080"
 UNINSTALL=0
 NO_CLAUDE=0
 CHECK=0
+ALLOW_DOWNGRADE=0
 
 log() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+# normalize_version strips a leading "v" (release tags are "vX.Y.Z", the
+# installed binary's own `styr version` output is bare "X.Y.Z"), so both
+# sides of a version_lt comparison are in the same shape.
+normalize_version() { printf '%s\n' "${1#v}"; }
+
+# version_lt A B: true (exit 0) when version A sorts strictly before version
+# B under `sort -V` (natural/dotted version order, so "0.9.0" sorts before
+# "0.10.0" unlike a plain string compare). Equal versions are not "less
+# than".
+version_lt() {
+  [[ "$1" == "$2" ]] && return 1
+  [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" == "$1" ]]
+}
 
 usage() {
   cat <<'USAGE'
@@ -65,6 +80,8 @@ Options:
                       /var/lib/styr and /etc/styr.
   --check            Print installed vs latest/target version and what would
                       change. Makes no changes.
+  --allow-downgrade  Allow --version to install an older release than the
+                      one currently installed (refused otherwise).
   -h, --help          Show this help.
 USAGE
 }
@@ -77,6 +94,7 @@ while [[ $# -gt 0 ]]; do
     --no-claude) NO_CLAUDE=1; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
     --check) CHECK=1; shift ;;
+    --allow-downgrade) ALLOW_DOWNGRADE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown flag $1 (see --help)" ;;
   esac
@@ -380,6 +398,16 @@ else
   tag="$VERSION"
   if [[ "$VERSION" == "latest" ]]; then
     tag="$(resolve_latest_tag)" || die "could not resolve the latest release (network?); pass --version vX.Y.Z or --binary PATH for a local build"
+  fi
+  current="$(installed_version)"
+  if [[ "$current" != "(not installed)" && "$current" != "unknown" ]]; then
+    if version_lt "$(normalize_version "$tag")" "$(normalize_version "$current")"; then
+      if [[ $ALLOW_DOWNGRADE -eq 1 ]]; then
+        log "Downgrading styr from $current to ${tag#v} (--allow-downgrade)"
+      else
+        die "refusing to downgrade styr from $current to ${tag#v}; pass --allow-downgrade to override"
+      fi
+    fi
   fi
   download_and_install_binary "$tag"
 fi
