@@ -5,3 +5,4 @@ data_dir: ./data
 secret_key: dev-only-secret-key-change-me-0123456789
 claude_bin: ./testdata/fake-claude/fake-claude.sh
 dev_user: dev@example.com
+codex_bin: ./testdata/fake-codex/fake-codex.sh
