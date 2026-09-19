@@ -57,6 +57,7 @@ func (s *stubStarter) calls() []RunInput {
 
 type fixture struct {
 	svc        *Service
+	database   *db.DB
 	repos      Repos
 	starter    *stubStarter
 	templateID string
@@ -97,6 +98,7 @@ func newFixture(t *testing.T, kind domain.TriggerKind, tune func(in *domain.Trig
 	}
 
 	f := &fixture{
+		database: database,
 		repos: Repos{
 			Templates:  db.NewTemplates(database),
 			Triggers:   db.NewTriggers(database),
@@ -880,5 +882,168 @@ func TestTemplateLoopFields(t *testing.T) {
 		LoopUntil: "done",
 	}); !errors.Is(err, domain.ErrInvalid) {
 		t.Fatalf("update to an endless loop: err = %v, want ErrInvalid", err)
+	}
+}
+
+// stubPipelineStarter stands in for the pipeline executor: it records what
+// the router asked to start and can be made to fail.
+type stubPipelineStarter struct {
+	mu    sync.Mutex
+	calls []pipelineStart
+	err   error
+}
+
+type pipelineStart struct {
+	actor      Actor
+	pipelineID string
+	input      templates.Vars
+	origin     domain.Origin
+	originRef  string
+}
+
+func (s *stubPipelineStarter) Start(_ context.Context, actor Actor, pipelineID string, input templates.Vars,
+	origin domain.Origin, originRef string,
+) (domain.PipelineRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, pipelineStart{actor: actor, pipelineID: pipelineID, input: input, origin: origin, originRef: originRef})
+	if s.err != nil {
+		return domain.PipelineRun{}, s.err
+	}
+	return domain.PipelineRun{ID: fmt.Sprintf("prun-%d", len(s.calls)), State: domain.PipelineRunRunning}, nil
+}
+
+func (s *stubPipelineStarter) snapshot() []pipelineStart {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]pipelineStart(nil), s.calls...)
+}
+
+// seedPipeline inserts a pipeline row for a trigger to point at.
+func seedPipeline(t *testing.T, f *fixture, name string) domain.Pipeline {
+	t.Helper()
+	pl := domain.Pipeline{
+		ID: "pl-" + name, Name: name, WorkspaceID: "ws-1",
+		YAML: "name: " + name + "\nsteps: []\n", CreatedAt: base, UpdatedAt: base,
+	}
+	if err := db.NewPipelines(f.database).Create(context.Background(), pl); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	return pl
+}
+
+// A trigger may name a pipeline instead of a template; a delivery then
+// starts a pipeline run and the delivery records it behind the "pr:" prefix.
+func TestDeliverStartsAPipelineWhenTheTriggerNamesOne(t *testing.T) {
+	f := newFixture(t, domain.TriggerGeneric, nil)
+	ctx := context.Background()
+	pl := seedPipeline(t, f, "fix-ci")
+	starter := &stubPipelineStarter{}
+	f.svc.WithPipelines(starter)
+
+	tr, secret, err := f.svc.CreateTrigger(ctx, admin, domain.TriggerInput{
+		Name: "Pipeline hook", Kind: string(domain.TriggerGeneric), PipelineID: pl.ID, Shared: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	if tr.TemplateID != "" {
+		t.Fatalf("template_id = %q, want empty for a pipeline trigger", tr.TemplateID)
+	}
+	if tr.PipelineID == nil || *tr.PipelineID != pl.ID {
+		t.Fatalf("pipeline_id = %v, want %s", tr.PipelineID, pl.ID)
+	}
+
+	dl, err := f.svc.Deliver(ctx, domain.Inbound{
+		Slug:    tr.Slug,
+		Body:    []byte(`{"title":"CI is red"}`),
+		Headers: http.Header{"X-Styr-Secret": []string{secret}},
+		Now:     base,
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if dl.Status != domain.DeliveryAccepted {
+		t.Fatalf("delivery status = %s (%s)", dl.Status, dl.Reason)
+	}
+	if dl.RunID == nil || *dl.RunID != PipelineRunRefPrefix+"prun-1" {
+		t.Fatalf("delivery run_id = %v, want the prefixed pipeline run id", dl.RunID)
+	}
+	if got := len(f.starter.calls()); got != 0 {
+		t.Fatalf("started %d template runs, want none", got)
+	}
+
+	calls := starter.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("pipeline starts = %d, want 1", len(calls))
+	}
+	call := calls[0]
+	if call.pipelineID != pl.ID || call.origin != domain.OriginWebhook || call.originRef != tr.ID {
+		t.Fatalf("pipeline start = %+v", call)
+	}
+	if !call.actor.IsAdmin {
+		t.Fatalf("pipeline start actor = %+v, want the service actor", call.actor)
+	}
+	payload, _ := call.input["payload"].(map[string]any)
+	if payload["title"] != "CI is red" {
+		t.Fatalf("pipeline input = %+v, want the normalised payload", call.input)
+	}
+
+	// Stored and read back, the trigger still targets the pipeline.
+	reloaded, err := f.svc.GetTrigger(ctx, admin, tr.ID)
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if reloaded.TemplateID != "" || reloaded.PipelineID == nil {
+		t.Fatalf("reloaded trigger = %+v", reloaded)
+	}
+}
+
+// A trigger input names exactly one of template_id and pipeline_id.
+func TestCreateTriggerRequiresExactlyOneTarget(t *testing.T) {
+	f := newFixture(t, domain.TriggerGeneric, nil)
+	ctx := context.Background()
+	pl := seedPipeline(t, f, "either-or")
+
+	_, _, err := f.svc.CreateTrigger(ctx, admin, domain.TriggerInput{Name: "neither", Kind: "generic"})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("no target error = %v, want ErrInvalid", err)
+	}
+	_, _, err = f.svc.CreateTrigger(ctx, admin, domain.TriggerInput{
+		Name: "both", Kind: "generic", TemplateID: f.templateID, PipelineID: pl.ID,
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("two targets error = %v, want ErrInvalid", err)
+	}
+
+	_, err = f.svc.UpdateTrigger(ctx, admin, f.trigger.ID, domain.TriggerInput{
+		Name: "both", Kind: "generic", TemplateID: f.templateID, PipelineID: pl.ID,
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("update with two targets = %v, want ErrInvalid", err)
+	}
+}
+
+// Without a pipeline executor wired in, a pipeline trigger records a failed
+// delivery rather than panicking.
+func TestDeliverFailsWhenPipelinesAreNotWired(t *testing.T) {
+	f := newFixture(t, domain.TriggerGeneric, nil)
+	ctx := context.Background()
+	pl := seedPipeline(t, f, "unwired")
+
+	tr, secret, err := f.svc.CreateTrigger(ctx, admin, domain.TriggerInput{
+		Name: "Unwired", Kind: string(domain.TriggerGeneric), PipelineID: pl.ID, Shared: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateTrigger: %v", err)
+	}
+	dl, err := f.svc.Deliver(ctx, domain.Inbound{
+		Slug: tr.Slug, Body: []byte(`{}`), Headers: http.Header{"X-Styr-Secret": []string{secret}}, Now: base,
+	})
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if dl.Status != domain.DeliveryFailed || !strings.Contains(dl.Reason, "pipelines are not available") {
+		t.Fatalf("delivery = %s (%s), want a failed delivery", dl.Status, dl.Reason)
 	}
 }

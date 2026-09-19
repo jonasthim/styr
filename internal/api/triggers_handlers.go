@@ -94,7 +94,7 @@ type triggerInput struct {
 
 func (in triggerInput) toDomain() domain.TriggerInput {
 	return domain.TriggerInput{
-		Name: in.Name, Kind: in.Kind, TemplateID: in.TemplateID, PipelineID: in.PipelineID,
+		Name: in.Name, Kind: in.Kind, TemplateID: in.TemplateID, PipelineID: derefString(in.PipelineID),
 		DedupeKeyTemplate: in.DedupeKeyTemplate,
 		CooldownS:         in.CooldownS, StormCapPerHour: in.StormCapPerHour, RunOnResolved: in.RunOnResolved,
 		Shared: in.Shared, Enabled: in.Enabled,

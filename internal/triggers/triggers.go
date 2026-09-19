@@ -17,6 +17,7 @@ import (
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/templates"
 )
 
 // Actor identifies who is calling the service. Shared with
@@ -34,6 +35,27 @@ type RunStarter interface {
 	Start(ctx context.Context, in RunInput) (domain.Run, error)
 }
 
+// PipelineStarter starts a pipeline run, for a trigger that names a
+// pipeline instead of a template. *pipelines.Executor implements it; it is
+// optional (nil until the composition root attaches one), and a trigger
+// pointing at a pipeline without it records a failed delivery rather than
+// panicking.
+type PipelineStarter interface {
+	Start(ctx context.Context, actor Actor, pipelineID string, input templates.Vars,
+		origin domain.Origin, originRef string) (domain.PipelineRun, error)
+}
+
+// PipelineRunRefPrefix marks a delivery's run_id as a pipeline run id
+// rather than a run id. The column has no foreign key (see migration
+// 00003), so one column carries both; everything reading it must strip the
+// prefix to know which table to look in.
+const PipelineRunRefPrefix = "pr:"
+
+// serviceActor is the actor the router acts as when it starts a pipeline: a
+// webhook delivery has no human behind it, exactly like the run engine's
+// own unattended sessions.
+var serviceActor = Actor{IsAdmin: true}
+
 // Repos bundles the repositories the service reads and writes.
 type Repos struct {
 	Templates  *db.Templates
@@ -45,8 +67,12 @@ type Repos struct {
 type Service struct {
 	repos  Repos
 	engine RunStarter
-	logger *slog.Logger
-	now    func() time.Time
+	// pipelines starts the pipeline runs of triggers that name one. Nil
+	// until WithPipelines attaches the executor (the composition root wires
+	// it after both services exist).
+	pipelines PipelineStarter
+	logger    *slog.Logger
+	now       func() time.Time
 
 	// box is held for symmetry with the other services that store sealed
 	// secrets. Trigger secrets are stored as a sha256 hash, never sealed
@@ -64,6 +90,25 @@ func New(repos Repos, engine RunStarter, box *crypto.Box, logger *slog.Logger, n
 		now = time.Now
 	}
 	return &Service{repos: repos, engine: engine, box: box, logger: logger, now: now}
+}
+
+// WithPipelines attaches the pipeline executor and returns s, so the
+// composition root can wire the two services that reference each other.
+func (s *Service) WithPipelines(p PipelineStarter) *Service {
+	s.pipelines = p
+	return s
+}
+
+// validateTarget enforces the plan's "exactly one of template_id and
+// pipeline_id" rule on a trigger or schedule input.
+func validateTarget(templateID, pipelineID string) error {
+	switch {
+	case templateID == "" && pipelineID == "":
+		return fmt.Errorf("%w: one of template_id and pipeline_id is required", domain.ErrInvalid)
+	case templateID != "" && pipelineID != "":
+		return fmt.Errorf("%w: exactly one of template_id and pipeline_id may be set", domain.ErrInvalid)
+	}
+	return nil
 }
 
 // visibleOwner reports whether actor may see a row owned by owner: admins

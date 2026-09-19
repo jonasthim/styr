@@ -109,12 +109,13 @@ func TestTriggersCreate_PipelineIDOnly_OK(t *testing.T) {
 		if in.TemplateID != "" {
 			t.Fatalf("template_id = %q, want empty", in.TemplateID)
 		}
-		if in.PipelineID == nil || *in.PipelineID != "pipe-1" {
+		if in.PipelineID != "pipe-1" {
 			t.Fatalf("pipeline_id = %v, want pipe-1", in.PipelineID)
 		}
 		trig := sampleTrigger()
 		trig.TemplateID = ""
-		trig.PipelineID = in.PipelineID
+		pid := in.PipelineID
+		trig.PipelineID = &pid
 		return trig, "styr_whs_plaintext_secret", nil
 	}
 	var out triggerCreateOut

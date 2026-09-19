@@ -19,6 +19,7 @@ import (
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/harness/claude"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/pipelines"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
@@ -52,6 +53,7 @@ type background struct {
 	Runs      *runs.Engine
 	Triggers  *triggers.Service
 	Schedules *schedules.Service
+	Pipelines *pipelines.Executor
 }
 
 func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *sessions.Service, *background, error) {
@@ -79,6 +81,9 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	loopsRepo := db.NewLoops(d)
 	schedulesRepo := db.NewSchedules(d)
 	scheduleFiringsRepo := db.NewScheduleFirings(d)
+	pipelinesRepo := db.NewPipelines(d)
+	pipelineRunsRepo := db.NewPipelineRuns(d)
+	stepRunsRepo := db.NewStepRuns(d)
 
 	h := claude.New(cfg.ClaudeBin)
 
@@ -129,6 +134,20 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Schedules: schedulesRepo,
 		Firings:   scheduleFiringsRepo,
 	}, runsEngine, runsEngine, nil, slog.Default())
+
+	// The pipeline executor chains runs: it starts each step through the
+	// same run engine and advances the graph on the event bus. Triggers and
+	// schedules learn about it afterwards, since it is only reachable once
+	// the run engine exists.
+	pipelinesExec := pipelines.New(pipelines.Repos{
+		Pipelines:    pipelinesRepo,
+		PipelineRuns: pipelineRunsRepo,
+		StepRuns:     stepRunsRepo,
+		Runs:         runsRepo,
+		Workspaces:   workspacesRepo,
+	}, runsEngine, svc, sessionsRepo, bus, pipelines.NewTemplateIndex(templatesRepo), nil, slog.Default())
+	triggersSvc = triggersSvc.WithPipelines(pipelinesExec)
+	schedulesSvc = schedulesSvc.WithPipelines(pipelinesExec)
 
 	statsSvc := stats.New(d, sessionsRepo, users, slog.Default())
 
@@ -181,6 +200,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Notifications:  channelsRepo,
 		Notifier:       notifier,
 		Schedules:      schedulesSvc,
+		Pipelines:      pipelinesExec,
 		Stats:          statsSvc,
 		Users:          users,
 		Tokens:         tokens,
@@ -208,7 +228,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		MaxOpenSessions: cfg.MaxOpenSessions,
 		IdleTimeout:     cfg.IdleTimeout,
 	}
-	return deps, svc, &background{Runs: runsEngine, Triggers: triggersSvc, Schedules: schedulesSvc}, nil
+	return deps, svc, &background{Runs: runsEngine, Triggers: triggersSvc, Schedules: schedulesSvc, Pipelines: pipelinesExec}, nil
 }
 
 // probeClaudeVersion runs `<bin> --version` once at startup and returns its

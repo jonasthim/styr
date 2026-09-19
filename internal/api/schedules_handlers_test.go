@@ -113,12 +113,13 @@ func TestSchedulesCreate_PipelineIDOnly_OK(t *testing.T) {
 		if in.TemplateID != "" {
 			t.Fatalf("template_id = %q, want empty", in.TemplateID)
 		}
-		if in.PipelineID == nil || *in.PipelineID != "pipe-1" {
+		if in.PipelineID != "pipe-1" {
 			t.Fatalf("pipeline_id = %v, want pipe-1", in.PipelineID)
 		}
 		sc := sampleSchedule()
 		sc.TemplateID = ""
-		sc.PipelineID = in.PipelineID
+		pid := in.PipelineID
+		sc.PipelineID = &pid
 		return sc, nil
 	}
 	var out scheduleOut

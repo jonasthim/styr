@@ -25,7 +25,7 @@ func (t *Triggers) Create(ctx context.Context, tr domain.Trigger) error {
 		INSERT INTO triggers (`+triggerColumns+`)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tr.ID, ownerArg(tr.OwnerID), tr.Name, tr.Slug, string(tr.Kind), tr.SecretHash, tr.SecretHint,
-		tr.TemplateID, optionalString(tr.PipelineID), boolToInt(tr.Enabled), tr.DedupeKeyTemplate, tr.CooldownS, tr.StormCapPerHour,
+		emptyToNull(tr.TemplateID), optionalString(tr.PipelineID), boolToInt(tr.Enabled), tr.DedupeKeyTemplate, tr.CooldownS, tr.StormCapPerHour,
 		boolToInt(tr.RunOnResolved), nowString(tr.CreatedAt), nowString(tr.UpdatedAt), optionalTime(tr.LastDeliveryAt))
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -41,13 +41,14 @@ func scanTrigger(row interface{ Scan(dest ...any) error }) (*domain.Trigger, err
 		tr                   domain.Trigger
 		ownerID              sql.NullString
 		kind                 string
+		templateID           sql.NullString
 		pipelineID           sql.NullString
 		enabled, runOnResolv int
 		createdAt, updatedAt string
 		lastDeliveryAt       sql.NullString
 	)
 	if err := row.Scan(
-		&tr.ID, &ownerID, &tr.Name, &tr.Slug, &kind, &tr.SecretHash, &tr.SecretHint, &tr.TemplateID, &pipelineID,
+		&tr.ID, &ownerID, &tr.Name, &tr.Slug, &kind, &tr.SecretHash, &tr.SecretHint, &templateID, &pipelineID,
 		&enabled, &tr.DedupeKeyTemplate, &tr.CooldownS, &tr.StormCapPerHour, &runOnResolv,
 		&createdAt, &updatedAt, &lastDeliveryAt,
 	); err != nil {
@@ -55,6 +56,9 @@ func scanTrigger(row interface{ Scan(dest ...any) error }) (*domain.Trigger, err
 	}
 	tr.OwnerID = nullString(ownerID)
 	tr.Kind = domain.TriggerKind(kind)
+	// template_id is NULL for a trigger that starts a pipeline instead of a
+	// template (migration 00009); the domain uses "" for that.
+	tr.TemplateID = templateID.String
 	tr.PipelineID = nullString(pipelineID)
 	tr.Enabled = enabled != 0
 	tr.RunOnResolved = runOnResolv != 0

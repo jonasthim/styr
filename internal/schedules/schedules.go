@@ -16,6 +16,7 @@ import (
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/sessions"
+	"github.com/jonasthim/styr/internal/templates"
 )
 
 // Actor identifies who is calling the service. Shared with
@@ -41,6 +42,25 @@ type RunLookup interface {
 	Get(ctx context.Context, id string) (domain.RunView, error)
 }
 
+// PipelineStarter starts a pipeline run, for a schedule that names a
+// pipeline instead of a template. *pipelines.Executor implements it; it is
+// optional (nil until the composition root attaches one), and a schedule
+// pointing at a pipeline without it records a failed firing.
+type PipelineStarter interface {
+	Start(ctx context.Context, actor Actor, pipelineID string, input templates.Vars,
+		origin domain.Origin, originRef string) (domain.PipelineRun, error)
+}
+
+// PipelineRunRefPrefix marks a firing's run_id as a pipeline run id rather
+// than a run id. The column has no foreign key (see migration 00006), so
+// one column carries both; everything reading it must strip the prefix to
+// know which table to look in.
+const PipelineRunRefPrefix = "pr:"
+
+// serviceActor is the actor the scheduler acts as when it starts a
+// pipeline: a tick has no human behind it.
+var serviceActor = Actor{IsAdmin: true}
+
 // Repos bundles the repositories the service reads and writes.
 type Repos struct {
 	Schedules *db.Schedules
@@ -52,8 +72,12 @@ type Service struct {
 	repos   Repos
 	starter RunStarter
 	lookup  RunLookup
-	now     func() time.Time
-	logger  *slog.Logger
+	// pipelines starts the pipeline runs of schedules that name one. Nil
+	// until WithPipelines attaches the executor (the composition root wires
+	// it after both services exist).
+	pipelines PipelineStarter
+	now       func() time.Time
+	logger    *slog.Logger
 }
 
 // New constructs a Service. now is the clock used for next-run
@@ -67,6 +91,34 @@ func New(repos Repos, starter RunStarter, lookup RunLookup, now func() time.Time
 		logger = slog.Default()
 	}
 	return &Service{repos: repos, starter: starter, lookup: lookup, now: now, logger: logger}
+}
+
+// WithPipelines attaches the pipeline executor and returns s, so the
+// composition root can wire the two services that reference each other.
+func (s *Service) WithPipelines(p PipelineStarter) *Service {
+	s.pipelines = p
+	return s
+}
+
+// validateTarget enforces the plan's "exactly one of template_id and
+// pipeline_id" rule on a schedule input.
+func validateTarget(templateID, pipelineID string) error {
+	switch {
+	case templateID == "" && pipelineID == "":
+		return fmt.Errorf("%w: one of template_id and pipeline_id is required", domain.ErrInvalid)
+	case templateID != "" && pipelineID != "":
+		return fmt.Errorf("%w: exactly one of template_id and pipeline_id may be set", domain.ErrInvalid)
+	}
+	return nil
+}
+
+// optionalID turns an empty id into a nil pointer, for the nullable
+// pipeline_id column.
+func optionalID(id string) *string {
+	if id == "" {
+		return nil
+	}
+	return &id
 }
 
 // visibleOwner reports whether actor may see a row owned by owner: admins

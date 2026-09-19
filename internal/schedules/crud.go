@@ -23,8 +23,8 @@ func (s *Service) Create(ctx context.Context, actor Actor, in domain.ScheduleInp
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.Schedule{}, fmt.Errorf("%w: name is required", domain.ErrInvalid)
 	}
-	if in.TemplateID == "" {
-		return domain.Schedule{}, fmt.Errorf("%w: template_id is required", domain.ErrInvalid)
+	if err := validateTarget(in.TemplateID, in.PipelineID); err != nil {
+		return domain.Schedule{}, err
 	}
 	sched, err := parseCron(in.Cron)
 	if err != nil {
@@ -42,6 +42,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in domain.ScheduleInp
 		OwnerID:    ownerFor(actor, in.Shared),
 		Name:       strings.TrimSpace(in.Name),
 		TemplateID: in.TemplateID,
+		PipelineID: optionalID(in.PipelineID),
 		Cron:       in.Cron,
 		Enabled:    in.Enabled == nil || *in.Enabled,
 		Vars:       vars,
@@ -84,8 +85,8 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in domain.
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.Schedule{}, fmt.Errorf("%w: name is required", domain.ErrInvalid)
 	}
-	if in.TemplateID == "" {
-		return domain.Schedule{}, fmt.Errorf("%w: template_id is required", domain.ErrInvalid)
+	if err := validateTarget(in.TemplateID, in.PipelineID); err != nil {
+		return domain.Schedule{}, err
 	}
 	sched, err := parseCron(in.Cron)
 	if err != nil {
@@ -102,6 +103,7 @@ func (s *Service) Update(ctx context.Context, actor Actor, id string, in domain.
 	}
 	updated.Name = strings.TrimSpace(in.Name)
 	updated.TemplateID = in.TemplateID
+	updated.PipelineID = optionalID(in.PipelineID)
 	cronChanged := updated.Cron != in.Cron
 	updated.Cron = in.Cron
 	updated.Vars = vars

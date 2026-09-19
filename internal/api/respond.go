@@ -82,3 +82,12 @@ func userMessage(err, sentinel error) string {
 	}
 	return msg
 }
+
+// derefString returns the string behind p, or "" when p is nil; JSON inputs
+// carry nullable ids while the domain uses "" for "not set".
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
+}

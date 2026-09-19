@@ -72,7 +72,7 @@ type scheduleInput struct {
 
 func (in scheduleInput) toDomain() domain.ScheduleInput {
 	return domain.ScheduleInput{
-		Name: in.Name, TemplateID: in.TemplateID, PipelineID: in.PipelineID, Cron: in.Cron, Vars: in.Vars,
+		Name: in.Name, TemplateID: in.TemplateID, PipelineID: derefString(in.PipelineID), Cron: in.Cron, Vars: in.Vars,
 		Enabled: in.Enabled, Shared: in.Shared,
 	}
 }

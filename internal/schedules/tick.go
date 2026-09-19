@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -88,6 +89,12 @@ func (s *Service) overlapping(ctx context.Context, scheduleID string) bool {
 	if err != nil {
 		return false
 	}
+	if strings.HasPrefix(runID, PipelineRunRefPrefix) {
+		// A pipeline run is not a run row and this service has no reader for
+		// one, so a pipeline schedule does not skip on overlap yet: its
+		// cadence is expected to be longer than its pipeline's timeout.
+		return false
+	}
 	view, err := s.lookup.Get(ctx, runID)
 	if err != nil {
 		return false
@@ -105,6 +112,10 @@ func (s *Service) startAndRecord(ctx context.Context, sc domain.Schedule, firedA
 		return domain.Run{}, err
 	}
 
+	if sc.PipelineID != nil {
+		return s.startPipeline(ctx, sc, vars, firedAt)
+	}
+
 	run, err := s.starter.Start(ctx, RunInput{
 		TemplateID: sc.TemplateID,
 		Vars:       vars,
@@ -118,6 +129,27 @@ func (s *Service) startAndRecord(ctx context.Context, sc domain.Schedule, firedA
 	runID := run.ID
 	s.finishFiring(ctx, sc.ID, firedAt, domain.FiringStarted, "", &runID, "started")
 	return run, nil
+}
+
+// startPipeline fires a schedule that names a pipeline instead of a
+// template. The firing's run_id records the pipeline run id behind the
+// PipelineRunRefPrefix, and the Run returned to the caller (RunNow's
+// response) is a stand-in carrying that same prefixed id: a pipeline run is
+// not a run row, but the scheduler's API predates pipelines.
+func (s *Service) startPipeline(ctx context.Context, sc domain.Schedule, vars templates.Vars, firedAt time.Time) (domain.Run, error) {
+	if s.pipelines == nil {
+		const reason = "pipelines are not available"
+		s.finishFiring(ctx, sc.ID, firedAt, domain.FiringFailed, reason, nil, "failed")
+		return domain.Run{}, fmt.Errorf("%w: %s", domain.ErrConflict, reason)
+	}
+	pr, err := s.pipelines.Start(ctx, serviceActor, *sc.PipelineID, vars, domain.OriginSchedule, sc.ID)
+	if err != nil {
+		s.finishFiring(ctx, sc.ID, firedAt, domain.FiringFailed, err.Error(), nil, "failed")
+		return domain.Run{}, err
+	}
+	ref := PipelineRunRefPrefix + pr.ID
+	s.finishFiring(ctx, sc.ID, firedAt, domain.FiringStarted, "", &ref, "started")
+	return domain.Run{ID: ref, Origin: string(domain.OriginSchedule), StartedAt: pr.StartedAt, Outcome: domain.RunRunning}, nil
 }
 
 // finishFiring records a firing and stamps the schedule's last_run_at/
