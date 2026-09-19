@@ -1,0 +1,147 @@
+# Changelog
+
+All notable changes to Styr are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Version numbers are
+`MAJOR.MINOR.PATCH`; see [docs/API.md](docs/API.md) for what "stable" means for the API
+starting at `1.0.0`.
+
+## [Unreleased]
+
+Work merged toward v1.0.0, "Boring and durable": a second harness, a stable API, an upgrade
+and backup story, and roles for a handful of users. Completed so far, on this card and its
+neighbours:
+
+### Added
+
+- Codex CLI harness alongside Claude Code, behind the same internal harness interface: a Codex
+  session can investigate read-only or edit inside a worktree, the same way a Claude Code
+  session does. Codex approvals are not supported the same way Claude Code's are — Codex
+  enforces its sandbox policy up front rather than asking per command — so a Codex session's
+  inbox affordances differ from a Claude Code session's.
+- `styr backup <file>` and `styr restore <file>`: an online SQLite backup (`VACUUM INTO`, no
+  downtime) plus a manifest recording the styr and schema version it was taken with. Restore
+  refuses to run against a server that is still up, and refuses a backup whose schema is newer
+  than the binary doing the restoring supports.
+- `doctor` now checks free disk space and flags orphaned session worktrees left behind by a
+  crash; `install.sh --version <v>` refuses to downgrade past the version already installed.
+- CI now also greps for Codex's own dangerous bypass flag, alongside the existing Claude Code
+  guard.
+
+Still to land on the rest of this wave: the harness registry and a per-session/per-workspace
+choice of harness, this API freeze's own `viewer` role and per-workspace access lists, the
+integration pass, and the v1.0.0 release itself.
+
+## [0.5.0] - 2026-09-19
+
+"Pipelines."
+
+### Added
+
+- YAML DAG pipelines: a pipeline is a small chain of steps, each one a template run whose
+  structured report feeds the steps that come after it.
+- Fan-out: a step's `foreach` over a list becomes N parallel step-runs, one per item.
+- Retries: a failed step gets a fresh attempt within its own budget before the failure cascades
+  to the whole pipeline run.
+- Shared worktrees: a step can continue in a dependency's own worktree instead of a fresh one,
+  so a triage → fix → verify chain edits and tests the same checkout.
+- A live graph on the pipeline run page, showing every step's state, attempt and report as it
+  happens.
+- Pipelines can now start from a trigger or a schedule, not just by hand, the same as a
+  template.
+- `docs/PIPELINES.md`: the full YAML format, execution semantics and worktree modes.
+
+## [0.4.0] - 2026-09-19
+
+"Schedules and loops."
+
+### Added
+
+- Cron schedules that start a template run on a cadence, with overlap protection: a schedule
+  never runs two of its own instances concurrently, it skips (and logs) the tick instead.
+- Until-done loops: a template repeats its run on the same session until its structured report
+  says it's done, or its iteration budget runs out.
+- A fleet Gantt: one lane per active session, showing running, waiting and idle time over the
+  last 1h, 6h or 24h.
+- A cost dashboard: what the whole box has spent, per day, per user and per origin, plus the
+  top templates by spend.
+- `docs/SCHEDULES.md`: the full schedule, loop, Gantt and cost guide.
+
+## [0.3.0] - 2026-09-19
+
+"Review."
+
+### Added
+
+- A worktree per session on a worktree-enabled workspace: sessions run on their own branch,
+  never in the workspace's shared checkout.
+- Diff review with inline comments that become the session's next prompt once the review is
+  sent.
+- Commit (folds a session's checkpoints into one commit) and Open PR (push plus `gh pr create`)
+  straight from the session view.
+- Checkpoints after every turn, with rewind to any of them — files only, the chat is kept.
+- Plan approval: a plan-mode session's finished plan renders as a checklist you approve or send
+  back with comments.
+- `docs/REVIEW.md`: the full worktree, review, checkpoint and plan-approval guide.
+
+### Fixed
+
+- Error responses no longer repeat their own error-category prefix twice (an error used to
+  read like "conflict: conflict: ...").
+
+## [0.2.0] - 2026-09-18
+
+"Triggers."
+
+### Added
+
+- Templates and inbound webhook triggers (generic, Grafana, GitHub kinds), with dedupe, a
+  cooldown window and a storm cap so a flapping alert can't flood the box.
+- A seeded Grafana alert-investigation template, ready to point a Grafana contact point at.
+- Runs and reports: every unattended investigation, its structured report and its cost, on a
+  Runs page any signed-in user can see.
+- ntfy and generic-webhook outbound notifications when a run finishes, needs a human, or fails.
+- Per-user managed workspaces, cloned from a git URL or created empty on demand, instead of
+  only admin-registered server paths.
+- Personal API tokens, for scripting against the API without a browser session.
+- A per-session model and reasoning-effort switch, changeable mid-session.
+- A slash-command menu in the composer, fed by the CLI's own commands and skills.
+- `docs/TRIGGERS.md`: the full trigger, run and notification setup guide.
+
+## [0.1.1 to 0.1.4] - 2026-09-18
+
+Small fixes and polish between the first release and the v0.2.0 feature work, folded into one
+entry here rather than four separate ones.
+
+### Added
+
+- An onboarding redirect straight into a new user's first workspace, a "sign out everywhere"
+  action, and a theme option that follows the system setting.
+
+### Fixed
+
+- A user's own chat turns are now recorded in the session transcript (previously only the
+  assistant's side was kept).
+- Database writes take an immediate-mode transaction lock up front, instead of occasionally
+  hitting a "database is busy" error under concurrent writers.
+- A failed Claude token verification now explains why (expired, revoked, wrong scope, ...)
+  instead of failing silently.
+- The install script now installs `git` as a dependency and locates the `claude` binary
+  correctly without a login shell; `doctor` now loads the same environment file the service
+  does, so its checks match what's actually running.
+- `/etc/styr/env` is now readable by the `styr` group (and `doctor` warns when it isn't); the
+  release workflow now attaches `install.sh` to each GitHub release as its own downloadable
+  asset, rather than only inside the source archive.
+
+## [0.1.0] - 2026-09-18
+
+"Cockpit." The first release.
+
+### Added
+
+- OIDC login (PKCE) with per-user profiles; the first user to ever sign in becomes admin.
+- A sessions list and a session view with tool-call blocks and an activity timeline.
+- An inbox with approvals: allow, deny, or edit-then-allow a pending permission prompt from
+  your phone.
+- Workspaces and profiles.
+- A command palette (`Cmd+K`) and full keyboard shortcuts.
+- An install script and a Docker image; zero telemetry.

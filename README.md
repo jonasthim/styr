@@ -64,6 +64,11 @@ setup (Authentik, Authelia, Pocket ID, Keycloak).
 
 ## Features
 
+- **Stable API.** Every session, workspace, trigger, run, pipeline and schedule is reachable
+  over a documented REST and SSE API (`docs/openapi.yaml`), versioned separately from the
+  server itself and, within the 1.x line, additive-only — see [docs/API.md](docs/API.md) for
+  authentication, conventions, a curl walkthrough and the compatibility promise.
+
 ![Styr runs view](docs/screenshots/runs.png)
 
 v0.1 "Cockpit":
