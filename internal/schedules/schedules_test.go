@@ -15,6 +15,7 @@ import (
 
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/domain"
+	"github.com/jonasthim/styr/internal/templates"
 )
 
 var (
@@ -86,12 +87,13 @@ func (f *fakeLookup) set(id string, outcome domain.RunOutcome) {
 }
 
 type fixture struct {
-	svc     *Service
-	repos   Repos
-	starter *fakeStarter
-	lookup  *fakeLookup
-	tplID   string
-	now     time.Time
+	svc      *Service
+	database *db.DB
+	repos    Repos
+	starter  *fakeStarter
+	lookup   *fakeLookup
+	tplID    string
+	now      time.Time
 }
 
 // newFixture builds a service over a temp database with a ready workspace
@@ -134,6 +136,7 @@ func newFixture(t *testing.T) *fixture {
 	}
 
 	f := &fixture{
+		database: database,
 		repos: Repos{
 			Schedules: db.NewSchedules(database),
 			Firings:   db.NewScheduleFirings(database),
@@ -509,5 +512,120 @@ func TestService_VarsMergedWithScheduleKey(t *testing.T) {
 	}
 	if sched["fired_at"] != f.now.UTC().Format(time.RFC3339) {
 		t.Fatalf("Vars[schedule][fired_at] = %v, want %v", sched["fired_at"], f.now.UTC().Format(time.RFC3339))
+	}
+}
+
+// stubPipelineStarter stands in for the pipeline executor.
+type stubPipelineStarter struct {
+	mu    sync.Mutex
+	calls []pipelineStart
+	err   error
+}
+
+type pipelineStart struct {
+	actor      Actor
+	pipelineID string
+	input      templates.Vars
+	origin     domain.Origin
+	originRef  string
+}
+
+func (s *stubPipelineStarter) Start(_ context.Context, actor Actor, pipelineID string, input templates.Vars,
+	origin domain.Origin, originRef string,
+) (domain.PipelineRun, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls = append(s.calls, pipelineStart{actor: actor, pipelineID: pipelineID, input: input, origin: origin, originRef: originRef})
+	if s.err != nil {
+		return domain.PipelineRun{}, s.err
+	}
+	return domain.PipelineRun{ID: fmt.Sprintf("prun-%d", len(s.calls)), State: domain.PipelineRunRunning, StartedAt: base}, nil
+}
+
+func (s *stubPipelineStarter) snapshot() []pipelineStart {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]pipelineStart(nil), s.calls...)
+}
+
+// A schedule may name a pipeline instead of a template; a tick then starts
+// a pipeline run and the firing records it behind the "pr:" prefix.
+func TestService_TickStartsAPipelineWhenTheScheduleNamesOne(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	starter := &stubPipelineStarter{}
+	f.svc.WithPipelines(starter)
+
+	pl := domain.Pipeline{ID: "pl-1", Name: "nightly-sweep", WorkspaceID: "ws-1",
+		YAML: "name: nightly-sweep\nsteps: []\n", CreatedAt: base, UpdatedAt: base}
+	if err := db.NewPipelines(f.database).Create(ctx, pl); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	sc, err := f.svc.Create(ctx, admin, domain.ScheduleInput{
+		Name: "nightly", PipelineID: pl.ID, Cron: "*/5 * * * *", Shared: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if sc.TemplateID != "" || sc.PipelineID == nil || *sc.PipelineID != pl.ID {
+		t.Fatalf("schedule = %+v, want a pipeline target only", sc)
+	}
+
+	f.now = base.Add(5 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+
+	calls := starter.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("pipeline starts = %d, want 1", len(calls))
+	}
+	if calls[0].pipelineID != pl.ID || calls[0].origin != domain.OriginSchedule || calls[0].originRef != sc.ID {
+		t.Fatalf("pipeline start = %+v", calls[0])
+	}
+	if sched, _ := calls[0].input["schedule"].(map[string]any); sched["name"] != "nightly" {
+		t.Fatalf("pipeline input = %+v, want the schedule vars", calls[0].input)
+	}
+	if got := len(f.starter.calls()); got != 0 {
+		t.Fatalf("started %d template runs, want none", got)
+	}
+
+	firings, err := f.repos.Firings.ListBySchedule(ctx, sc.ID, 10)
+	if err != nil {
+		t.Fatalf("list firings: %v", err)
+	}
+	if len(firings) != 1 || firings[0].Status != domain.FiringStarted {
+		t.Fatalf("firings = %+v", firings)
+	}
+	if firings[0].RunID == nil || *firings[0].RunID != PipelineRunRefPrefix+"prun-1" {
+		t.Fatalf("firing run_id = %v, want the prefixed pipeline run id", firings[0].RunID)
+	}
+
+	// A "pr:" reference is not a run row: the overlap check leaves the
+	// schedule firing rather than skipping forever.
+	f.now = base.Add(10 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	if got := len(starter.snapshot()); got != 2 {
+		t.Fatalf("pipeline starts after the second tick = %d, want 2", got)
+	}
+}
+
+// A schedule input names exactly one of template_id and pipeline_id.
+func TestService_CreateRequiresExactlyOneTarget(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	pl := domain.Pipeline{ID: "pl-2", Name: "either-or", WorkspaceID: "ws-1",
+		YAML: "name: either-or\nsteps: []\n", CreatedAt: base, UpdatedAt: base}
+	if err := db.NewPipelines(f.database).Create(ctx, pl); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+
+	if _, err := f.svc.Create(ctx, admin, domain.ScheduleInput{Name: "neither", Cron: "*/5 * * * *"}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("no target error = %v, want ErrInvalid", err)
+	}
+	_, err := f.svc.Create(ctx, admin, domain.ScheduleInput{
+		Name: "both", TemplateID: f.tplID, PipelineID: pl.ID, Cron: "*/5 * * * *",
+	})
+	if !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("two targets error = %v, want ErrInvalid", err)
 	}
 }

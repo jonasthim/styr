@@ -269,10 +269,37 @@ func (e *Engine) finish(ctx context.Context, run domain.Run, outcome domain.RunO
 	}
 	e.notified.forget(run.ID)
 	e.logger.Info("runs: finished", "run_id", run.ID, "outcome", outcome)
+	e.publishFinished(run, outcome)
 	// Every path that closes a run out goes through finish, so this is the
 	// one place a loop has to learn that one of its iterations ended.
 	e.advance(ctx, run, outcome, report)
 	return true
+}
+
+// publishFinished announces a closed-out run on the event bus, as
+// EventFinished (success) or EventFailed (every other outcome). The
+// pipeline executor subscribes to these to advance a pipeline's graph when
+// one of its step runs ends; the SSE stream forwards them to the UI. It is
+// published after the run row is written, so a subscriber that reads the
+// run back always sees the finished row.
+func (e *Engine) publishFinished(run domain.Run, outcome domain.RunOutcome) {
+	if e.bus == nil {
+		return
+	}
+	kind := EventFinished
+	if outcome != domain.RunSuccess {
+		kind = EventFailed
+	}
+	payload, err := json.Marshal(struct {
+		RunID     string  `json:"run_id"`
+		StepRunID *string `json:"step_run_id"`
+		Outcome   string  `json:"outcome"`
+	}{RunID: run.ID, StepRunID: run.StepRunID, Outcome: string(outcome)})
+	if err != nil {
+		e.logger.Error("runs: marshal run state", "run_id", run.ID, "error", err)
+		return
+	}
+	e.bus.Publish(events.Message{Kind: kind, SessionID: run.SessionID, Payload: payload})
 }
 
 // costOf returns the session's accumulated cost, falling back to (and never

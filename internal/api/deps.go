@@ -14,6 +14,7 @@ import (
 	"github.com/jonasthim/styr/internal/domain"
 	"github.com/jonasthim/styr/internal/events"
 	"github.com/jonasthim/styr/internal/notify"
+	"github.com/jonasthim/styr/internal/pipelines"
 	"github.com/jonasthim/styr/internal/runs"
 	"github.com/jonasthim/styr/internal/schedules"
 	"github.com/jonasthim/styr/internal/sessions"
@@ -178,6 +179,13 @@ type Deps struct {
 	// (internal/schedules.Service and internal/stats.Service at runtime).
 	Schedules SchedulesService
 	Stats     StatsService
+
+	// Pipelines backs the /pipelines and /pipeline-runs routes
+	// (internal/pipelines.Executor at runtime, wired in by the composition
+	// root). It is the concrete type rather than an interface because its
+	// run view (pipelines.RunView) is this package's only way to name a
+	// pipeline graph.
+	Pipelines *pipelines.Executor
 
 	// MaxOpenSessions and IdleTimeout surface the sessions scheduler's
 	// configured limits on GET /api/v1/settings. sessions.Service does not

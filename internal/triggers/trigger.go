@@ -49,13 +49,17 @@ func (s *Service) CreateTrigger(ctx context.Context, actor Actor, in domain.Trig
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.Trigger{}, "", fmt.Errorf("%w: name is required", domain.ErrInvalid)
 	}
-	if in.TemplateID == "" {
-		return domain.Trigger{}, "", fmt.Errorf("%w: template_id is required", domain.ErrInvalid)
+	if err := validateTarget(in.TemplateID, in.PipelineID); err != nil {
+		return domain.Trigger{}, "", err
 	}
 	// A trigger may only point at a template the actor can see; the FK
-	// alone would happily accept someone else's private template.
-	if _, err := s.GetTemplate(ctx, actor, in.TemplateID); err != nil {
-		return domain.Trigger{}, "", err
+	// alone would happily accept someone else's private template. A
+	// pipeline target is checked by the foreign key only: the executor
+	// re-checks visibility when it starts the run.
+	if in.TemplateID != "" {
+		if _, err := s.GetTemplate(ctx, actor, in.TemplateID); err != nil {
+			return domain.Trigger{}, "", err
+		}
 	}
 
 	slug, err := s.uniqueSlug(ctx, slugify(in.Name))
@@ -77,6 +81,7 @@ func (s *Service) CreateTrigger(ctx context.Context, actor Actor, in domain.Trig
 		SecretHash:        hashSecret(secret),
 		SecretHint:        secretHint(secret),
 		TemplateID:        in.TemplateID,
+		PipelineID:        optionalID(in.PipelineID),
 		Enabled:           in.Enabled == nil || *in.Enabled,
 		DedupeKeyTemplate: in.DedupeKeyTemplate,
 		CooldownS:         orDefault(in.CooldownS, defaultCooldownS),
@@ -124,10 +129,10 @@ func (s *Service) UpdateTrigger(ctx context.Context, actor Actor, id string, in 
 	if strings.TrimSpace(in.Name) == "" {
 		return domain.Trigger{}, fmt.Errorf("%w: name is required", domain.ErrInvalid)
 	}
-	if in.TemplateID == "" {
-		return domain.Trigger{}, fmt.Errorf("%w: template_id is required", domain.ErrInvalid)
+	if err := validateTarget(in.TemplateID, in.PipelineID); err != nil {
+		return domain.Trigger{}, err
 	}
-	if in.TemplateID != existing.TemplateID {
+	if in.TemplateID != "" && in.TemplateID != existing.TemplateID {
 		if _, err := s.GetTemplate(ctx, actor, in.TemplateID); err != nil {
 			return domain.Trigger{}, err
 		}
@@ -140,6 +145,7 @@ func (s *Service) UpdateTrigger(ctx context.Context, actor Actor, id string, in 
 	updated.Name = strings.TrimSpace(in.Name)
 	updated.Kind = kind
 	updated.TemplateID = in.TemplateID
+	updated.PipelineID = optionalID(in.PipelineID)
 	updated.DedupeKeyTemplate = in.DedupeKeyTemplate
 	updated.CooldownS = orDefault(in.CooldownS, defaultCooldownS)
 	updated.StormCapPerHour = orDefault(in.StormCapPerHour, defaultStormCap)
@@ -268,6 +274,15 @@ func validateTriggerKind(kind string) (domain.TriggerKind, error) {
 	default:
 		return "", fmt.Errorf("%w: unknown trigger kind %q", domain.ErrInvalid, kind)
 	}
+}
+
+// optionalID turns an empty id into a nil pointer, for the nullable
+// pipeline_id column.
+func optionalID(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 // orDefault applies a column default to a non-positive input value.

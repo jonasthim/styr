@@ -187,6 +187,10 @@ func (s *Service) process(ctx context.Context, tr domain.Trigger, payload []byte
 		return domain.Delivery{}, err
 	}
 
+	if tr.PipelineID != nil {
+		return s.startPipeline(ctx, tr, dl, vars), nil
+	}
+
 	run, err := s.engine.Start(ctx, RunInput{
 		TemplateID: tr.TemplateID,
 		TriggerID:  tr.ID,
@@ -197,14 +201,7 @@ func (s *Service) process(ctx context.Context, tr domain.Trigger, payload []byte
 	if err != nil {
 		// The delivery row already exists (the run references it), so the
 		// failure is recorded on the row rather than losing it.
-		reason := "start run: " + err.Error()
-		s.logger.Error("triggers: start run", "trigger_id", tr.ID, "delivery_id", dl.ID, "error", err)
-		if sErr := s.repos.Deliveries.SetStatus(ctx, dl.ID, domain.DeliveryFailed, reason); sErr != nil {
-			s.logger.Error("triggers: mark delivery failed", "delivery_id", dl.ID, "error", sErr)
-		}
-		dl.Status = domain.DeliveryFailed
-		dl.Reason = reason
-		return dl, nil
+		return s.failDelivery(ctx, dl, "start run: "+err.Error(), err), nil
 	}
 
 	if err := s.repos.Deliveries.SetRun(ctx, dl.ID, run.ID); err != nil {
@@ -213,6 +210,38 @@ func (s *Service) process(ctx context.Context, tr domain.Trigger, payload []byte
 	runID := run.ID
 	dl.RunID = &runID
 	return dl, nil
+}
+
+// startPipeline starts the pipeline run of a trigger that names a pipeline
+// instead of a template. The delivery's run_id records the pipeline run id
+// behind the PipelineRunRefPrefix, since one nullable column carries both
+// kinds of reference.
+func (s *Service) startPipeline(ctx context.Context, tr domain.Trigger, dl domain.Delivery, vars templates.Vars) domain.Delivery {
+	if s.pipelines == nil {
+		return s.failDelivery(ctx, dl, "start pipeline: pipelines are not available", nil)
+	}
+	pr, err := s.pipelines.Start(ctx, serviceActor, *tr.PipelineID, vars, domain.OriginWebhook, tr.ID)
+	if err != nil {
+		return s.failDelivery(ctx, dl, "start pipeline: "+err.Error(), err)
+	}
+	ref := PipelineRunRefPrefix + pr.ID
+	if err := s.repos.Deliveries.SetRun(ctx, dl.ID, ref); err != nil {
+		s.logger.Error("triggers: link delivery to pipeline run", "delivery_id", dl.ID, "pipeline_run_id", pr.ID, "error", err)
+	}
+	dl.RunID = &ref
+	return dl
+}
+
+// failDelivery records a delivery that was accepted but whose run (or
+// pipeline run) could not be started, and returns the updated row.
+func (s *Service) failDelivery(ctx context.Context, dl domain.Delivery, reason string, err error) domain.Delivery {
+	s.logger.Error("triggers: start", "trigger_id", dl.TriggerID, "delivery_id", dl.ID, "error", err, "reason", reason)
+	if sErr := s.repos.Deliveries.SetStatus(ctx, dl.ID, domain.DeliveryFailed, reason); sErr != nil {
+		s.logger.Error("triggers: mark delivery failed", "delivery_id", dl.ID, "error", sErr)
+	}
+	dl.Status = domain.DeliveryFailed
+	dl.Reason = reason
+	return dl
 }
 
 // gate applies the four reasons a delivery does not start a run. force

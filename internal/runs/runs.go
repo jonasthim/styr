@@ -79,9 +79,23 @@ type RunInput struct {
 	DeliveryID string
 	Vars       templates.Vars
 	// Origin is what asked for this run: webhook (the default), schedule,
-	// ui (a template started by hand) or loop. It is carried onto the
-	// session, and onto every further iteration when the template loops.
+	// ui (a template started by hand), pipeline (one step of a pipeline
+	// run) or loop. It is carried onto the session, and onto every further
+	// iteration when the template loops.
 	Origin domain.Origin
+
+	// StepRunID is the internal/pipelines step-run attempt this run is,
+	// recorded on the run row so the pipeline executor can map a finished
+	// run back to the step it advances. Empty for every run outside a
+	// pipeline.
+	StepRunID string
+
+	// WorktreePath starts the run's session in an existing git worktree
+	// instead of a fresh one (a pipeline step declaring `worktree:
+	// shared`); see sessions.CreateInput.WorktreePath. Empty is the
+	// default: the session creates its own worktree when its workspace
+	// enables them.
+	WorktreePath string
 }
 
 // Engine starts unattended runs and follows them to completion.
@@ -171,6 +185,7 @@ func (e *Engine) Start(ctx context.Context, in RunInput) (domain.Run, error) {
 		RunID:        runID,
 		JSONSchema:   tpl.ReportSchema,
 		SystemPrompt: tpl.SystemPrompt,
+		WorktreePath: in.WorktreePath,
 	})
 	if err != nil {
 		return domain.Run{}, err
@@ -191,6 +206,7 @@ func (e *Engine) Start(ctx context.Context, in RunInput) (domain.Run, error) {
 		TriggerID:  optional(in.TriggerID),
 		DeliveryID: optional(in.DeliveryID),
 		Origin:     string(origin),
+		StepRunID:  optional(in.StepRunID),
 		LoopID:     loopID,
 		Iteration:  iteration,
 		StartedAt:  time.Now(),

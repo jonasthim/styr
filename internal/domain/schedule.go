@@ -64,8 +64,12 @@ type ScheduleFiring struct {
 // schedule as owned by nobody (OwnerID nil) rather than the acting user;
 // only an admin actor may set it.
 type ScheduleInput struct {
-	Name       string
+	Name string
+	// TemplateID and PipelineID are the two things a schedule can start;
+	// exactly one of them must be set (a rule internal/schedules enforces,
+	// not the schema).
 	TemplateID string
+	PipelineID string
 	Cron       string
 	Vars       json.RawMessage
 	Enabled    *bool

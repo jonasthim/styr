@@ -92,6 +92,10 @@ func runServe(stdout io.Writer) int {
 	// cron-driven runs through the same engine.
 	go bg.Runs.Run(maintCtx)
 	go bg.Schedules.Run(maintCtx)
+	// The pipeline executor rides the same bus: it advances each pipeline
+	// run's graph as the runs behind its steps finish, and sweeps pipeline
+	// runs that overrun their timeout.
+	go bg.Pipelines.Run(maintCtx)
 
 	// Every request context derives from reqCtx so that cancelling it ends the
 	// long-lived SSE streams; http.Server.Shutdown only waits for handlers and

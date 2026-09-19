@@ -42,7 +42,7 @@ func Open(path string) (*DB, error) {
 		_ = sqldb.Close()
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
-	if err := migrate(ctx, sqldb); err != nil {
+	if err := migrate(ctx, dsn); err != nil {
 		_ = sqldb.Close()
 		return nil, err
 	}
@@ -55,14 +55,25 @@ func Open(path string) (*DB, error) {
 	return &DB{sqldb}, nil
 }
 
-// migrate applies all pending migrations.
-func migrate(ctx context.Context, sqldb *sql.DB) error {
+// migrate applies all pending migrations on a pool of its own, limited to a
+// single connection: a table rebuild has to turn foreign keys off around
+// itself (migration 00010), and PRAGMA foreign_keys is a per-connection
+// setting that a second connection from the pool would not share. The pool
+// is closed again before Open hands its own back, so the two never overlap.
+func migrate(ctx context.Context, dsn string) error {
+	migrator, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return fmt.Errorf("open sqlite for migrations: %w", err)
+	}
+	defer func() { _ = migrator.Close() }()
+	migrator.SetMaxOpenConns(1)
+
 	goose.SetBaseFS(migrations)
 	goose.SetLogger(goose.NopLogger())
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		return fmt.Errorf("goose dialect: %w", err)
 	}
-	if err := goose.UpContext(ctx, sqldb, "migrations"); err != nil {
+	if err := goose.UpContext(ctx, migrator, "migrations"); err != nil {
 		return fmt.Errorf("migrate: %w", err)
 	}
 	return nil

@@ -28,9 +28,13 @@ type TemplateInput struct {
 // pointer so update can distinguish "leave enabled as-is" (nil) from an
 // explicit true/false; create treats nil as enabled.
 type TriggerInput struct {
-	Name              string
-	Kind              string
+	Name string
+	Kind string
+	// TemplateID and PipelineID are the two things a trigger can start;
+	// exactly one of them must be set (a rule internal/triggers enforces,
+	// not the schema).
 	TemplateID        string
+	PipelineID        string
 	DedupeKeyTemplate string
 	CooldownS         int
 	StormCapPerHour   int
