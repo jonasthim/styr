@@ -20,6 +20,7 @@ run timeout row.
 | `data_dir` | `STYR_DATA_DIR` | `/var/lib/styr` (prod), `./data` (dev) | Directory for the SQLite database, per-user data and workspace checkouts. See [Data directory layout](#data-directory-layout). |
 | `secret_key` | `STYR_SECRET_KEY` | *(none)* | 32+ bytes, base64 or raw. Encrypts stored Claude tokens at rest. Required. Generate with `openssl rand -base64 32`. |
 | `claude_bin` | `STYR_CLAUDE_BIN` | `claude` | Path to the Claude Code CLI binary. |
+| `codex_bin` | `STYR_CODEX_BIN` | `codex` | Path to the Codex CLI binary, for sessions on the codex harness. Not bundled by the installer or the image. |
 | `max_open_sessions` | `STYR_MAX_OPEN_SESSIONS` | `4` | Maximum number of concurrently open Claude sessions (a slot semaphore; further sessions queue). |
 | `idle_timeout` | `STYR_IDLE_TIMEOUT` | `15m` | How long an open session may sit idle before it is closed automatically. |
 | `approval_timeout` | `STYR_APPROVAL_TIMEOUT` | `30m` | How long an unattended profile waits for approval before the request expires (defaults to deny). |
