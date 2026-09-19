@@ -120,7 +120,7 @@ palette reaches every object and action. `?` shows shortcuts.
 | v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
 | v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
 | v0.4 Schedules and loops (shipped) | Cron, until-done loops, fleet Gantt, cost dashboard |
-| v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
+| v0.5 Pipelines (shipped) | YAML DAG, fan-out, retries, shared worktrees, live graph, start from triggers and schedules |
 | v1.0 | Second harness (Codex CLI), stable API |
 
 ## Architecture

@@ -5,6 +5,15 @@ matters from your phone, and keep every decision on your own box.
 
 ![Styr session view](docs/screenshots/session.png)
 
+## Status
+
+What's proven: the real backend — the full stack, driving the fake Claude CLI rather than the
+mocked frontend — is exercised end to end by the `real-desktop`/`real-phone` Playwright suite
+(see [CONTRIBUTING.md](CONTRIBUTING.md)) before every release, and Styr runs as the author's own
+homelab deployment, the audience it's built for. What isn't: there are no external users yet, and
+the API and UI should still be expected to move before v1.0 — see the [Roadmap](#roadmap) below
+for what's shipped and what's left.
+
 ## Why Styr
 
 - **Your plan, not API credits.** Styr drives the Claude Code CLI with a `claude setup-token`
@@ -21,10 +30,11 @@ matters from your phone, and keep every decision on your own box.
 
 ## Quick start
 
-Styr is early: v0.4.0 is the latest release, and it covers login, sessions, approvals, triggers,
-runs and unattended investigations, review — worktrees, diffs, checkpoints, commit and PR — and
-now schedules and loops — cron-driven runs, until-done loops, a fleet Gantt and a cost dashboard
-— see [Features](#features) below for what's in and what's still to come.
+Styr is early: v0.5.0 is the latest release, and it covers login, sessions, approvals, triggers,
+runs and unattended investigations, review — worktrees, diffs, checkpoints, commit and PR —
+schedules and loops — cron-driven runs, until-done loops, a fleet Gantt and a cost dashboard —
+and now pipelines — YAML DAGs of chained agents, with fan-out, retries and shared worktrees — see
+[Features](#features) below for what's in and what's still to come.
 
 ### Install script (bare host, systemd)
 
@@ -111,6 +121,23 @@ v0.4 "Schedules and loops":
 
 See [docs/SCHEDULES.md](docs/SCHEDULES.md) for the full schedule, loop, Gantt and cost guide.
 
+v0.5 "Pipelines":
+
+![Styr pipeline run view](docs/screenshots/pipeline-run.png)
+
+- YAML DAG pipelines: a small chain of steps, each one a template run whose structured report
+  feeds the steps after it
+- Fan-out: a step's `foreach` over a list becomes N parallel step-runs, one per item
+- Retries: a failed step gets a fresh attempt within its own budget before the failure cascades
+- Shared worktrees: a step can continue in a dependency's own worktree instead of a fresh one, so
+  a triage → fix → verify chain edits and tests the same checkout
+- Live graph: the pipeline run page shows every step's state, attempt and report as it happens
+- Start from a trigger or a schedule, not just by hand — a webhook or a cron cadence can fire a
+  whole pipeline instead of a single template run
+
+See [docs/PIPELINES.md](docs/PIPELINES.md) for the full YAML format, execution semantics and
+worktree modes.
+
 ### Roadmap
 
 | Release | Contents |
@@ -119,7 +146,7 @@ See [docs/SCHEDULES.md](docs/SCHEDULES.md) for the full schedule, loop, Gantt an
 | v0.2 Triggers (shipped) | Templates, inbound webhooks (generic, Grafana, GitHub), runs and reports, dedupe, cooldown, outbound ntfy and webhook, personal API tokens, per-session model and effort, slash-command menu |
 | v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
 | v0.4 Schedules and loops (shipped) | Cron, until-done loops, fleet Gantt, cost dashboard |
-| v0.5 Pipelines | YAML DAG, live graph, fan-out, retries |
+| v0.5 Pipelines (shipped) | YAML DAG, fan-out, retries, shared worktrees, live graph, start from triggers and schedules |
 | v1.0 | Second harness (Codex CLI), stable API |
 
 ## Configuration

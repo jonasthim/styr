@@ -350,3 +350,82 @@ implementation. The v0.4 scheduler and loop-advancement goroutines are unaffecte
 ordering — they stop via their own `maintCtx` cancellation, independent of `reqCtx` — but a
 schedule's own "Run now" HTTP call, and any browser tab watching a loop's session over SSE, both
 depend on this ordering to unblock promptly rather than waiting out the full timeout.
+
+## ADR-016: Pipelines advance on run events
+
+Date: 2026-09-19. Status: accepted.
+
+Context: v0.5's pipelines chain several template runs into a DAG — a step starts once every step
+it `needs` has succeeded, a failed step retries within a budget, and a `foreach` step fans out
+into N parallel step-runs. The design question was how the pipeline executor learns that one of
+its steps' runs has finished, to decide what to start next: poll the `runs` table on a timer, add
+a callback/hook the run engine calls directly, or reuse the same event bus `internal/runs.Engine`
+already publishes session events on.
+
+Decision: `internal/runs.Engine`'s `finish` — the single place every run closes out, whatever
+outcome ends it (`internal/runs/loop.go`) — now publishes `run.finished` (success) or
+`run.failed` (every other outcome) on the bus, carrying `{run_id, step_run_id, outcome}`.
+`runs.RunInput` gains a `StepRunID` field, set only when the run is one attempt of a pipeline
+step and carried onto the `runs` row (migration `00008_pipelines.sql`'s `runs.step_run_id`
+column); every other run publishes a nil `step_run_id`. `internal/pipelines.Executor.Run`
+subscribes to the same bus (structurally identical to `runs.Engine.Run`'s own subscribe-and-select
+loop) and reacts only to messages carrying a non-nil `step_run_id`: it loads the step run,
+records the report or the failure, and advances the graph — starting the next eligible step(s),
+expanding a fan-out whose dependency just succeeded, or settling the pipeline run out once
+nothing is left running. A 30s sweep (the same interval the scheduler and run-engine timeouts
+use) closes out pipeline runs that overran their definition's timeout and reconciles any step-run
+whose bus message never arrived (a dropped message, or a restart between the run finishing and
+the message being handled) by re-reading its underlying `runs` row directly.
+
+Consequences: the pipeline executor needed no new coupling to `internal/runs` beyond the bus it
+already fans every session and run event through, and no polling loop of its own beyond the
+timeout/reconcile sweep every other unattended-work package (`internal/runs`, `internal/
+schedules`) already has. A step's `runs.Engine.Start` call is an ordinary run start in every other
+respect — same template rendering, same session creation, same notification path — which is what
+lets a pipeline step's run show up on the Runs page, the cost dashboard and the fleet Gantt
+exactly like any other run, with `origin: pipeline` as its only tell. The tradeoff is the same one
+`internal/runs`' own reconciliation already accepts: a bus message can be dropped (a full
+subscriber channel, a process restart), so correctness cannot depend on every message arriving —
+the 30s sweep's reconciliation is what makes a dropped message a bounded delay rather than a stuck
+pipeline, at the cost of the executor also needing that sweep's more complex "is this really still
+running" check rather than trusting the bus alone.
+
+## ADR-017: Nullable trigger and schedule targets; single-connection migrations
+
+Date: 2026-09-19. Status: accepted.
+
+Context: v0.5 lets a trigger or a schedule start either a template run or a pipeline run
+(`template_id`/`pipeline_id`, exactly one). Migration `00008_pipelines.sql` added the
+`pipeline_id` columns to `triggers` and `schedules`, but both tables' `template_id` column was
+still `NOT NULL REFERENCES templates(id)` from earlier migrations (`00003_triggers.sql`,
+`00006_schedules.sql`), leaving no legal value to store for a row that targets a pipeline instead
+of a template. SQLite has no `ALTER TABLE ... ALTER COLUMN` to drop a `NOT NULL` constraint in
+place; the only supported way to change a column's constraints is SQLite's own documented
+12-step procedure: turn foreign keys off, create a replacement table with the new schema, copy
+every row across, drop the old table, rename the replacement into its place, turn foreign keys
+back on.
+
+Decision: migration `00010_pipeline_targets.sql` runs that rebuild for `triggers` and
+`schedules`, relaxing `template_id` to nullable on both (the foreign key itself is kept — a
+non-null `template_id` must still reference a real template) and re-creating `schedules`' index
+afterwards. `PRAGMA foreign_keys` is both a per-connection setting and a documented no-op inside a
+transaction, so this migration is marked `-- +goose NO TRANSACTION` and `internal/db.migrate`
+opens goose's own migration runner on a `*sql.DB` capped at exactly **one** connection
+(`migrator.SetMaxOpenConns(1)`), closed again before `Open` hands the application's own
+(unrestricted) pool back — a second pooled connection borrowed mid-migration would not see the
+same session's `PRAGMA foreign_keys = OFF`, and could reintroduce the very constraint enforcement
+the rebuild is trying to work around.
+
+Consequences: every future migration that needs a `PRAGMA` toggle (`foreign_keys`, or any other
+per-connection pragma) gets the same single-connection guarantee for free, rather than each one
+having to reason about pool behaviour itself — the constraint is now structural (`db.migrate`'s
+own pool), not a convention migration authors have to remember. The cost is that migrations run
+serialized on one connection rather than whatever concurrency the driver's pool would otherwise
+allow, which is immaterial at Styr's scale (one process, migrations run once at startup) but would
+need revisiting if migrations ever needed to run concurrently against a large existing database.
+`internal/triggers` and `internal/schedules` both gained an `exactlyOneOfTemplateOrPipeline`
+validation rule at the API layer to keep the "exactly one of the two" invariant the nullable
+columns no longer enforce at the schema level (a `CHECK` constraint expressing "at least one of
+two nullable columns is non-null, but not both" is possible in SQLite but was judged not worth the
+same rebuild machinery for a rule the handlers already had to validate for the 422 error message
+anyway).
