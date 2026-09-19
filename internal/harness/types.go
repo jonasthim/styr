@@ -17,8 +17,19 @@ import (
 // Kind identifies which underlying CLI a Harness drives.
 type Kind string
 
-// KindClaude is the Harness kind for the Claude Code CLI.
-const KindClaude Kind = "claude"
+const (
+	// KindClaude is the Harness kind for the Claude Code CLI.
+	KindClaude Kind = "claude"
+	// KindCodex is the Harness kind for the OpenAI Codex CLI (`codex exec`).
+	KindCodex Kind = "codex"
+)
+
+// ErrUnsupported is returned by a Process method that the underlying CLI has no equivalent
+// for. It is a normal outcome, not a failure: the Codex CLI, for instance, decides tool use
+// with a sandbox policy chosen at process start and never asks the host, so its Decide always
+// returns ErrUnsupported. Callers should test for it with errors.Is and degrade (hide the
+// affordance) rather than reporting an error to the operator.
+var ErrUnsupported = errors.New("harness: operation not supported by this harness")
 
 // Profile configures how a session is allowed to behave: which permission mode it runs
 // under, which tools are explicitly allowed or disallowed, and a turn budget.
@@ -126,6 +137,10 @@ const (
 
 // Init carries the session metadata reported when a session starts.
 type Init struct {
+	// Harness names the CLI that reported this session in. Every codec sets it, so the UI can
+	// show which harness a session is actually running under without consulting the session
+	// row that asked for it.
+	Harness   Kind
 	SessionID string
 	Model     string
 	Tools     []string

@@ -429,3 +429,42 @@ columns no longer enforce at the schema level (a `CHECK` constraint expressing "
 two nullable columns is non-null, but not both" is possible in SQLite but was judged not worth the
 same rebuild machinery for a rule the handlers already had to validate for the 422 error message
 anyway).
+## ADR-018: Codex harness: sandbox policy instead of per-command approvals
+
+Date: 2026-09-19. Status: accepted.
+
+Context: Styr's `Harness` interface was designed around the Claude Code CLI, whose
+`--permission-prompt-tool stdio` turns every risky tool use into a `can_use_tool`
+`control_request` that the host answers with an allow/deny `control_response` — that round trip
+is what the inbox's approve/deny affordance and `Process.Decide` exist for. The OpenAI Codex
+CLI (`codex-cli 0.154.0`, spiked in T60, see `internal/harness/codex/testdata/PROTOCOL.md`) has
+no equivalent. `codex exec` offers exactly three permission postures: a `--sandbox` policy
+chosen once when the process starts (`read-only`, `workspace-write`, `danger-full-access`),
+`--approve-for-me` (approvals answered by an automatic reviewer inside the CLI, with no host
+channel), and two bypass flags — one skipping approvals and sandboxing outright, one running
+hooks without persisted trust — that Styr never passes. Nothing in the
+`--json` event stream ever asks the host a question, and there is no stdin channel to answer on
+— `codex exec` takes one prompt as an argument and exits when the turn ends.
+
+Decision: a Codex session's permissions are expressed entirely as a sandbox policy derived from
+the session's profile at process start, and `Process.Decide` returns the new sentinel
+`harness.ErrUnsupported` rather than pretending to approve anything. `codex.SandboxMode` maps
+`plan` and `dontAsk` — and any profile that disallows both `Edit` and `Write`, which is how the
+`investigate` profile says "look, do not touch" — to `read-only`; every other mode
+(`default`, `acceptEdits`, `auto`) to `workspace-write`, i.e. writes confined to the session's
+own workspace directory. `danger-full-access` is never emitted, and neither bypass flag appears
+anywhere in the package or the recorder. Because `codex exec resume` accepts no `--sandbox`
+flag at all, a resumed turn re-states the policy as a `-c sandbox_mode=<mode>` config override
+rather than inheriting whatever the CLI's default happens to be — the `investigate` profile has
+to stay read-only on turn five as much as on turn one.
+
+Consequences: `ErrUnsupported` is a normal outcome, not a failure. The UI must hide the
+approve/deny affordances for a Codex session rather than showing them and failing, and the
+session's inbox should say plainly that Codex sessions apply a sandbox policy instead of
+per-command approvals — an operator who grants `default` to a Codex session is granting write
+access to the whole workspace for the whole session, not a chance to review each command. The
+two harnesses are therefore not interchangeable at the same trust level: the same profile buys
+finer-grained control under Claude Code than under Codex, and the honest place to say so is the
+harness chip and the profile documentation. `Interrupt` also changes meaning: with no control
+channel, it kills the turn's OS process, so the turn ends with a synthesised `interrupted`
+result rather than with the CLI's own acknowledgement.

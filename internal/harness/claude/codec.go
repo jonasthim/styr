@@ -95,7 +95,8 @@ func DecodeLine(line []byte, now time.Time) []harness.Event {
 			return nil
 		}
 		return []harness.Event{{Type: harness.EventInit, At: now, Init: &harness.Init{
-			SessionID: env.SessionID, Model: env.Model, Tools: env.Tools, SlashCommands: env.SlashCommands,
+			Harness: harness.KindClaude, SessionID: env.SessionID, Model: env.Model,
+			Tools: env.Tools, SlashCommands: env.SlashCommands,
 		}}}
 
 	case "rate_limit_event":

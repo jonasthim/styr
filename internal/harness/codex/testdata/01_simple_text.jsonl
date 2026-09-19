@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"01a0b707-ce58-7660-b301-4939ce14c766"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /home/thim/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"pong"}}
+{"type":"turn.completed","usage":{"input_tokens":19234,"cached_input_tokens":12160,"cache_write_input_tokens":0,"output_tokens":5,"reasoning_output_tokens":0}}
+>>> exit 0
