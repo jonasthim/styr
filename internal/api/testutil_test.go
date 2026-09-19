@@ -111,6 +111,16 @@ func (f *fakeTokenStore) TouchUsed(_ context.Context, id string, _ time.Time) er
 	return nil
 }
 
+// harnessRegistry builds the registry the sessions service runs on: both fakes, so a test can
+// create a session on either harness without rebuilding the environment.
+func harnessRegistry(hs ...*fake.Harness) *harness.Registry {
+	r := harness.New()
+	for _, h := range hs {
+		r.Register(h)
+	}
+	return r
+}
+
 // stubVerifier is a settable api.TokenVerifier: nil error (the default)
 // means every token verifies; setErr makes every call fail, as the real
 // verifier does for a bad token.
@@ -153,6 +163,9 @@ type testEnv struct {
 	box            *crypto.Box
 	bus            *events.Bus
 	harness        *fake.Harness
+	codexHarness   *fake.Harness
+	codexCreds     *db.CodexCredentials
+	codexVerifier  *stubVerifier
 	verifier       *stubVerifier
 	tokenStore     *fakeTokenStore
 	svc            *sessions.Service
@@ -209,7 +222,10 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		logins:        db.NewLoginSessions(database),
 		bus:           events.New(),
 		harness:       fake.New(steps...),
+		codexHarness:  fake.NewKind(harness.KindCodex, steps...),
+		codexCreds:    db.NewCodexCredentials(database),
 		verifier:      &stubVerifier{},
+		codexVerifier: &stubVerifier{},
 		tokenStore:    newFakeTokenStore(),
 		usersDir:      t.TempDir(),
 		notifications: db.NewNotificationChannels(database),
@@ -241,7 +257,9 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		ReviewComments: e.reviewComments,
 		Checkpoints:    e.checkpoints,
 		Users:          e.users,
-	}, e.harness, e.bus, box, sessions.Options{
+
+		CodexCredentials: e.codexCreds,
+	}, harnessRegistry(e.harness, e.codexHarness), e.bus, box, sessions.Options{
 		MaxOpen:     4,
 		IdleTimeout: time.Hour,
 		UsersDir:    e.usersDir,
@@ -267,6 +285,8 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		Bus:            e.bus,
 		Box:            box,
 		Verifier:       e.verifier,
+		CodexVerifier:  e.codexVerifier,
+		CodexCreds:     e.codexCreds,
 		Triggers:       e.triggers,
 		Runs:           e.runs,
 		Notifications:  e.notifications,
@@ -275,7 +295,13 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 		Stats:          e.stats,
 		Pipelines:      e.pipelines,
 		Status: func() api.StatusInfo {
-			return api.StatusInfo{Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0}
+			return api.StatusInfo{
+				Version: "test", ClaudeVersion: "test", OpenProcesses: 0, Slots: 4, QueueDepth: 0,
+				Harnesses: []api.HarnessInfo{
+					{Kind: "claude", Available: true, Version: "2.1.276", Bin: "claude"},
+					{Kind: "codex", Available: false, Version: "unknown", Bin: "codex"},
+				},
+			}
 		},
 		Version:         "test",
 		MaxOpenSessions: 4,
@@ -376,6 +402,20 @@ func (e *testEnv) seedToken(userID string) {
 	}
 	if err := e.tokens.Set(context.Background(), userID, ciphertext, nonce, "test"); err != nil {
 		e.t.Fatalf("set token: %v", err)
+	}
+}
+
+// seedCodexKey seals and stores an OpenAI API key directly for userID,
+// bypassing the verify-then-store HTTP flow, for tests that need a working
+// Codex credential already in place.
+func (e *testEnv) seedCodexKey(userID string) {
+	e.t.Helper()
+	ciphertext, nonce, err := e.box.Seal([]byte("sk-test-codex-key"))
+	if err != nil {
+		e.t.Fatalf("seal codex key: %v", err)
+	}
+	if err := e.codexCreds.Set(context.Background(), userID, ciphertext, nonce, "…-key"); err != nil {
+		e.t.Fatalf("set codex key: %v", err)
 	}
 }
 

@@ -138,11 +138,25 @@ type Notifier interface {
 	Send(ctx context.Context, ch notify.Channel, ev notify.Event) error
 }
 
-// TokenVerifier checks that a Claude token actually works before Styr
-// stores it. The real implementation (Task 14) runs the claude CLI; tests
-// use a stub.
+// TokenVerifier checks that a credential actually works before Styr stores
+// it. The real implementations run the CLI once (internal/harness/claude's
+// and internal/harness/codex's Verifier); tests use a stub. The same
+// interface serves the Claude token and the Codex API key — both are
+// "spawn the CLI with this credential and see whether it is accepted".
 type TokenVerifier interface {
 	Verify(ctx context.Context, token string) error
+}
+
+// CodexCredentialStore is the subset of db.CodexCredentials the /me/codex-key
+// and /settings/codex-key handlers need. Declared as an interface so a nil
+// store (a build that never wired one) makes those routes answer 501 rather
+// than panicking, matching TokenStore's rule above.
+type CodexCredentialStore interface {
+	Set(ctx context.Context, userID string, ciphertext, nonce []byte, label string) error
+	Get(ctx context.Context, userID string) (ciphertext, nonce []byte, label string, addedAt time.Time, err error)
+	Delete(ctx context.Context, userID string) error
+	SetService(ctx context.Context, ciphertext, nonce []byte, label string) error
+	GetService(ctx context.Context) (ciphertext, nonce []byte, label string, addedAt time.Time, err error)
 }
 
 // TokenStore is the subset of the api_tokens repository (T31's
@@ -157,6 +171,18 @@ type TokenStore interface {
 	Delete(ctx context.Context, id, userID string) error
 }
 
+// HarnessInfo describes one agentic CLI this server was built to drive, as
+// probed once at startup. Available is false when `<bin> --version` could not
+// be run at all, which is how the UI explains a harness it must not offer.
+type HarnessInfo struct {
+	Kind      string `json:"kind"`
+	Available bool   `json:"available"`
+	Version   string `json:"version"`
+	// Bin is the configured binary name or path. It is the operator's own
+	// config value, never a credential.
+	Bin string `json:"bin"`
+}
+
 // StatusInfo is the payload for GET /api/v1/status.
 type StatusInfo struct {
 	Version       string `json:"version"`
@@ -164,6 +190,9 @@ type StatusInfo struct {
 	OpenProcesses int    `json:"open_processes"`
 	Slots         int    `json:"slots"`
 	QueueDepth    int    `json:"queue_depth"`
+	// Harnesses is every harness kind this build knows, with whether its
+	// binary answered `--version` at startup and what it said.
+	Harnesses []HarnessInfo `json:"harnesses"`
 }
 
 // Deps is everything the API handlers need.
@@ -183,6 +212,12 @@ type Deps struct {
 	Bus            *events.Bus
 	Box            *crypto.Box
 	Verifier       TokenVerifier
+	// CodexVerifier checks an OpenAI API key before it is stored, and
+	// CodexCreds is where the sealed key goes. Both nil on a build without
+	// the Codex harness wired in, which makes the codex-key routes answer
+	// 501 instead of panicking.
+	CodexVerifier TokenVerifier
+	CodexCreds    CodexCredentialStore
 	// TokenStore backs GET/POST /me/api-tokens and DELETE
 	// /me/api-tokens/{id} (T36). nil until T31's db.APITokens repository is
 	// wired in (cmd/styr/wire.go); the handlers answer 501 in that case

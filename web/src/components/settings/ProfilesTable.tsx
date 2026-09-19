@@ -1,15 +1,16 @@
 // Settings (admin) > Profiles. Builtin rows (docs/openapi.yaml: "Builtin
-// profiles only allow max_turns, approval_timeout, model and effort to
-// change") lock name and mode; custom rows are fully editable. Every mode
+// profiles only allow max_turns, approval_timeout, model, effort and harness
+// to change") lock name and mode; custom rows are fully editable. Every mode
 // select - locked or not - only ever renders these five values, never the
-// skip-all-checks mode. Model and effort are an operator preference rather
-// than part of what makes a builtin profile safe, so those two stay editable
-// on every row.
+// skip-all-checks mode. Model, effort and harness are operator preferences
+// rather than part of what makes a builtin profile safe, so those three stay
+// editable on every row.
 import { useState } from 'react'
 import clsx from 'clsx'
 import { useQuery } from '@tanstack/react-query'
 import { q } from '../../api/queries'
-import type { Effort, Profile, ProfileMode } from '../../api/types'
+import type { Effort, HarnessKind, Profile, ProfileMode } from '../../api/types'
+import { HARNESS_LABEL } from '../../lib/harness'
 import { Badge, Input, Select, TableFrame, Td, Th, Tr } from '../ui'
 
 const MODE_OPTIONS: Array<{ value: ProfileMode; label: string }> = [
@@ -21,7 +22,7 @@ const MODE_OPTIONS: Array<{ value: ProfileMode; label: string }> = [
 ]
 
 export type ProfilePatch = Partial<
-  Pick<Profile, 'name' | 'mode' | 'max_turns' | 'approval_timeout' | 'unattended' | 'model' | 'effort'>
+  Pick<Profile, 'name' | 'mode' | 'max_turns' | 'approval_timeout' | 'unattended' | 'model' | 'effort' | 'harness'>
 >
 
 // Radix Select has no empty-string item value, so "whatever the CLI defaults
@@ -50,11 +51,13 @@ function ProfileRow({
   onUpdate,
   modelOptions,
   effortOptions,
+  harnessOptions,
 }: {
   profile: Profile
   onUpdate: ProfilesTableProps['onUpdate']
   modelOptions: Array<{ value: string; label: string }>
   effortOptions: Array<{ value: string; label: string }>
+  harnessOptions: Array<{ value: string; label: string }>
 }) {
   const [name, setName] = useState(profile.name)
   const [maxTurns, setMaxTurns] = useState(String(profile.max_turns))
@@ -94,6 +97,15 @@ function ProfileRow({
           onValueChange={(value) => void onUpdate(profile.id, { mode: value as ProfileMode })}
           options={MODE_OPTIONS}
           className="max-w-[170px]"
+        />
+      </Td>
+      <Td>
+        <Select
+          aria-label={`Harness for ${profile.name}`}
+          value={profile.harness}
+          onValueChange={(value) => void onUpdate(profile.id, { harness: value as HarnessKind })}
+          options={harnessOptions}
+          className="max-w-[150px]"
         />
       </Td>
       <Td>
@@ -155,13 +167,20 @@ export function ProfilesTable({ profiles, onUpdate }: ProfilesTableProps) {
     { value: CLI_DEFAULT, label: 'Default' },
     ...(status.data?.efforts ?? []).map((e) => ({ value: e, label: EFFORT_LABEL[e] })),
   ]
+  // Unlike model and effort, a harness has no "default": every profile names
+  // one. An unavailable harness is still listed, so an existing profile
+  // pointing at it keeps a select that shows its own value.
+  const harnessOptions = (status.data?.harnesses ?? [{ kind: 'claude' as const, available: true, version: '', bin: '' }]).map(
+    (h) => ({ value: h.kind, label: h.available ? HARNESS_LABEL[h.kind] : `${HARNESS_LABEL[h.kind]} (unavailable)` }),
+  )
 
   return (
-    <TableFrame minWidth={900}>
+    <TableFrame minWidth={1040}>
       <thead>
         <tr>
           <Th>Name</Th>
           <Th>Mode</Th>
+          <Th>Harness</Th>
           <Th>Model</Th>
           <Th>Effort</Th>
           <Th>Max turns</Th>
@@ -177,6 +196,7 @@ export function ProfilesTable({ profiles, onUpdate }: ProfilesTableProps) {
             onUpdate={onUpdate}
             modelOptions={modelOptions}
             effortOptions={effortOptions}
+            harnessOptions={harnessOptions}
           />
         ))}
       </tbody>

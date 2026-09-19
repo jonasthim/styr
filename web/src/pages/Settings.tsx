@@ -1,15 +1,18 @@
-// Information architecture #10 ("Settings", admin-only): service token,
-// harness limits, profiles, users, OIDC providers, about.
+// Information architecture #10 ("Settings", admin-only): the service
+// credentials (one per harness), harness limits, profiles, users, OIDC
+// providers, about.
 import type { ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../api/client'
 import { q } from '../api/queries'
 import { useMe } from '../hooks/useMe'
-import type { ClaudeTokenInfo, Role, User } from '../api/types'
+import type { ClaudeTokenInfo, CodexKeyInfo, Role, User } from '../api/types'
 import { ClaudeTokenCard } from '../components/profile/ClaudeTokenCard'
+import { CodexKeyCard } from '../components/profile/CodexKeyCard'
 import { NotificationsSection } from '../components/settings/NotificationsSection'
 import { ProfilesTable, type ProfilePatch } from '../components/settings/ProfilesTable'
 import { UsersTable } from '../components/settings/UsersTable'
+import { HARNESS_LABEL } from '../lib/harness'
 import { Card, PageHeader } from '../components/ui'
 
 // GET /api/v1/settings's shape (docs/openapi.yaml); not in api/types.ts,
@@ -18,6 +21,7 @@ interface SettingsInfo {
   max_open_sessions: number
   idle_timeout: string
   service_token: ClaudeTokenInfo
+  codex_key: CodexKeyInfo
 }
 
 function Section({ title, note, children }: { title: string; note?: string; children: ReactNode }) {
@@ -55,6 +59,11 @@ export function Settings() {
     await queryClient.invalidateQueries({ queryKey: ['settings'] })
   }
 
+  async function handleSaveServiceCodexKey(key: string) {
+    await api('/api/v1/settings/codex-key', { method: 'PUT', json: { key } })
+    await queryClient.invalidateQueries({ queryKey: ['settings'] })
+  }
+
   async function handleUpdateProfile(id: string, patch: ProfilePatch) {
     await api(`/api/v1/profiles/${id}`, { method: 'PATCH', json: patch })
     await queryClient.invalidateQueries({ queryKey: ['profiles'] })
@@ -84,6 +93,16 @@ export function Settings() {
           tokenInfo={settingsQuery.data?.service_token}
           onSave={handleSaveServiceToken}
           testId="service-token-card"
+        />
+      </div>
+
+      <div className="mt-4">
+        <CodexKeyCard
+          title="Service Codex key"
+          inputLabel="Service Codex key"
+          keyInfo={settingsQuery.data?.codex_key}
+          onSave={handleSaveServiceCodexKey}
+          testId="service-codex-key-card"
         />
       </div>
 
@@ -138,10 +157,14 @@ export function Settings() {
             <span className="text-fg-secondary">
               Styr <span className="font-mono tabular-nums text-fg-primary">{status.data?.version ?? '—'}</span>
             </span>
-            <span className="text-fg-secondary">
-              Claude Code{' '}
-              <span className="font-mono tabular-nums text-fg-primary">{status.data?.claude_version ?? '—'}</span>
-            </span>
+            {(status.data?.harnesses ?? []).map((h) => (
+              <span key={h.kind} className="text-fg-secondary">
+                {HARNESS_LABEL[h.kind]}{' '}
+                <span className="font-mono tabular-nums text-fg-primary">
+                  {h.available ? h.version : 'not available'}
+                </span>
+              </span>
+            ))}
             <a
               href="https://github.com/jonasthim/styr/blob/main/LICENSE"
               target="_blank"

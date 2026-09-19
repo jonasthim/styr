@@ -27,6 +27,9 @@ func TestDefaultAppliesExpectedValues(t *testing.T) {
 	if c.ClaudeBin != "claude" {
 		t.Errorf("ClaudeBin = %q, want %q", c.ClaudeBin, "claude")
 	}
+	if c.CodexBin != "codex" {
+		t.Errorf("CodexBin = %q, want %q", c.CodexBin, "codex")
+	}
 	if c.MaxOpenSessions != 4 {
 		t.Errorf("MaxOpenSessions = %d, want 4", c.MaxOpenSessions)
 	}
@@ -123,6 +126,7 @@ func TestEnvOverridesDurationsAndOther(t *testing.T) {
 	t.Setenv("STYR_DATA_DIR", "/tmp/styr-data")
 	t.Setenv("STYR_SECRET_KEY", "a-secret-key-that-is-32-bytes-ok")
 	t.Setenv("STYR_CLAUDE_BIN", "/usr/bin/claude")
+	t.Setenv("STYR_CODEX_BIN", "/usr/bin/codex")
 	t.Setenv("STYR_IDLE_TIMEOUT", "5m")
 	t.Setenv("STYR_APPROVAL_TIMEOUT", "1h")
 	t.Setenv("STYR_DEV_USER", "someone@example.com")
@@ -141,6 +145,9 @@ func TestEnvOverridesDurationsAndOther(t *testing.T) {
 	}
 	if c.ClaudeBin != "/usr/bin/claude" {
 		t.Errorf("ClaudeBin = %q", c.ClaudeBin)
+	}
+	if c.CodexBin != "/usr/bin/codex" {
+		t.Errorf("CodexBin = %q", c.CodexBin)
 	}
 	if c.IdleTimeout != 5*time.Minute {
 		t.Errorf("IdleTimeout = %v, want 5m", c.IdleTimeout)

@@ -20,4 +20,8 @@ type Profile struct {
 	Model string
 	// Effort is the default reasoning effort ("", low, medium, high, xhigh, max).
 	Effort string
+	// Harness names the agentic CLI sessions started under this profile run on
+	// ("claude" | "codex"), unless the request names another. Empty is read as
+	// "claude"; internal/db normalises it on write.
+	Harness string
 }

@@ -19,7 +19,19 @@ type Profiles struct{ d *DB }
 // NewProfiles constructs a Profiles repository.
 func NewProfiles(d *DB) *Profiles { return &Profiles{d: d} }
 
-const profileColumns = `id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout_s, builtin, model, effort`
+const profileColumns = `id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout_s, builtin, model, effort, harness`
+
+// defaultHarness is what an unset Profile.Harness is stored as: the column is
+// NOT NULL DEFAULT 'claude', but an explicit empty string would bypass that
+// default and produce a profile no registry lookup could resolve.
+const defaultHarness = "claude"
+
+func harnessOrDefault(kind string) string {
+	if kind == "" {
+		return defaultHarness
+	}
+	return kind
+}
 
 func marshalToolList(tools []string) string {
 	if tools == nil {
@@ -33,10 +45,10 @@ func marshalToolList(tools []string) string {
 func (p *Profiles) Create(ctx context.Context, pr domain.Profile) error {
 	_, err := p.d.ExecContext(ctx, `
 		INSERT INTO profiles (`+profileColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		pr.ID, pr.Name, pr.Mode, marshalToolList(pr.AllowedTools), marshalToolList(pr.DisallowedTools),
 		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), boolToInt(pr.Builtin),
-		pr.Model, pr.Effort)
+		pr.Model, pr.Effort, harnessOrDefault(pr.Harness))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create profile: %w", domain.ErrConflict)
@@ -54,7 +66,7 @@ func scanProfile(row interface{ Scan(dest ...any) error }) (*domain.Profile, err
 		approvalTimeoutS    int
 	)
 	if err := row.Scan(&pr.ID, &pr.Name, &pr.Mode, &allowed, &disallowed, &pr.MaxTurns,
-		&unattended, &approvalTimeoutS, &builtin, &pr.Model, &pr.Effort); err != nil {
+		&unattended, &approvalTimeoutS, &builtin, &pr.Model, &pr.Effort, &pr.Harness); err != nil {
 		return nil, err
 	}
 	_ = json.Unmarshal([]byte(allowed), &pr.AllowedTools)
@@ -100,9 +112,9 @@ func (p *Profiles) List(ctx context.Context) ([]domain.Profile, error) {
 func (p *Profiles) Update(ctx context.Context, pr domain.Profile) error {
 	res, err := p.d.ExecContext(ctx, `
 		UPDATE profiles SET name = ?, mode = ?, allowed_tools = ?, disallowed_tools = ?,
-			max_turns = ?, unattended = ?, approval_timeout_s = ?, model = ?, effort = ? WHERE id = ?`,
+			max_turns = ?, unattended = ?, approval_timeout_s = ?, model = ?, effort = ?, harness = ? WHERE id = ?`,
 		pr.Name, pr.Mode, marshalToolList(pr.AllowedTools), marshalToolList(pr.DisallowedTools),
-		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), pr.Model, pr.Effort, pr.ID)
+		pr.MaxTurns, boolToInt(pr.Unattended), int(pr.ApprovalTimeout/time.Second), pr.Model, pr.Effort, harnessOrDefault(pr.Harness), pr.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("update profile: %w", domain.ErrConflict)

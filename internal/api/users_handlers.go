@@ -22,6 +22,7 @@ func registerUsersRoutes(r chi.Router, d *Deps) {
 
 	r.With(auth.RequireAdmin).Get("/settings", handleSettingsGet(d))
 	r.With(auth.RequireAdmin).Put("/settings/service-token", handleSettingsServiceTokenPut(d))
+	r.With(auth.RequireAdmin).Put("/settings/codex-key", handleSettingsCodexKeyPut(d))
 }
 
 type userDTO struct {
@@ -101,6 +102,9 @@ type settingsDTO struct {
 	MaxOpenSessions int            `json:"max_open_sessions"`
 	IdleTimeout     string         `json:"idle_timeout"`
 	ServiceToken    claudeTokenDTO `json:"service_token"`
+	// CodexKey is the service-wide OpenAI API key unattended Codex sessions
+	// run with, summarised the same way as the service Claude token.
+	CodexKey codexKeyDTO `json:"codex_key"`
 }
 
 // handleSettingsGet is GET /api/v1/settings.
@@ -111,10 +115,16 @@ func handleSettingsGet(d *Deps) http.HandlerFunc {
 			WriteError(w, err)
 			return
 		}
+		key, err := codexKeyFor(d, r, serviceCredentialUserID)
+		if err != nil {
+			WriteError(w, err)
+			return
+		}
 		WriteJSON(w, http.StatusOK, settingsDTO{
 			MaxOpenSessions: d.MaxOpenSessions,
 			IdleTimeout:     d.IdleTimeout.String(),
 			ServiceToken:    tok,
+			CodexKey:        key,
 		})
 	}
 }
@@ -140,6 +150,29 @@ func handleSettingsServiceTokenPut(d *Deps) http.HandlerFunc {
 		}
 		label := "…" + crypto.Suffix(in.Token)
 		if err := d.Tokens.SetService(r.Context(), ciphertext, nonce, label); err != nil {
+			WriteError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+// serviceCredentialUserID mirrors internal/db's own sentinel: the service-wide
+// credentials live in the per-user tables under this id. Declared here (rather
+// than exported from internal/db) so the handlers can summarise the service
+// key with the same helper they use for a real user's.
+const serviceCredentialUserID = "__service__"
+
+// handleSettingsCodexKeyPut is PUT /api/v1/settings/codex-key: the
+// service-wide OpenAI API key unattended Codex sessions run with. Same
+// verify-then-store rule as the per-user key.
+func handleSettingsCodexKeyPut(d *Deps) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ciphertext, nonce, label, _, ok := verifyAndSealCodexKey(d, w, r, "service")
+		if !ok {
+			return
+		}
+		if err := d.CodexCreds.SetService(r.Context(), ciphertext, nonce, label); err != nil {
 			WriteError(w, err)
 			return
 		}

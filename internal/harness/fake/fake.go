@@ -24,15 +24,31 @@ type Step struct {
 // Steps, so the same Harness can be reused to start several sessions with identical scripts.
 type Harness struct {
 	Steps []Step
-	mu    sync.Mutex
-	Procs []*Process // every Process ever started, for test inspection
+	// HarnessKind is the kind this fake stands in for. Empty means harness.KindClaude: a
+	// fake registered in a harness.Registry has to answer to a kind a session row can
+	// actually name, and Claude Code is what a session defaults to. Set it to
+	// harness.KindCodex to stand in for the Codex CLI instead.
+	HarnessKind harness.Kind
+	mu          sync.Mutex
+	Procs       []*Process // every Process ever started, for test inspection
 }
 
 // New returns a Harness that replays steps, in order, one per Send, for every session it starts.
 func New(steps ...Step) *Harness { return &Harness{Steps: steps} }
 
-// Kind identifies this Harness as the fake, in-memory implementation.
-func (h *Harness) Kind() harness.Kind { return "fake" }
+// NewKind is New for a fake standing in for a particular harness kind.
+func NewKind(kind harness.Kind, steps ...Step) *Harness {
+	return &Harness{Steps: steps, HarnessKind: kind}
+}
+
+// Kind reports the kind this fake stands in for (harness.KindClaude unless HarnessKind says
+// otherwise).
+func (h *Harness) Kind() harness.Kind {
+	if h.HarnessKind == "" {
+		return harness.KindClaude
+	}
+	return h.HarnessKind
+}
 
 // Start validates spec and starts a new scripted Process.
 func (h *Harness) Start(ctx context.Context, spec harness.StartSpec) (harness.Process, error) {

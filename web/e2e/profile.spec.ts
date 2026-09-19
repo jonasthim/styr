@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
-import { ensureRealToken, isReal, setClaudeTokenPresence } from './helpers/seed'
+import { clearRealCodexKey, ensureRealToken, isReal, setClaudeTokenPresence } from './helpers/seed'
 
 // Runs against both backends. /api/v1/me starts logged in as the dev admin
 // with a present Claude token in both; the absent-state tests flip it via
@@ -65,6 +65,56 @@ test.describe('Profile - Claude token card', () => {
     // file, given workers: 1 - web/playwright.config.ts) need a working
     // Claude token to create sessions.
     if (isReal(testInfo)) await ensureRealToken(page)
+  })
+})
+
+// Runs against both backends. Both start with the Codex key absent - the
+// mock seeds it that way (web/src/mocks/handlers.ts) and a fresh real backend
+// has none - so the card's whole flow (absent -> save and verify -> present ->
+// remove) can be driven from the top. The dev-mode key verifiers (the mock's
+// verifyCodexKey and cmd/styr/wire.go's devCodexVerifier) both accept anything
+// starting with "sk-" and reject everything else.
+test.describe('Profile - Codex key card', () => {
+  test('saving a key flips it to present, and removing it flips it back', async ({ page }, testInfo) => {
+    await page.goto('/profile')
+    await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible()
+    // The real projects share one backend for the whole run, and another spec
+    // may have seeded a Codex key already; start from absent either way.
+    await clearRealCodexKey(page, testInfo)
+
+    const card = page.getByTestId('codex-key-card')
+    await expect(card.getByTestId('codex-key-card-absent')).toBeVisible()
+
+    await card.getByLabel('Codex API key').fill('sk-proj-e2e-abcd')
+    await card.getByRole('button', { name: 'Save and verify' }).click()
+
+    const present = card.getByTestId('codex-key-card-present')
+    await expect(present).toBeVisible()
+    // The label is an ellipsis plus the key's last four characters, never the
+    // key (internal/api/me_handlers.go's codexKeyLabel).
+    await expect(present.locator('p').first()).toHaveText('…abcd')
+    await expect(present).not.toContainText('sk-proj-e2e')
+
+    await card.getByRole('button', { name: 'Remove' }).click()
+    await expect(card.getByTestId('codex-key-card-absent')).toBeVisible()
+  })
+
+  test('a key that fails verification shows the error and stores nothing', async ({ page }, testInfo) => {
+    await page.goto('/profile')
+    await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible()
+
+    await clearRealCodexKey(page, testInfo)
+
+    const card = page.getByTestId('codex-key-card')
+    await card.getByLabel('Codex API key').fill('nope')
+    await card.getByRole('button', { name: 'Save and verify' }).click()
+
+    const error = card.getByTestId('codex-key-card-error')
+    await expect(error).toBeVisible()
+    // Both dev verifiers reject the same input, worded differently: the mock
+    // shows UX copy, the real handler quotes its verifier's own line.
+    await expect(error).toHaveText(isReal(testInfo) ? /could not be verified/ : /wasn't accepted/)
+    await expect(card.getByTestId('codex-key-card-absent')).toBeVisible()
   })
 })
 

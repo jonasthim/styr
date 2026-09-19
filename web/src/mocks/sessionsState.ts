@@ -32,6 +32,14 @@ export const MOCK_MODELS: ModelOption[] = [
 
 export const MOCK_EFFORTS: Exclude<Effort, ''>[] = ['low', 'medium', 'high', 'xhigh', 'max']
 
+// The harness roster GET /status reports (internal/api/deps.go's HarnessInfo).
+// Both are available in the mock: a mock-mode spec must be able to pick either
+// one in the new-session dialog.
+export const MOCK_HARNESSES = [
+  { kind: 'claude' as const, available: true, version: '2.1.276', bin: 'claude' },
+  { kind: 'codex' as const, available: true, version: 'codex-cli 0.154.0', bin: 'codex' },
+]
+
 export const MOCK_HIDDEN_COMMANDS = ['clear', 'doctor', 'color', 'reload-plugins', 'model', 'effort']
 
 export const MOCK_SLASH_COMMANDS = ['compact', 'commit-commands:commit', 'superpowers:brainstorming', 'clear', 'doctor']

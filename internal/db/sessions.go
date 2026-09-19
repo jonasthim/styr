@@ -134,6 +134,14 @@ func (s *Sessions) UpdateNow(ctx context.Context, id string, nowLine string) err
 	return s.exec1(ctx, `UPDATE sessions SET now_line = ? WHERE id = ?`, nowLine, id)
 }
 
+// UpdateHarness records the harness the session's process actually reported
+// itself as on its init message. It is normally the same value Create stored,
+// but the CLI is the authority: a session row only asks for a harness, the
+// init message is what answered.
+func (s *Sessions) UpdateHarness(ctx context.Context, id string, kind string) error {
+	return s.exec1(ctx, `UPDATE sessions SET harness = ? WHERE id = ?`, kind, id)
+}
+
 // UpdateModel sets the model in use.
 func (s *Sessions) UpdateModel(ctx context.Context, id string, model string) error {
 	return s.exec1(ctx, `UPDATE sessions SET model = ? WHERE id = ?`, model, id)

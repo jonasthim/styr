@@ -31,6 +31,7 @@ type Config struct {
 	DataDir         string         `yaml:"data_dir"`          // default /var/lib/styr (prod); ./data (dev)
 	SecretKey       string         `yaml:"secret_key"`        // 32+ bytes, base64 or raw; encrypts tokens; required
 	ClaudeBin       string         `yaml:"claude_bin"`        // default "claude"
+	CodexBin        string         `yaml:"codex_bin"`         // default "codex"
 	MaxOpenSessions int            `yaml:"max_open_sessions"` // default 4
 	IdleTimeout     time.Duration  `yaml:"idle_timeout"`      // default 15m
 	ApprovalTimeout time.Duration  `yaml:"approval_timeout"`  // default 30m, for unattended
@@ -47,6 +48,7 @@ func Default() Config {
 		Env:             "prod",
 		Listen:          "127.0.0.1:8080",
 		ClaudeBin:       "claude",
+		CodexBin:        "codex",
 		MaxOpenSessions: 4,
 		IdleTimeout:     15 * time.Minute,
 		ApprovalTimeout: 30 * time.Minute,
@@ -118,6 +120,7 @@ func applyEnv(c *Config) {
 	str("DATA_DIR", &c.DataDir)
 	str("SECRET_KEY", &c.SecretKey)
 	str("CLAUDE_BIN", &c.ClaudeBin)
+	str("CODEX_BIN", &c.CodexBin)
 	integer("MAX_OPEN_SESSIONS", &c.MaxOpenSessions)
 	duration("IDLE_TIMEOUT", &c.IdleTimeout)
 	duration("APPROVAL_TIMEOUT", &c.ApprovalTimeout)

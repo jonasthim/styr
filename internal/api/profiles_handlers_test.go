@@ -124,3 +124,44 @@ func TestProfilesList_SeedsModelAndEffortOnUnattendedBuiltins(t *testing.T) {
 		}
 	}
 }
+
+// A profile carries the harness its sessions default to; it is editable on builtin rows, the
+// same way model and effort are.
+func TestProfilesPatch_Harness(t *testing.T) {
+	e := newEnv(t)
+
+	var list []struct {
+		ID      string `json:"id"`
+		Harness string `json:"harness"`
+	}
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/profiles", nil, &list); status != http.StatusOK {
+		t.Fatalf("GET /profiles = %d, want 200", status)
+	}
+	if len(list) == 0 {
+		t.Fatal("no profiles seeded")
+	}
+	for _, p := range list {
+		if p.Harness != "claude" {
+			t.Fatalf("profile %s harness = %q, want claude", p.ID, p.Harness)
+		}
+	}
+
+	var out struct {
+		Harness string `json:"harness"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPatch, "/api/v1/profiles/interactive", map[string]any{"harness": "codex"}, &out)
+	if status != http.StatusOK {
+		t.Fatalf("PATCH /profiles/interactive = %d, want 200", status)
+	}
+	if out.Harness != "codex" {
+		t.Fatalf("harness = %q, want codex", out.Harness)
+	}
+}
+
+func TestProfilesPatch_UnknownHarnessIs422(t *testing.T) {
+	e := newEnv(t)
+	status := e.doJSON(e.adminClient, http.MethodPatch, "/api/v1/profiles/interactive", map[string]any{"harness": "gemini"}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("PATCH with an unknown harness = %d, want 422", status)
+	}
+}

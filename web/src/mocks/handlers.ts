@@ -11,6 +11,7 @@ import type {
   ApiErrorBody,
   DiffSummary,
   ClaudeTokenInfo,
+  CodexKeyInfo,
   Effort,
   Me,
   Profile,
@@ -33,6 +34,7 @@ import type { ApiToken, ApiTokenCreated } from '../api/types'
 import {
   DEV_USER_ID,
   MOCK_EFFORTS,
+  MOCK_HARNESSES,
   MOCK_HIDDEN_COMMANDS,
   MOCK_MODELS,
   MOCK_SLASH_COMMANDS,
@@ -80,6 +82,19 @@ export const TOKEN_INVALID_MESSAGE =
 function verifyToken(token: string): ClaudeTokenInfo | null {
   if (!token.startsWith('sk-ant-')) return null
   return { present: true, label: `…${token.slice(-6)}`, verified_at: iso(0) }
+}
+
+// The dev Codex verifier (cmd/styr/wire.go's devCodexVerifier): accepts
+// anything starting with "sk-" (an OpenAI API key's prefix), rejects
+// everything else with 422 key_invalid. Shared by PUT /me/codex-key and
+// PUT /settings/codex-key. The stored label is the last four characters,
+// not the six a Claude token keeps (internal/api/me_handlers.go).
+export const KEY_INVALID_MESSAGE =
+  "That key wasn't accepted. Paste an OpenAI API key (it starts with sk-) from platform.openai.com."
+
+function verifyCodexKey(key: string): CodexKeyInfo | null {
+  if (!key.startsWith('sk-')) return null
+  return { present: true, label: `…${key.slice(-4)}` }
 }
 
 // DEV_USER_ID, TOOL_FIXTURE_SESSION_ID and the `sessions` array itself now
@@ -210,6 +225,7 @@ const profiles: Profile[] = [
     builtin: true,
     model: '',
     effort: '',
+    harness: 'claude',
   },
   {
     id: 'investigate',
@@ -230,6 +246,7 @@ const profiles: Profile[] = [
     builtin: true,
     model: 'sonnet',
     effort: 'medium',
+    harness: 'claude',
   },
   {
     id: 'remediate',
@@ -252,6 +269,7 @@ const profiles: Profile[] = [
     builtin: true,
     model: 'sonnet',
     effort: 'medium',
+    harness: 'claude',
   },
   {
     // One editable profile alongside the three builtins. Builtin rows lock
@@ -268,6 +286,7 @@ const profiles: Profile[] = [
     builtin: false,
     model: '',
     effort: '',
+    harness: 'claude',
   },
 ]
 
@@ -329,6 +348,11 @@ let loggedOut = false
 // POST /__mock/reset-claude-token for the absent-state test.
 let devClaudeToken: ClaudeTokenInfo = { present: true, label: '…a1b2c3', verified_at: iso(60 * 24) }
 
+// Seeded absent, unlike the Claude token: the Codex key card's whole flow
+// (absent -> save and verify -> present -> remove) is what e2e/profile.spec.ts
+// drives, and starting absent is the state that flow begins from.
+let devCodexKey: CodexKeyInfo = { present: false, label: '' }
+
 // Flipped by POST /__mock/set-role so a spec can see a members-only view
 // (the first-run "ask an admin" copy) without a second seeded user.
 let devRole: Role = 'admin'
@@ -339,12 +363,14 @@ interface MockSettings {
   max_open_sessions: number
   idle_timeout: string
   service_token: ClaudeTokenInfo
+  codex_key: CodexKeyInfo
 }
 
 let settings: MockSettings = {
   max_open_sessions: 4,
   idle_timeout: '15m0s',
   service_token: { present: false, label: '', verified_at: null },
+  codex_key: { present: false, label: '' },
 }
 
 // ---- T36: personal API tokens (additive; see the matching block appended
@@ -446,6 +472,7 @@ export const handlers = [
       role: devRole,
       prefs: { theme: 'dark' },
       claude_token: devClaudeToken,
+      codex_key: devCodexKey,
     }
     return HttpResponse.json(me)
   }),
@@ -462,6 +489,19 @@ export const handlers = [
 
   http.delete('/api/v1/me/claude-token', () => {
     devClaudeToken = { present: false, label: '', verified_at: null }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.put('/api/v1/me/codex-key', async ({ request }) => {
+    const body = (await request.json()) as { key?: string }
+    const verified = verifyCodexKey(body.key ?? '')
+    if (!verified) return HttpResponse.json(errorBody('key_invalid', KEY_INVALID_MESSAGE), { status: 422 })
+    devCodexKey = verified
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.delete('/api/v1/me/codex-key', () => {
+    devCodexKey = { present: false, label: '' }
     return new HttpResponse(null, { status: 204 })
   }),
 
@@ -482,6 +522,14 @@ export const handlers = [
     const verified = verifyToken(body.token ?? '')
     if (!verified) return HttpResponse.json(errorBody('token_invalid', TOKEN_INVALID_MESSAGE), { status: 422 })
     settings = { ...settings, service_token: verified }
+    return new HttpResponse(null, { status: 204 })
+  }),
+
+  http.put('/api/v1/settings/codex-key', async ({ request }) => {
+    const body = (await request.json()) as { key?: string }
+    const verified = verifyCodexKey(body.key ?? '')
+    if (!verified) return HttpResponse.json(errorBody('key_invalid', KEY_INVALID_MESSAGE), { status: 422 })
+    settings = { ...settings, codex_key: verified }
     return new HttpResponse(null, { status: 204 })
   }),
 
@@ -611,6 +659,7 @@ export const handlers = [
       builtin: false,
       model: body.model ?? '',
       effort: body.effort ?? '',
+      harness: body.harness ?? 'claude',
     }
     profiles.push(p)
     return HttpResponse.json(p, { status: 201 })
@@ -631,7 +680,7 @@ export const handlers = [
       // "Builtin profiles only allow max_turns, approval_timeout, model and
       // effort to change" (docs/openapi.yaml) - reject any other field that
       // would actually change the stored value.
-      const editableKeys = new Set(['max_turns', 'approval_timeout', 'model', 'effort'])
+      const editableKeys = new Set(['max_turns', 'approval_timeout', 'model', 'effort', 'harness'])
       const offending = (Object.keys(body) as Array<keyof Profile>).some(
         (key) => !editableKeys.has(key) && body[key] !== undefined && body[key] !== p[key],
       )
@@ -639,7 +688,7 @@ export const handlers = [
         return HttpResponse.json(
           errorBody(
             'immutable_field',
-            'Builtin profiles only allow max turns, approval timeout, model and effort to change.',
+            'Builtin profiles only allow max turns, approval timeout, model, effort and harness to change.',
           ),
           { status: 422 },
         )
@@ -659,14 +708,17 @@ export const handlers = [
       prompt: string
       model?: string
       effort?: Effort
+      harness?: Session['harness']
     }
+    const profile = profiles.find((p) => p.id === body.profile_id)
+    const harness = body.harness || profile?.harness || 'claude'
     const session: Session = {
       id: crypto.randomUUID(),
       owner_id: DEV_USER_ID,
       title: body.title || 'Untitled session',
       workspace_id: body.workspace_id,
       profile_id: body.profile_id,
-      harness: 'claude',
+      harness,
       state: 'open',
       origin: 'ui',
       origin_ref: '',
@@ -683,7 +735,7 @@ export const handlers = [
       tokens_in: 0,
       tokens_out: 0,
       now_line: '',
-      model: body.model || 'claude-fable-5-1',
+      model: body.model || (harness === 'codex' ? 'gpt-5-codex' : 'claude-fable-5-1'),
       effort: body.effort ?? '',
       slash_commands: MOCK_SLASH_COMMANDS,
     }
@@ -796,6 +848,7 @@ export const handlers = [
       queue_depth: 0,
       models: MOCK_MODELS,
       efforts: MOCK_EFFORTS,
+      harnesses: MOCK_HARNESSES,
       hidden_commands: MOCK_HIDDEN_COMMANDS,
     }
     return HttpResponse.json(status)
@@ -969,6 +1022,36 @@ export const handlers = [
   // in its input) that PlanCard.tsx and the inbox render as a checklist. Not
   // part of the default seed because e2e/inbox.spec.ts asserts exact pending
   // counts.
+  // Seeds a pending Bash approval against any session, so a spec can prove
+  // the session view hides the approval affordances for a Codex session
+  // rather than merely not having had an approval to show.
+  http.post('/__mock/pending-approval', async ({ request }) => {
+    const body = (await request.json()) as { session_id?: string }
+    const sessionId = body.session_id ?? ''
+    const session = sessions.find((s) => s.id === sessionId)
+    if (!session) return HttpResponse.json(errorBody('not_found', 'session not found'), { status: 404 })
+    const id = `mock-approval-${sessionId}`
+    if (!approvals.some((a) => a.id === id)) {
+      approvals.push({
+        id,
+        session_id: sessionId,
+        request_id: `req-${id}`,
+        tool: 'Bash',
+        input: { command: 'ls -la' },
+        risk: 'exec',
+        state: 'pending',
+        created_at: iso(0),
+        snoozed_until: null,
+        updated_input: null,
+        message: '',
+        session_title: session.title,
+        now_line: session.now_line,
+      })
+    }
+    session.state = 'waiting'
+    return new HttpResponse(null, { status: 204 })
+  }),
+
   http.post('/__mock/plan-approval', () => {
     if (!approvals.some((a) => a.id === PLAN_APPROVAL_ID)) {
       const session = sessions.find((s) => s.id === TOOL_FIXTURE_SESSION_ID)

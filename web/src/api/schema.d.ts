@@ -148,6 +148,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/me/codex-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the current user's Codex API key
+         * @description The OpenAI API key the user's Codex sessions run with, handed to the child process as OPENAI_API_KEY and nothing else. It is verified (one read-only `codex exec` turn) before anything is stored; on a failed verify nothing is written and the response is 422 key_invalid. The key itself is never returned by any response - only a label made of its last four characters. 501 when the server has no Codex harness wired in.
+         */
+        put: operations["putMeCodexKey"];
+        post?: never;
+        /** Remove the current user's Codex API key */
+        delete: operations["deleteMeCodexKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/me/api-tokens": {
         parameters: {
             query?: never;
@@ -263,6 +284,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/codex-key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set the service-wide Codex API key
+         * @description The OpenAI API key unattended Codex sessions (webhook, schedule and pipeline runs, which have no owner) run with. Same verify-then-store rule as PUT /me/codex-key.
+         */
+        put: operations["putServiceCodexKey"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces": {
         parameters: {
             query?: never;
@@ -365,7 +406,7 @@ export interface paths {
         head?: never;
         /**
          * Update a profile
-         * @description Builtin profiles only allow max_turns, approval_timeout, model and effort to change. mode may never be the CLI's skip-all-permissions mode (422 on any profile; see internal/harness's validModes), and effort must be one of the valid levels.
+         * @description Builtin profiles only allow max_turns, approval_timeout, model, effort and harness to change. mode may never be the CLI's skip-all-permissions mode (422 on any profile; see internal/harness's validModes), and effort must be one of the valid levels.
          */
         patch: operations["patchProfile"];
         trace?: never;
@@ -1517,6 +1558,11 @@ export interface components {
             /** Format: date-time */
             verified_at: string | null;
         };
+        /** @description The per-user (or service-wide) Codex credential summary. Unlike a Claude token there is no verified_at: a key is verified before it is stored and never re-verified, so present already implies "verified once". label is an ellipsis plus the key's last four characters; the key itself is never returned. */
+        CodexKey: {
+            present: boolean;
+            label: string;
+        };
         /** @description GET /me/api-tokens's element shape: never the raw secret or its hash, only enough to recognise a token in the list. */
         APIToken: {
             id: string;
@@ -1556,6 +1602,7 @@ export interface components {
             role: "admin" | "member";
             prefs: Record<string, never>;
             claude_token: components["schemas"]["ClaudeToken"];
+            codex_key: components["schemas"]["CodexKey"];
         };
         Provider: {
             name: string;
@@ -1607,6 +1654,11 @@ export interface components {
              * @enum {string}
              */
             effort: "" | "low" | "medium" | "high" | "xhigh" | "max";
+            /**
+             * @description The agentic CLI sessions started under this profile default to. Always one of the two; a row written before the column existed reads as claude.
+             * @enum {string}
+             */
+            harness: "claude" | "codex";
         };
         Session: {
             id: string;
@@ -1614,7 +1666,11 @@ export interface components {
             title: string;
             workspace_id: string;
             profile_id: string;
-            harness: string;
+            /**
+             * @description The agentic CLI this session runs on. Set from the request (or the profile's default) at creation, then confirmed by whatever the CLI's own init message reported.
+             * @enum {string}
+             */
+            harness: "claude" | "codex";
             /** @enum {string} */
             state: "open" | "running" | "waiting" | "closed" | "failed";
             /** @enum {string} */
@@ -1767,6 +1823,15 @@ export interface components {
             }[];
             /** @description The reasoning effort levels, in increasing order. */
             efforts: ("low" | "medium" | "high" | "xhigh" | "max")[];
+            /** @description Every harness this build can drive, probed once at startup by running `<bin> --version`. available is false when the binary could not be run at all, which is how the UI explains a harness it must not offer. */
+            harnesses: {
+                /** @enum {string} */
+                kind: "claude" | "codex";
+                available: boolean;
+                version: string;
+                /** @description The configured binary name or path; never a credential. */
+                bin: string;
+            }[];
             /** @description CLI built-ins the composer's slash menu must filter out of a session's slash_commands: they do not survive headless mode, are terminal-only, or are replaced by Styr's own controls. */
             hidden_commands: string[];
         };
@@ -2411,6 +2476,75 @@ export interface operations {
             };
         };
     };
+    putMeCodexKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Key verified and stored */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The key failed verification */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The Codex harness is not configured on this server */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    deleteMeCodexKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removed (idempotent) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The Codex harness is not configured on this server */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     listMeAPITokens: {
         parameters: {
             query?: never;
@@ -2560,6 +2694,7 @@ export interface operations {
                         /** @description A Go duration string, e.g. "15m0s". */
                         idle_timeout: string;
                         service_token: components["schemas"]["ClaudeToken"];
+                        codex_key: components["schemas"]["CodexKey"];
                     };
                 };
             };
@@ -2590,6 +2725,49 @@ export interface operations {
             };
             /** @description The token failed verification */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    putServiceCodexKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    key: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Key verified and stored */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            /** @description The key failed verification */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+            /** @description The Codex harness is not configured on this server */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2839,6 +3017,11 @@ export interface operations {
                     model?: string;
                     /** @enum {string} */
                     effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
+                    /**
+                     * @description The agentic CLI sessions started under this profile run on unless the request names another. Defaults to claude.
+                     * @enum {string}
+                     */
+                    harness?: "claude" | "codex";
                 };
             };
         };
@@ -2885,6 +3068,8 @@ export interface operations {
                     model?: string;
                     /** @enum {string} */
                     effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
+                    /** @enum {string} */
+                    harness?: "claude" | "codex";
                 };
             };
         };
@@ -2950,6 +3135,11 @@ export interface operations {
                      * @enum {string}
                      */
                     effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
+                    /**
+                     * @description The agentic CLI to run this session on. Empty falls back to the profile's own default, then to claude. A codex session requires the owner's Codex API key (PUT /me/codex-key), or the service-wide one for an unattended run.
+                     * @enum {string}
+                     */
+                    harness?: "claude" | "codex";
                     /** @description Starts the session on an existing worktree (typically another session's, under the workspace's .styr/worktrees/ directory) instead of creating a fresh one, so a pipeline "worktree: shared" step can continue where the previous step left off. Empty (the default) creates a fresh worktree as before. The workspace must have worktrees enabled; otherwise the request is 422. */
                     worktree_path?: string;
                 };
@@ -2983,7 +3173,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description No Claude token available for the current user (add one in profile settings), or worktree_path does not point to an existing worktree registered under the workspace's .styr/worktrees/ directory (or the workspace has worktrees disabled) */
+            /** @description No credential available for the current user for the chosen harness (a Claude token, or a Codex API key for a codex session; add one in profile settings), an unknown or unavailable harness, or worktree_path does not point to an existing worktree registered under the workspace's .styr/worktrees/ directory (or the workspace has worktrees disabled) */
             422: {
                 headers: {
                     [name: string]: unknown;

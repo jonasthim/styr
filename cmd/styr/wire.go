@@ -17,7 +17,9 @@ import (
 	"github.com/jonasthim/styr/internal/crypto"
 	"github.com/jonasthim/styr/internal/db"
 	"github.com/jonasthim/styr/internal/events"
+	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/harness/claude"
+	"github.com/jonasthim/styr/internal/harness/codex"
 	"github.com/jonasthim/styr/internal/notify"
 	"github.com/jonasthim/styr/internal/pipelines"
 	"github.com/jonasthim/styr/internal/runs"
@@ -28,8 +30,8 @@ import (
 	"github.com/jonasthim/styr/internal/workspaces"
 )
 
-// probeVersionTimeout bounds the one-time `claude --version` call at
-// startup used to populate the status endpoint.
+// probeVersionTimeout bounds the one-time `<bin> --version` call made per
+// harness at startup to populate the status endpoint.
 const probeVersionTimeout = 10 * time.Second
 
 // runTimeout is how long an unattended run may stay running before the run
@@ -64,6 +66,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 
 	users := db.NewUsers(d)
 	tokens := db.NewTokens(d)
+	codexCreds := db.NewCodexCredentials(d)
 	logins := db.NewLoginSessions(d)
 	workspacesRepo := db.NewWorkspaces(d)
 	profiles := db.NewProfiles(d)
@@ -85,7 +88,12 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	pipelineRunsRepo := db.NewPipelineRuns(d)
 	stepRunsRepo := db.NewStepRuns(d)
 
-	h := claude.New(cfg.ClaudeBin)
+	// Every harness this build can drive, registered by kind: a session picks one on its own
+	// row (its profile's default, or the request's), and internal/sessions looks it up again
+	// on every resume.
+	registry := harness.New()
+	registry.Register(claude.New(cfg.ClaudeBin))
+	registry.Register(codex.New(cfg.CodexBin))
 
 	workspacesSvc := workspaces.New(workspacesRepo, sessionsRepo, bus, cfg.UsersDir(), nil)
 
@@ -100,7 +108,9 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		ReviewComments: reviewCommentsRepo,
 		Checkpoints:    checkpointsRepo,
 		Users:          users,
-	}, h, bus, box, sessions.Options{
+
+		CodexCredentials: codexCreds,
+	}, registry, bus, box, sessions.Options{
 		MaxOpen:     cfg.MaxOpenSessions,
 		IdleTimeout: cfg.IdleTimeout,
 		UsersDir:    cfg.UsersDir(),
@@ -187,17 +197,24 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	authSvc = authSvc.WithAPITokens(apiTokensRepo)
 
 	var verifier api.TokenVerifier
+	var codexVerifier api.TokenVerifier
 	if cfg.Env == "dev" {
-		// The dev verifier never spawns a process, so the UI's token cards
-		// can be exercised locally with any string shaped like a token,
-		// without a real Claude credential or the shell fake understanding
+		// The dev verifiers never spawn a process, so the UI's credential cards can be
+		// exercised locally with any string shaped like a token or an API key, without a real
+		// Claude or OpenAI credential and without the shell fakes having to understand
 		// --output-format json.
 		verifier = devVerifier{}
+		codexVerifier = devCodexVerifier{}
 	} else {
 		verifier = claude.Verifier{Bin: cfg.ClaudeBin}
+		codexVerifier = codex.Verifier{Bin: cfg.CodexBin}
 	}
 
-	claudeVersion := probeClaudeVersion(cfg.ClaudeBin)
+	claudeVersion := probeVersion(cfg.ClaudeBin)
+	harnessInfos := []api.HarnessInfo{
+		harnessInfo(harness.KindClaude, cfg.ClaudeBin, claudeVersion),
+		harnessInfo(harness.KindCodex, cfg.CodexBin, probeVersion(cfg.CodexBin)),
+	}
 
 	deps := &api.Deps{
 		TokenStore:     apiTokensRepo,
@@ -219,6 +236,8 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Bus:            bus,
 		Box:            box,
 		Verifier:       verifier,
+		CodexVerifier:  codexVerifier,
+		CodexCreds:     codexCreds,
 		Version:        version,
 		Status: func() api.StatusInfo {
 			// sessions.Service tracks its live processes privately and
@@ -231,6 +250,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 				OpenProcesses: 0,
 				Slots:         cfg.MaxOpenSessions,
 				QueueDepth:    0,
+				Harnesses:     harnessInfos,
 			}
 		},
 		MaxOpenSessions: cfg.MaxOpenSessions,
@@ -239,16 +259,45 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	return deps, svc, &background{Runs: runsEngine, Triggers: triggersSvc, Schedules: schedulesSvc, Pipelines: pipelinesExec}, nil
 }
 
-// probeClaudeVersion runs `<bin> --version` once at startup and returns its
+// probeVersion runs `<bin> --version` once at startup and returns its
 // trimmed stdout, or "unknown" when the binary cannot be run.
-func probeClaudeVersion(bin string) string {
+func probeVersion(bin string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), probeVersionTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, bin, "--version").Output()
 	if err != nil {
 		return "unknown"
 	}
-	return strings.TrimSpace(string(out))
+	return firstLine(string(out))
+}
+
+// firstLine is the first non-empty line of s, capped at 80 characters. A real
+// CLI answers --version with exactly one short line; a shell fake standing in
+// for one during tests may answer with whatever it prints by default, and that
+// belongs nowhere near a status field the UI renders.
+func firstLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if l := strings.TrimSpace(line); l != "" {
+			if len(l) > 80 {
+				return l[:80]
+			}
+			return l
+		}
+	}
+	return ""
+}
+
+// harnessInfo turns a startup version probe into the entry GET /status
+// reports: a harness whose binary could not be run at all is listed as
+// unavailable rather than hidden, so the UI can say why a choice is missing
+// instead of silently omitting it.
+func harnessInfo(kind harness.Kind, bin, version string) api.HarnessInfo {
+	return api.HarnessInfo{
+		Kind:      string(kind),
+		Available: version != "unknown",
+		Version:   version,
+		Bin:       bin,
+	}
 }
 
 // devVerifier is wired instead of claude.Verifier when cfg.Env == "dev". It
@@ -262,4 +311,17 @@ func (devVerifier) Verify(_ context.Context, token string) error {
 		return nil
 	}
 	return errors.New("claude: dev verifier: token must start with sk-ant-")
+}
+
+// devCodexVerifier is wired instead of codex.Verifier when cfg.Env == "dev".
+// It accepts anything shaped like an OpenAI API key (the "sk-" prefix)
+// without spawning a process, and rejects everything else so the profile
+// UI's error path stays exercisable.
+type devCodexVerifier struct{}
+
+func (devCodexVerifier) Verify(_ context.Context, key string) error {
+	if strings.HasPrefix(key, "sk-") {
+		return nil
+	}
+	return errors.New("codex: dev verifier: key must start with sk-")
 }

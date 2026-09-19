@@ -43,7 +43,7 @@ func TestHandlePermission_ApprovalCreateFails_DeniesFailsSessionAndLogs(t *testi
 	// so the pre-inserted conflicting row is valid on its own terms.
 	placeholder := domain.Session{
 		ID: "placeholder-session", OwnerID: &owner, Title: "placeholder", WorkspaceID: testWorkspaceID,
-		ProfileID: "interactive", Harness: "fake", State: domain.SessionOpen, Origin: domain.OriginUI,
+		ProfileID: "interactive", Harness: "claude", State: domain.SessionOpen, Origin: domain.OriginUI,
 		CreatedAt: time.Now(), LastActiveAt: time.Now(),
 	}
 	if err := repos.Sessions.Create(ctx, placeholder); err != nil {

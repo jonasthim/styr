@@ -221,6 +221,58 @@ paths:
         "204":
           description: Removed (idempotent)
 
+  /api/v1/me/codex-key:
+    put:
+      summary: Set the current user's Codex API key
+      description: >
+        The OpenAI API key the user's Codex sessions run with, handed to the
+        child process as OPENAI_API_KEY and nothing else. It is verified (one
+        read-only `codex exec` turn) before anything is stored; on a failed
+        verify nothing is written and the response is 422 key_invalid. The key
+        itself is never returned by any response - only a label made of its
+        last four characters. 501 when the server has no Codex harness wired
+        in.
+      operationId: putMeCodexKey
+      tags: [me]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+              required: [key]
+      responses:
+        "204":
+          description: Key verified and stored
+        "422":
+          description: The key failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "501":
+          description: The Codex harness is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+    delete:
+      summary: Remove the current user's Codex API key
+      operationId: deleteMeCodexKey
+      tags: [me]
+      responses:
+        "204":
+          description: Removed (idempotent)
+        "501":
+          description: The Codex harness is not configured on this server
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
   /api/v1/me/api-tokens:
     get:
       summary: List the current user's personal API tokens
@@ -362,7 +414,9 @@ paths:
                     description: A Go duration string, e.g. "15m0s".
                   service_token:
                     $ref: "#/components/schemas/ClaudeToken"
-                required: [max_open_sessions, idle_timeout, service_token]
+                  codex_key:
+                    $ref: "#/components/schemas/CodexKey"
+                required: [max_open_sessions, idle_timeout, service_token, codex_key]
         "403":
           $ref: "#/components/responses/Forbidden"
 
@@ -387,6 +441,43 @@ paths:
           description: Token verified and stored
         "422":
           description: The token failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+
+  /api/v1/settings/codex-key:
+    put:
+      summary: Set the service-wide Codex API key
+      description: >
+        The OpenAI API key unattended Codex sessions (webhook, schedule and
+        pipeline runs, which have no owner) run with. Same verify-then-store
+        rule as PUT /me/codex-key.
+      operationId: putServiceCodexKey
+      tags: [admin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                key:
+                  type: string
+              required: [key]
+      responses:
+        "204":
+          description: Key verified and stored
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "422":
+          description: The key failed verification
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorBody"
+        "501":
+          description: The Codex harness is not configured on this server
           content:
             application/json:
               schema:
@@ -652,6 +743,12 @@ paths:
                 effort:
                   type: string
                   enum: ["", low, medium, high, xhigh, max]
+                harness:
+                  type: string
+                  enum: [claude, codex]
+                  description: >
+                    The agentic CLI sessions started under this profile run
+                    on unless the request names another. Defaults to claude.
               required: [name, mode]
       responses:
         "201":
@@ -671,8 +768,8 @@ paths:
     patch:
       summary: Update a profile
       description: >
-        Builtin profiles only allow max_turns, approval_timeout, model and
-        effort to change. mode may never be the CLI's skip-all-permissions
+        Builtin profiles only allow max_turns, approval_timeout, model,
+        effort and harness to change. mode may never be the CLI's skip-all-permissions
         mode (422 on any profile; see internal/harness's validModes), and
         effort must be one of the valid levels.
       operationId: patchProfile
@@ -712,6 +809,9 @@ paths:
                 effort:
                   type: string
                   enum: ["", low, medium, high, xhigh, max]
+                harness:
+                  type: string
+                  enum: [claude, codex]
       responses:
         "200":
           description: The updated profile
@@ -768,6 +868,15 @@ paths:
                   type: string
                   enum: ["", low, medium, high, xhigh, max]
                   description: Overrides the profile's effort default.
+                harness:
+                  type: string
+                  enum: [claude, codex]
+                  description: >
+                    The agentic CLI to run this session on. Empty falls back
+                    to the profile's own default, then to claude. A codex
+                    session requires the owner's Codex API key (PUT
+                    /me/codex-key), or the service-wide one for an unattended
+                    run.
                 worktree_path:
                   type: string
                   description: >
@@ -800,8 +909,10 @@ paths:
                 $ref: "#/components/schemas/ErrorBody"
         "422":
           description: >
-            No Claude token available for the current user (add one in
-            profile settings), or worktree_path does not point to an
+            No credential available for the current user for the chosen
+            harness (a Claude token, or a Codex API key for a codex session;
+            add one in profile settings), an unknown or unavailable harness,
+            or worktree_path does not point to an
             existing worktree registered under the workspace's
             .styr/worktrees/ directory (or the workspace has worktrees
             disabled)
@@ -2915,6 +3026,21 @@ components:
           format: date-time
       required: [present, label, verified_at]
 
+    CodexKey:
+      description: >
+        The per-user (or service-wide) Codex credential summary. Unlike a
+        Claude token there is no verified_at: a key is verified before it is
+        stored and never re-verified, so present already implies "verified
+        once". label is an ellipsis plus the key's last four characters; the
+        key itself is never returned.
+      type: object
+      properties:
+        present:
+          type: boolean
+        label:
+          type: string
+      required: [present, label]
+
     APIToken:
       description: >
         GET /me/api-tokens's element shape: never the raw secret or its
@@ -2998,7 +3124,9 @@ components:
           type: object
         claude_token:
           $ref: "#/components/schemas/ClaudeToken"
-      required: [id, email, display_name, avatar_url, role, prefs, claude_token]
+        codex_key:
+          $ref: "#/components/schemas/CodexKey"
+      required: [id, email, display_name, avatar_url, role, prefs, claude_token, codex_key]
 
     Provider:
       type: object
@@ -3112,7 +3240,14 @@ components:
           type: string
           enum: ["", low, medium, high, xhigh, max]
           description: Default reasoning effort. Empty means the CLI's own default.
-      required: [id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout, builtin, model, effort]
+        harness:
+          type: string
+          enum: [claude, codex]
+          description: >
+            The agentic CLI sessions started under this profile default to.
+            Always one of the two; a row written before the column existed
+            reads as claude.
+      required: [id, name, mode, allowed_tools, disallowed_tools, max_turns, unattended, approval_timeout, builtin, model, effort, harness]
 
     Session:
       type: object
@@ -3129,6 +3264,11 @@ components:
           type: string
         harness:
           type: string
+          enum: [claude, codex]
+          description: >
+            The agentic CLI this session runs on. Set from the request (or
+            the profile's default) at creation, then confirmed by whatever
+            the CLI's own init message reported.
         state:
           type: string
           enum: [open, running, waiting, closed, failed]
@@ -3454,6 +3594,27 @@ components:
           items:
             type: string
             enum: [low, medium, high, xhigh, max]
+        harnesses:
+          type: array
+          description: >
+            Every harness this build can drive, probed once at startup by
+            running `<bin> --version`. available is false when the binary
+            could not be run at all, which is how the UI explains a harness
+            it must not offer.
+          items:
+            type: object
+            properties:
+              kind:
+                type: string
+                enum: [claude, codex]
+              available:
+                type: boolean
+              version:
+                type: string
+              bin:
+                type: string
+                description: The configured binary name or path; never a credential.
+            required: [kind, available, version, bin]
         hidden_commands:
           type: array
           description: >
@@ -3462,7 +3623,7 @@ components:
             are terminal-only, or are replaced by Styr's own controls.
           items:
             type: string
-      required: [version, claude_version, open_processes, slots, queue_depth, models, efforts, hidden_commands]
+      required: [version, claude_version, open_processes, slots, queue_depth, models, efforts, hidden_commands, harnesses]
 
     TemplateInput:
       description: The create/update request body for POST/PATCH /templates(/{id}).

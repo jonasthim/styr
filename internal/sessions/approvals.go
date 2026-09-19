@@ -3,6 +3,7 @@ package sessions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/jonasthim/styr/internal/domain"
@@ -30,6 +31,15 @@ func (s *Service) Decide(ctx context.Context, actor Actor, approvalID string, al
 	sess, err := s.getVisible(ctx, actor, ap.SessionID)
 	if err != nil {
 		return err
+	}
+	// The Codex CLI decides tool use with the sandbox policy its process was
+	// started under and never asks the host, so a Codex session has no
+	// approval to answer — the UI hides the affordance, and a client that
+	// asks anyway is told why rather than having the request silently
+	// swallowed. (Nothing creates approvals for such a session, so this only
+	// fires for a stale id or a hand-made request.)
+	if harness.Kind(sess.Harness) == harness.KindCodex {
+		return fmt.Errorf("%w: this harness has no approvals", domain.ErrConflict)
 	}
 
 	state := domain.ApprovalDenied

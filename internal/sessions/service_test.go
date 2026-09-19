@@ -53,6 +53,8 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 		ReviewComments: db.NewReviewComments(database),
 		Checkpoints:    db.NewCheckpoints(database),
 		Users:          users,
+
+		CodexCredentials: db.NewCodexCredentials(database),
 	}
 
 	box, err := crypto.NewBox(testSecret)
@@ -88,7 +90,7 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 	}
 
 	h := fake.New(steps...)
-	svc := New(repos, h, events.New(), box, Options{
+	svc := New(repos, harness.SingleRegistry(h), events.New(), box, Options{
 		MaxOpen:     4,
 		IdleTimeout: time.Hour,
 		UsersDir:    t.TempDir(),
@@ -614,7 +616,7 @@ func TestVisibility(t *testing.T) {
 
 	unowned := domain.Session{
 		ID: uuid.NewString(), OwnerID: nil, Title: "unowned", WorkspaceID: testWorkspaceID,
-		ProfileID: "interactive", Harness: "fake", State: domain.SessionOpen, Origin: domain.OriginSchedule,
+		ProfileID: "interactive", Harness: "claude", State: domain.SessionOpen, Origin: domain.OriginSchedule,
 		CreatedAt: time.Now(), LastActiveAt: time.Now(),
 	}
 	if err := repos.Sessions.Create(context.Background(), unowned); err != nil {

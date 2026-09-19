@@ -22,6 +22,18 @@ export type Role = Schemas['User']['role']
 
 export type ClaudeTokenInfo = Schemas['ClaudeToken']
 
+/** The per-user (or service-wide) Codex credential summary. No `verified_at`:
+ * a key is verified before it is stored and never re-verified, so `present`
+ * already means "verified once". */
+export type CodexKeyInfo = Schemas['CodexKey']
+
+/** Which agentic CLI a session runs on. */
+export type HarnessKind = Schemas['Session']['harness']
+
+/** One entry of GET /status's harness roster: the kind, whether its binary
+ * answered `--version` at startup, and what it said. */
+export type HarnessInfo = Schemas['StatusInfo']['harnesses'][number]
+
 export type Me = Omit<Schemas['Me'], 'prefs'> & { prefs: Record<string, unknown> }
 
 export type User = Omit<Schemas['User'], 'prefs'> & { prefs: Record<string, unknown> }
