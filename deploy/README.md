@@ -28,6 +28,9 @@ This creates a system user `styr` (HOME `/var/lib/styr`), installs the
 `--uninstall` removes the service and binary but keeps `/var/lib/styr` and
 `/etc/styr`. See `install.sh --help` for `--version`, `--binary` and
 `--listen`, and [Upgrading](#upgrading) below to update an existing install.
+`--version` refuses to install an older release than the one already
+installed unless you also pass `--allow-downgrade` (see
+[Upgrading](#upgrading)).
 
 ## Option 2: Docker
 
@@ -63,8 +66,18 @@ of a maintenance window); it is never required for an ordinary upgrade.
 Config and data under `/etc/styr` and `/var/lib/styr` (or the Docker
 volume) are untouched by either upgrade path.
 
+`install.sh --version vX.Y.Z` refuses to install a release older than the
+one already installed (compared with `sort -V`, so `0.9.0` < `0.10.0`
+correctly); pass `--allow-downgrade` to do it anyway. Downgrading the
+binary does not downgrade the database schema, since migrations only ever
+run forward -- restore a backup taken before the upgrade you want to undo
+instead (`styr restore`, see `docs/OPERATIONS.md`).
+
 ## Both paths
 
 `styr doctor` (installer) or `docker compose exec styr styr doctor` checks
-the config, the database, the `claude` binary and OIDC discovery. Zero
-telemetry, no login wall beyond OIDC.
+the config, the database, the `claude` binary, OIDC discovery, free disk
+space, orphan session worktrees and its own pid file. Zero telemetry, no
+login wall beyond OIDC. See [docs/OPERATIONS.md](../docs/OPERATIONS.md) for
+`styr backup`/`styr restore`, upgrading/downgrading and orphan worktree
+cleanup in full.

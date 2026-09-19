@@ -129,6 +129,7 @@ Everything Styr owns lives under `data_dir`:
 ```
 <data_dir>/
   styr.db              SQLite database: sessions, events, approvals, users, audit log
+  styr.pid              serve's own pid, written at startup and removed on shutdown
   users/<user-id>/      one directory per user, used as that user's Claude CLI HOME
                          (keeps ~/.claude state, credentials and settings isolated per user)
   workspaces/<name>/    registered workspace checkouts sessions run against
@@ -142,7 +143,11 @@ capacity accordingly for a large repository with many concurrent sessions. **Dis
 closing out a session whose work was already committed or turned into a PR) removes its
 worktree directory immediately (`git worktree remove --force`); nothing prunes an open session's
 worktree automatically, since its checkpoints and uncommitted changes are the whole point of
-keeping it around.
+keeping it around. A worktree directory that outlives every session referencing it (an orphan) is
+detected and can be removed by `styr doctor --prune-worktrees` — see `docs/OPERATIONS.md`.
 
 `internal/config/config.go`'s `DBPath()`, `UsersDir()` and `WorkspacesDir()` are the
 authoritative paths (`<data_dir>/styr.db`, `<data_dir>/users`, `<data_dir>/workspaces`).
+
+See `docs/OPERATIONS.md` for `styr backup`/`styr restore`, upgrading and downgrading, orphan
+worktree cleanup, and the `styr.pid` file above.

@@ -26,9 +26,13 @@ func run(args []string, stdout io.Writer) int {
 	case "migrate":
 		return runMigrate(stdout)
 	case "doctor":
-		return runDoctor(stdout)
+		return runDoctor(stdout, args[1:])
+	case "backup":
+		return runBackup(stdout, args[1:])
+	case "restore":
+		return runRestore(stdout, args[1:])
 	default:
-		fmt.Fprintf(stdout, "unknown command %q\nusage: styr [serve|migrate|doctor|version]\n", args[0])
+		fmt.Fprintf(stdout, "unknown command %q\nusage: styr [serve|migrate|doctor|backup|restore|version]\n", args[0])
 		return 2
 	}
 }

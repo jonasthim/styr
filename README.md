@@ -152,7 +152,8 @@ worktree modes.
 ## Configuration
 
 Every `config.yaml` key, its `STYR_*` environment override, tokens and the data directory
-layout are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+layout are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md). For backup, restore,
+upgrading/downgrading and orphan worktree cleanup, see [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Security model
 
