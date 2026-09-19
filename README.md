@@ -1,18 +1,20 @@
 # Styr
 
-Styr runs your Claude Code agents: start them from a browser, watch what they do, approve what
-matters from your phone, and keep every decision on your own box.
+Styr runs your Claude Code and Codex agents: start them from a browser, watch what they do,
+approve what matters from your phone, and keep every decision on your own box.
 
 ![Styr session view](docs/screenshots/session.png)
 
 ## Status
 
-What's proven: the real backend — the full stack, driving the fake Claude CLI rather than the
-mocked frontend — is exercised end to end by the `real-desktop`/`real-phone` Playwright suite
-(see [CONTRIBUTING.md](CONTRIBUTING.md)) before every release, and Styr runs as the author's own
-homelab deployment, the audience it's built for. What isn't: there are no external users yet, and
-the API and UI should still be expected to move before v1.0 — see the [Roadmap](#roadmap) below
-for what's shipped and what's left.
+What's proven: the real backend — the full stack, driving the fake Claude Code and Codex CLIs
+rather than the mocked frontend — is exercised end to end by the `real-desktop`/`real-phone`
+Playwright suite (see [CONTRIBUTING.md](CONTRIBUTING.md)) before every release, and Styr runs as
+the author's own homelab deployment, the audience it's built for. What isn't: there are no
+external users yet — v1.0 freezes the API and UI at "additive-only within 1.x"
+(see [docs/API.md](docs/API.md)), but that promise has exactly one deployment's worth of
+real-world mileage behind it so far. See the [Roadmap](#roadmap) below for what's shipped and
+what's next.
 
 ## Why Styr
 
@@ -30,11 +32,11 @@ for what's shipped and what's left.
 
 ## Quick start
 
-Styr is early: v0.5.0 is the latest release, and it covers login, sessions, approvals, triggers,
-runs and unattended investigations, review — worktrees, diffs, checkpoints, commit and PR —
-schedules and loops — cron-driven runs, until-done loops, a fleet Gantt and a cost dashboard —
-and now pipelines — YAML DAGs of chained agents, with fan-out, retries and shared worktrees — see
-[Features](#features) below for what's in and what's still to come.
+Styr is v1.0: login, sessions, approvals, triggers, runs and unattended investigations, review —
+worktrees, diffs, checkpoints, commit and PR — schedules and loops, pipelines — YAML DAGs of
+chained agents with fan-out, retries and shared worktrees — a second harness (the Codex CLI,
+alongside Claude Code), and a stable, versioned API — see [Features](#features) below for the
+full list.
 
 ### Install script (bare host, systemd)
 
@@ -143,6 +145,36 @@ v0.5 "Pipelines":
 See [docs/PIPELINES.md](docs/PIPELINES.md) for the full YAML format, execution semantics and
 worktree modes.
 
+v1.0 "Boring and durable":
+
+- The OpenAI Codex CLI as a second harness alongside Claude Code, chosen per profile or per
+  session from a harness registry
+- Personal Codex keys (Profile → Codex key), sealed the same way as a Claude token
+- `styr backup`/`styr restore`: an online, no-downtime SQLite snapshot and a guarded restore
+- `styr doctor` orphan worktree and free-disk-space checks
+- A `viewer` role (read-only across the UI) and per-workspace access lists for shared workspaces
+- A stable API v1 (`docs/openapi.yaml`, `GET /api/v1/version`), additive-only within the 1.x
+  line and enforced by a CI compatibility guard
+
+See [Harnesses](#harnesses) below, [docs/OPERATIONS.md](docs/OPERATIONS.md) and
+[docs/API.md](docs/API.md) for the full detail behind each of these.
+
+## Harnesses
+
+Styr drives more than one agentic CLI behind the same internal interface — the session view,
+approvals, review and runs all work the same regardless of which one is running.
+
+- **Claude Code** — per-command approvals routed to your inbox, streaming partials, model and
+  reasoning-effort switches mid-session, cost reporting.
+- **Codex** (OpenAI Codex CLI) — enforces a sandbox policy (`read-only` or `workspace-write`)
+  chosen when the session starts instead of asking per command, so it has no inbox approvals;
+  model switches work, cost reporting is token counts only.
+
+![Styr new-session dialog with the harness select open](docs/screenshots/harness.png)
+
+See [docs/HARNESSES.md](docs/HARNESSES.md) for the full capability matrix, how approvals differ
+between the two, and how each harness's credential is stored.
+
 ### Roadmap
 
 | Release | Contents |
@@ -152,7 +184,14 @@ worktree modes.
 | v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
 | v0.4 Schedules and loops (shipped) | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines (shipped) | YAML DAG, fan-out, retries, shared worktrees, live graph, start from triggers and schedules |
-| v1.0 | Second harness (Codex CLI), stable API |
+| v1.0 Boring and durable (shipped) | Codex CLI harness and registry, personal Codex keys, backup and restore, doctor disk/orphan checks, viewer role, per-workspace access lists, stable API v1 with a CI compatibility guard |
+
+Beyond 1.0:
+
+- A Gemini CLI harness
+- Multi-node runners
+- Template and pipeline sharing
+- Codex device auth (`codex login --device-auth`), instead of pasting an API key
 
 ## Configuration
 

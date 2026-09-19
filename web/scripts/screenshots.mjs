@@ -270,6 +270,21 @@ async function main() {
         await page.close()
         console.log('captured pipeline-run.png (1280x800)')
       }
+
+      // 12. New-session dialog, desktop viewport, with the harness select
+      // open: the v1.0 second-harness choice (NewSessionDialog.tsx), same
+      // trigger web/e2e/session.spec.ts uses to reach it.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/sessions?new=1`, { waitUntil: 'networkidle' })
+        const dialog = page.getByRole('dialog')
+        await dialog.waitFor({ state: 'visible', timeout: 15_000 })
+        await dialog.getByRole('combobox', { name: 'Harness' }).click()
+        await page.waitForSelector('[role="option"]', { timeout: 15_000 })
+        await page.screenshot({ path: path.join(outDir, 'harness.png') })
+        await page.close()
+        console.log('captured harness.png (1280x800)')
+      }
     } finally {
       await browser.close()
     }

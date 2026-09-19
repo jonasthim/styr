@@ -92,6 +92,11 @@ restored /root/styr-2026-09-19.tar.gz into /var/lib/styr/styr.db
 
 ## Upgrading
 
+Take a backup first: `styr backup <file>` (see [Backup](#backup) above) is one online,
+no-downtime command that costs nothing while the old version is still running, and it is the
+way back if the new version turns out to be a mistake (`styr restore`, see
+[Restore](#restore)).
+
 There is no self-upgrade: re-run the installer (`curl ... | sudo bash`, or `--version vX.Y.Z`
 for a specific release) to fetch and install a newer `styr` binary, or pull a new image tag for
 Docker. `styr` applies every pending database migration itself as part of opening `styr.db` at
@@ -101,9 +106,12 @@ enough. See `deploy/README.md`'s own Upgrading section for the full walkthrough.
 ### Automating upgrades
 
 Keep the installer's output when you script it. It exits non-zero and prints `error: …` on
-any refusal (for example the downgrade guard), and its very last line on success is
-`styr install: OK, running styr X.Y.Z (sha)`. Discarding output and checking `styr version`
-afterwards hides a refused upgrade behind an unchanged version.
+any refusal (for example the downgrade guard), and its very last line on success names the
+version transition it just made: `styr install: OK, upgraded 0.5.1 -> 1.0.0` (an upgrade),
+`styr install: OK, installed 1.0.0` (a first install), or `styr install: OK, already current at
+1.0.0` (nothing to do). Discarding output and checking `styr version` afterwards hides a refused
+upgrade behind an unchanged version; matching against the exact line above instead tells a real
+upgrade, a first install and a no-op apart without parsing anything else.
 
 ## Downgrading
 
@@ -177,6 +185,12 @@ unconditionally.
 
 `styr doctor` (installer) or `docker compose exec styr styr doctor` checks the config, the
 database, the `claude` binary, OIDC discovery, free disk space on `data_dir` (`warn` below 1 GiB
-free, `FAIL` below 200 MiB), orphan worktrees, and the pid file's liveness. See
-`docs/CONFIGURATION.md` for every `config.yaml` key and the data directory layout, and
-`deploy/README.md` for install/upgrade/uninstall.
+free, `FAIL` below 200 MiB), orphan worktrees, and the pid file's liveness. It does not yet probe
+the `codex` binary the same way `claude`'s is checked — neither the installer nor the Docker
+image installs the Codex CLI, so if you want Codex sessions, install `codex` yourself and point
+`codex_bin` (`STYR_CODEX_BIN`) at it; an unreachable one shows up as `available: false` on
+`GET /api/v1/status` rather than as a `doctor` warning. Each user then pastes a Codex key
+(Profile → Codex key card) or an admin sets the service-wide one under Settings, the same way a
+Claude token or the service token works — see `docs/HARNESSES.md`. See `docs/CONFIGURATION.md`
+for every `config.yaml` key and the data directory layout, and `deploy/README.md` for
+install/upgrade/uninstall.
