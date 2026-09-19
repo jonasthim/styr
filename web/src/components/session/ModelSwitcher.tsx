@@ -95,7 +95,7 @@ export function ModelSwitcher({ session }: { session: Session }) {
   const busy = switchTo.isPending || resumingTo !== null
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex items-center gap-2 min-[900px]:flex-wrap">
       <Select
         id={MODEL_SELECT_ID}
         aria-label="Model"
@@ -104,7 +104,7 @@ export function ModelSwitcher({ session }: { session: Session }) {
         onValueChange={(value) => apply(value, session.effort)}
         options={modelOptions}
         placeholder="Model"
-        className="w-[150px]"
+        className="min-w-0 flex-1 min-[900px]:w-[150px] min-[900px]:flex-none"
       />
       <Select
         id={EFFORT_SELECT_ID}
@@ -113,10 +113,10 @@ export function ModelSwitcher({ session }: { session: Session }) {
         disabled={busy}
         onValueChange={(value) => apply(session.model, value === CLI_DEFAULT ? '' : (value as Effort))}
         options={effortOptions}
-        className="w-[140px]"
+        className="min-w-0 flex-1 min-[900px]:w-[140px] min-[900px]:flex-none"
       />
       {resumingTo && (
-        <span data-testid="model-resuming" className="text-[12px] text-fg-secondary">
+        <span data-testid="model-resuming" className="hidden text-[12px] text-fg-secondary min-[900px]:inline">
           Resuming with {resumingTo}…
         </span>
       )}

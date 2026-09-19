@@ -3,10 +3,15 @@
 // Interrupt/Close/copy-id actions, and — for a session running in a worktree —
 // the v0.3 changes cluster (commit, PR, checkpoints, discard) on the stats
 // row, where the numbers it acts on already are.
+//
+// Below 900px (the shell's tab-bar breakpoint) the header keeps only what a
+// phone needs above the transcript: a back link, the title, the state and
+// Close on one row, the model and effort selects on a second. The chips, the
+// token counts and the copy-id button are on the Info tab.
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
-import { Copy, Check, Square, XCircle, Zap } from 'lucide-react'
+import { ChevronLeft, Copy, Check, Square, XCircle, Zap } from 'lucide-react'
 import { api } from '../../api/client'
 import type { Session, SessionState } from '../../api/types'
 import { Badge, Button, Tooltip } from '../ui'
@@ -65,18 +70,25 @@ export function SessionHeader({
   }
 
   return (
-    <div className="flex flex-col gap-2 border-b border-hairline bg-surface-1 px-4! py-3!">
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-        <h1 className="min-w-0 truncate text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">
+    <div className="flex flex-col gap-1.5 border-b border-hairline bg-surface-1 px-3! py-2! min-[900px]:gap-2 min-[900px]:px-4! min-[900px]:py-3!">
+      <div className="flex flex-nowrap items-center gap-x-2 gap-y-2 min-[900px]:flex-wrap min-[900px]:gap-x-3">
+        <Link
+          to="/sessions"
+          aria-label="Back to sessions"
+          className="-ml-1 flex h-8 w-8 shrink-0 items-center justify-center text-fg-secondary no-underline hover:text-fg-primary min-[900px]:hidden"
+        >
+          <ChevronLeft size={18} aria-hidden />
+        </Link>
+        <h1 className="min-w-0 flex-1 truncate text-[15px] font-semibold tracking-[-0.01em] text-fg-primary min-[900px]:flex-none">
           {session.title || 'Untitled session'}
         </h1>
-        <Badge>{workspaceName}</Badge>
-        <Badge>{profileName}</Badge>
+        <Badge className="max-[899px]:hidden">{workspaceName}</Badge>
+        <Badge className="max-[899px]:hidden">{profileName}</Badge>
         {/* Which CLI is actually running matters most on a Codex session,
             where the approval affordances are absent by design - the chip is
             what says why. */}
         <Tooltip label={hasApprovals(session.harness) ? 'Harness' : CODEX_SANDBOX_NOTE}>
-          <Badge data-testid="harness-chip" variant="outline">
+          <Badge data-testid="harness-chip" variant="outline" className="max-[899px]:hidden">
             {harnessLabel(session.harness)}
           </Badge>
         </Tooltip>
@@ -111,14 +123,14 @@ export function SessionHeader({
             loading={close.isPending}
             icon={<XCircle size={12} aria-hidden />}
           >
-            Close
+            <span className="hidden min-[900px]:inline">Close</span>
           </Button>
           <Tooltip label={copied ? 'Copied' : 'Copy session id'}>
             <Button
               size="sm"
               onClick={copyId}
               aria-label="Copy session id"
-              className="w-7 px-0"
+              className="max-[899px]:hidden w-7 px-0"
               icon={
                 copied ? (
                   <Check size={13} aria-hidden className="text-state-running" />
@@ -141,13 +153,16 @@ export function SessionHeader({
           ·
         </span>
         <span>${session.cost_usd.toFixed(2)}</span>
-        <span aria-hidden className="text-fg-muted">
+        <span aria-hidden className="hidden text-fg-muted min-[900px]:inline">
           ·
         </span>
-        <span>
+        <span className="hidden min-[900px]:inline">
           {session.tokens_in.toLocaleString()}/{session.tokens_out.toLocaleString()} tokens
         </span>
-        <div className="ml-auto! font-sans">
+        {/* On a phone the four review buttons do not fit beside the numbers:
+            they take a full-width strip that scrolls sideways instead of
+            wrapping into a third and fourth header row. */}
+        <div className="ml-auto! font-sans max-[899px]:w-full max-[899px]:overflow-x-auto max-[899px]:[scrollbar-width:none]">
           <ReviewActions session={session} summary={summary} />
         </div>
       </div>

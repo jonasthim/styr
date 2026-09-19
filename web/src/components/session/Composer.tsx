@@ -158,7 +158,7 @@ export function Composer({ session }: { session: Session }) {
   }
 
   return (
-    <div className="relative border-t border-hairline bg-surface-1 px-4! py-3!">
+    <div className="relative border-t border-hairline bg-surface-1 px-3! py-2! min-[900px]:px-4! min-[900px]:py-3!">
       {reopening && (
         <div data-testid="composer-reopening" className="mb-2! text-[12px] text-fg-muted">
           Reopening session…
@@ -188,7 +188,7 @@ export function Composer({ session }: { session: Session }) {
           disabled={disabled || !text.trim()}
           loading={send.isPending && !reopening}
           iconRight={<CornerDownLeft size={13} aria-hidden />}
-          className="h-9"
+          className="h-11 min-[900px]:h-9"
         >
           Send
         </Button>
@@ -198,7 +198,7 @@ export function Composer({ session }: { session: Session }) {
           Answer the permission request first
         </div>
       ) : (
-        <div className="mt-2! flex items-center gap-1 text-[11px] text-fg-muted">
+        <div className="mt-2! hidden items-center gap-1 text-[11px] text-fg-muted min-[900px]:flex">
           <Kbd>{MOD_KEY}</Kbd>
           <Kbd>↵</Kbd>
           <span className="ml-0.5">to send</span>

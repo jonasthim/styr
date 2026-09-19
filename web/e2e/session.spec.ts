@@ -207,6 +207,10 @@ test('switching the model shows the resuming state', async ({ page }, testInfo) 
   const { sessionId } = await seedToolSession(page, testInfo)
   await page.goto(`/sessions/${sessionId}`)
 
+  // The mouse rests at (0,0) at the start of a test, which is over the rail,
+  // and a hovered rail expands over the header's left 220px; park the mouse
+  // over the transcript first so the select is not under it.
+  await page.mouse.move(640, 400)
   await page.locator('#session-model-select').click()
   await page.getByRole('option', { name: 'Haiku 4.5' }).click()
 
@@ -254,6 +258,10 @@ test('switching the model resumes the session and it settles again', async ({ pa
     return ((await res.json()) as Record<string, T>)[field]
   }
 
+  // The mouse rests at (0,0) at the start of a test, which is over the rail,
+  // and a hovered rail expands over the header's left 220px; park the mouse
+  // over the transcript first so the select is not under it.
+  await page.mouse.move(640, 400)
   await page.locator('#session-model-select').click()
   await page.getByRole('option', { name: 'Haiku 4.5' }).click()
 

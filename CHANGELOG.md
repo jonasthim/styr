@@ -7,8 +7,18 @@ starting at `1.0.0`.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-09-19
+
 ### Fixed
 
+- The session view on a phone: the header took a third of the screen (chips, full-width model
+  and effort selects, token counts, the copy-id button) and the Activity/Review/Info panel a
+  permanently open block above the composer, leaving the transcript a sliver a few lines tall.
+  Below 900px the header is now a back link, the title, the state and Close on one row and the
+  two selects on a second; the review buttons scroll sideways in one strip; the panel starts
+  collapsed to its tab strip and opens as a sheet when a tab is tapped (tap again or the chevron
+  to collapse); the composer drops the keyboard hints and gets a 44px Send. Desktop is
+  unchanged apart from the model and effort selects, which were accidentally full width.
 - `styr doctor` no longer doubles the status word in its skip and warn lines
   (`skip codex binary found (optional): codex not found ...`, not `...: skip: codex not found`).
 

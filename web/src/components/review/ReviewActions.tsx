@@ -20,7 +20,7 @@ export function ReviewActions({ session, summary }: { session: Session; summary:
   const busy = session.state === 'running' || session.state === 'waiting'
 
   return (
-    <div data-testid="review-actions" className="flex flex-wrap items-center gap-2">
+    <div data-testid="review-actions" className="flex flex-nowrap items-center gap-2 min-[900px]:flex-wrap">
       <CommitDialog session={session} diff={diff} />
       <PullRequestDialog session={session} diff={diff} summary={summary} />
       <CheckpointsMenu session={session} busy={busy} />
