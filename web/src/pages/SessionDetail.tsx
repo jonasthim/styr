@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft } from 'lucide-react'
 import { q } from '../api/queries'
 import { foldEvents, type Block } from '../lib/blocks'
+import { hasApprovals } from '../lib/harness'
 import { SessionHeader } from '../components/session/SessionHeader'
 import { Transcript } from '../components/session/Transcript'
 import { PermissionCard } from '../components/session/PermissionCard'
@@ -116,8 +117,16 @@ export function SessionDetail() {
           ) : (
             <Transcript blocks={visibleBlocks} sessionId={session.id} />
           )}
-          <PlanCard sessionId={session.id} />
-          <PermissionCard sessionId={session.id} />
+          {/* Codex decides tool use with the sandbox policy its process
+              started under and never asks the host, so a Codex session has no
+              approvals: the prompt and the plan card would be permanently
+              empty affordances (docs/HARNESSES.md). */}
+          {hasApprovals(session.harness) && (
+            <>
+              <PlanCard sessionId={session.id} />
+              <PermissionCard sessionId={session.id} />
+            </>
+          )}
         </div>
         {/* Reading a diff on a phone needs the column: below the side-by-side
             breakpoint the full-height panel would leave the diff barely a

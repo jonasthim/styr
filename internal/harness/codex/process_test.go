@@ -280,3 +280,18 @@ func TestToolEventsReachTheCaller(t *testing.T) {
 		t.Error("tool result content is empty")
 	}
 }
+
+// Interrupting after a turn has already reported its result is a no-op, not an error: the
+// child is finished and only waiting to be reaped, so there is nothing left to stop. The
+// sessions service calls Interrupt on whatever process a session has, without knowing whether
+// its last turn is still going.
+func TestInterruptAfterATurnFinishedDoesNothing(t *testing.T) {
+	p := startFake(t, "", nil)
+	turn(t, p, "[fixture:01] say pong")
+
+	if err := p.Interrupt(t.Context()); err != nil {
+		t.Errorf("Interrupt after a finished turn = %v, want nil", err)
+	}
+	// And the session is still usable: the next turn runs normally.
+	turn(t, p, "[fixture:01] again")
+}

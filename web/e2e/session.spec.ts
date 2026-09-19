@@ -1,5 +1,5 @@
-import { test, expect } from '@playwright/test'
-import { isReal, seedToolSession } from './helpers/seed'
+import { test, expect, type Page } from '@playwright/test'
+import { isReal, seedCodexSession, seedToolSession } from './helpers/seed'
 
 // Runs against both backends. Mock: msw handlers seed a fixed session
 // (TOOL_FIXTURE_SESSION_ID there) whose transcript is fixture 02
@@ -260,4 +260,120 @@ test('switching the model resumes the session and it settles again', async ({ pa
   // The fake ignores --model and reports the model its recording ran on, so
   // the assertion is that the session ends up with a model at all, not which.
   expect(await sessionField<string>('model')).not.toBe('')
+})
+
+// --- v1.0: the Codex harness ----------------------------------------------
+// Two paths, because the two backends can only be reached two different ways:
+// the mock has no server-side session store (msw only answers fetches the
+// page's own JS makes), so a mock Codex session is created through the
+// new-session dialog; the real backend gets one seeded over its API, running
+// the Codex shell fake that playwright.config.ts points STYR_CODEX_BIN at.
+
+test('creating a Codex session shows the harness chip and no approval affordances', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'real mode seeds its Codex session over the API, in the test below')
+
+  await page.goto('/sessions?new=1')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  // The note only appears once Codex is chosen: it is the one behavioural
+  // difference someone picking a harness has to know about.
+  await expect(dialog.getByTestId('codex-harness-note')).toHaveCount(0)
+  await dialog.getByRole('combobox', { name: 'Harness' }).click()
+  await page.getByRole('option', { name: 'Codex' }).click()
+  await expect(dialog.getByTestId('codex-harness-note')).toContainText('sandbox policy')
+
+  await dialog.getByLabel('Title').fill('Codex session')
+  await dialog.getByLabel('Prompt').fill('hi')
+  await dialog.getByRole('button', { name: 'Start session' }).click()
+
+  await expect(page).toHaveURL(/\/sessions\/[0-9a-f-]{36}$/)
+  const id = page.url().split('/').pop()!
+  await expect(page.getByTestId('harness-chip')).toHaveText('Codex')
+
+  // Even with a pending approval against it, a Codex session shows no
+  // approval affordances: its permission model is the sandbox policy, so the
+  // prompt would be an affordance nothing can ever answer.
+  expect(await seedMockApproval(page, id)).toBe(true)
+  await expect(page.getByTestId('permission-card')).toHaveCount(0)
+  await expect(page.getByTestId('plan-card')).toHaveCount(0)
+  await expect(page.getByTestId('harness-chip')).toHaveText('Codex')
+})
+
+/** Seeds a pending Bash approval against a mock session and makes the already
+ * loaded page observe it. Both halves have to happen inside the page: msw's
+ * service worker only intercepts fetches the page's own JS makes, and a
+ * reload would re-evaluate the mock module and throw away the very session
+ * this just seeded against (see e2e/helpers/seed.ts's note on the same
+ * constraint). */
+async function seedMockApproval(page: Page, sessionId: string): Promise<boolean> {
+  return page.evaluate(async (id) => {
+    const res = await fetch('/__mock/pending-approval', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: id }),
+    })
+    const client = (window as unknown as { __queryClient?: { refetchQueries: (f: { queryKey: unknown[] }) => Promise<unknown> } })
+      .__queryClient
+    await client?.refetchQueries({ queryKey: ['approvals'] })
+    await client?.refetchQueries({ queryKey: ['session', id] })
+    return res.ok
+  }, sessionId)
+}
+
+// The control for the test above: the same seeded approval on a Claude
+// session does show the permission card, so its absence on a Codex session is
+// the harness rule and not a broken fixture.
+test('a Claude session with the same pending approval does show the permission card', async ({ page }, testInfo) => {
+  test.skip(isReal(testInfo), 'mock-only: uses the mock control route to seed an approval')
+
+  const { sessionId } = await seedToolSession(page, testInfo)
+  await page.goto(`/sessions/${sessionId}`)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+
+  expect(await seedMockApproval(page, sessionId)).toBe(true)
+  await expect(page.getByTestId('permission-card')).toBeVisible()
+  await expect(page.getByTestId('harness-chip')).toHaveText('Claude Code')
+})
+
+test('a real Codex session replays its fixture and can be interrupted', async ({ page }, testInfo) => {
+  test.skip(!isReal(testInfo), 'real-only: needs the Codex shell fake behind STYR_CODEX_BIN')
+
+  const { sessionId } = await seedCodexSession(page, `Codex pong ${Date.now()}`)
+  await page.goto(`/sessions/${sessionId}`)
+
+  await expect(page.getByTestId('session-view')).toBeVisible()
+  await expect(page.getByTestId('harness-chip')).toHaveText('Codex')
+
+  // Codex fixture 01: the agent message "pong", then a completed turn, which
+  // the transcript folds into a text block and a result separator.
+  await expect(page.getByText('pong', { exact: true })).toBeVisible()
+  await expect(page.getByText(/Turn finished/)).toBeVisible()
+
+  // No approvals anywhere on a Codex session, however the turn went.
+  await expect(page.getByTestId('permission-card')).toHaveCount(0)
+
+  // Interrupt reaches the harness. Driven over the API rather than through the
+  // header button: a fixture replay finishes in milliseconds, so the button's
+  // running-only window is not something a click can be timed against, while
+  // the path under test (service -> registry -> codex process) is the same
+  // either way. It answers 202 whether or not the turn is still going, and the
+  // session stays settled rather than failing.
+  const interrupted = await page.request.post(`/api/v1/sessions/${sessionId}/interrupt`, {
+    headers: { 'X-Requested-With': 'styr' },
+  })
+  expect(interrupted.status()).toBe(202)
+
+  await expect
+    .poll(
+      async () => {
+        const res = await page.request.get(`/api/v1/sessions/${sessionId}`, {
+          headers: { 'X-Requested-With': 'styr' },
+        })
+        const body = (await res.json()) as { state: string }
+        return body.state
+      },
+      { timeout: 20_000 },
+    )
+    .toBe('open')
 })

@@ -26,6 +26,11 @@ import (
 // `codex login` under their Styr home) or from StartSpec.Env (e.g. OPENAI_API_KEY).
 var passthroughEnvVars = []string{"PATH", "TERM", "LANG"}
 
+// closeGrace is how long Close waits for an already-finished turn's child to be reaped before
+// killing it. Long enough for the normal case (the CLI has printed turn.completed and is
+// exiting), short enough that Close never appears to hang.
+const closeGrace = 5 * time.Second
+
 // process implements harness.Process for the Codex CLI.
 type process struct {
 	binary string
@@ -251,11 +256,16 @@ func (p *process) Decide(ctx context.Context, d harness.Decision) error {
 func (p *process) Interrupt(ctx context.Context) error {
 	p.mu.Lock()
 	cmd := p.cur
-	if cmd != nil {
-		p.interrupted = true
+	// A turn that has already reported its result is finished; its child is
+	// only waiting to be reaped, and Kill would fail with "process already
+	// finished". Interrupting it is a no-op, exactly as on an idle session.
+	if cmd == nil || p.resultSent {
+		p.mu.Unlock()
+		return nil
 	}
+	p.interrupted = true
 	p.mu.Unlock()
-	if cmd == nil || cmd.Process == nil {
+	if cmd.Process == nil {
 		return nil
 	}
 	return cmd.Process.Kill()
@@ -272,11 +282,26 @@ func (p *process) Close(ctx context.Context) error {
 	}
 	p.closed = true
 	cmd, done, schema := p.cur, p.turnDone, p.schemaPath
+	// resultSent says the last turn already reported its outcome, so its child is on its way
+	// out under its own steam and only has to be reaped. Killing it in that window would
+	// replace its real exit code with "signal: killed" (-1) in the EventExit below, which is
+	// what Close reports as the session's exit code.
+	finished := p.resultSent
 	p.schemaPath = ""
 	p.mu.Unlock()
 
 	if cmd != nil && cmd.Process != nil {
-		_ = cmd.Process.Kill()
+		if finished {
+			// Give the finished turn a moment to be reaped before resorting to a kill, so a
+			// CLI that has said everything it is going to say still exits on its own terms.
+			select {
+			case <-done:
+			case <-time.After(closeGrace):
+				_ = cmd.Process.Kill()
+			}
+		} else {
+			_ = cmd.Process.Kill()
+		}
 	}
 	var err error
 	if done != nil {

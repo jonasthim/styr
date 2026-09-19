@@ -147,3 +147,49 @@ func TestProfiles_UpdateModelAndEffort(t *testing.T) {
 		t.Fatalf("after Update: model/effort = %q/%q, want haiku/low", got.Model, got.Effort)
 	}
 }
+
+// A profile created with no harness is stored as the default one, not as an
+// empty string no registry lookup could resolve (migration 00011).
+func TestProfiles_HarnessDefaultsAndRoundTrips(t *testing.T) {
+	ctx := context.Background()
+	profiles := NewProfiles(testOpenDB(t))
+
+	if err := profiles.Create(ctx, domain.Profile{ID: "p-default", Name: "no harness", Mode: "default"}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := profiles.Get(ctx, "p-default")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Harness != "claude" {
+		t.Fatalf("Harness = %q, want claude", got.Harness)
+	}
+
+	got.Harness = "codex"
+	if err := profiles.Update(ctx, *got); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	again, err := profiles.Get(ctx, "p-default")
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if again.Harness != "codex" {
+		t.Fatalf("Harness after update = %q, want codex", again.Harness)
+	}
+}
+
+// The builtin profiles seeded by migration 00001 pick up the column default.
+func TestProfiles_BuiltinsDefaultToClaude(t *testing.T) {
+	list, err := NewProfiles(testOpenDB(t)).List(context.Background())
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) == 0 {
+		t.Fatal("no builtin profiles seeded")
+	}
+	for _, p := range list {
+		if p.Harness != "claude" {
+			t.Fatalf("builtin %s harness = %q, want claude", p.ID, p.Harness)
+		}
+	}
+}

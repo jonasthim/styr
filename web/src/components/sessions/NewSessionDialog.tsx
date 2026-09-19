@@ -14,7 +14,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderPlus } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api, ApiError } from '../../api/client'
-import type { Effort, Session } from '../../api/types'
+import type { Effort, HarnessKind, Session } from '../../api/types'
+import { CODEX_SANDBOX_NOTE, HARNESS_LABEL } from '../../lib/harness'
 import { workspaceOptionLabel } from '../workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, Field, Input, Kbd, MOD_KEY, Select, Textarea } from '../ui'
 
@@ -27,6 +28,7 @@ interface CreateSessionBody {
   prompt: string
   model: string
   effort: Effort
+  harness: HarnessKind
 }
 
 // The value the model and effort selects show for "whatever the CLI defaults
@@ -64,7 +66,17 @@ export function NewSessionDialog({
   const [prompt, setPrompt] = useState('')
   const [model, setModel] = useState(CLI_DEFAULT)
   const [effort, setEffort] = useState<string>(CLI_DEFAULT)
+  const [harness, setHarness] = useState<HarnessKind>('claude')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Only harnesses whose binary actually answered at startup can run a
+  // session, so an unavailable one is never offered; the roster is stable, so
+  // this falls back to the current selection alone rather than an empty
+  // select while /status is still loading.
+  const harnessOptions = (status.data?.harnesses ?? [])
+    .filter((h) => h.available)
+    .map((h) => ({ value: h.kind, label: HARNESS_LABEL[h.kind] }))
+  if (harnessOptions.length === 0) harnessOptions.push({ value: harness, label: HARNESS_LABEL[harness] })
 
   // A workspace still cloning (or one that failed) can't run a session yet -
   // only "ready" ones are offered here.
@@ -92,6 +104,7 @@ export function NewSessionDialog({
     if (!profile) return
     setModel(profile.model || CLI_DEFAULT)
     setEffort(profile.effort || CLI_DEFAULT)
+    setHarness(profile.harness)
   }, [profileId, profiles.data])
 
   useEffect(() => {
@@ -119,6 +132,7 @@ export function NewSessionDialog({
           prompt,
           model: model === CLI_DEFAULT ? '' : model,
           effort: effort === CLI_DEFAULT ? '' : (effort as Effort),
+          harness,
         } satisfies CreateSessionBody,
       }),
     onSuccess: (session) => {
@@ -255,6 +269,25 @@ export function NewSessionDialog({
                 )}
               </Field>
             </div>
+
+            <Field label="Harness">
+              {({ id }) => (
+                <Select
+                  id={id}
+                  value={harness}
+                  onValueChange={(value) => setHarness(value as HarnessKind)}
+                  options={harnessOptions}
+                />
+              )}
+            </Field>
+
+            {/* Only under Codex: the difference is worth a line exactly where
+                someone is choosing it, and noise everywhere else. */}
+            {harness === 'codex' && (
+              <p data-testid="codex-harness-note" className="-mt-2 text-[12px] text-fg-secondary">
+                {CODEX_SANDBOX_NOTE}
+              </p>
+            )}
 
             <div className="flex flex-col gap-4 sm:flex-row">
               <Field label="Model" className="flex-1">

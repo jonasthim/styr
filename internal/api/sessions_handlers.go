@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jonasthim/styr/internal/domain"
+	"github.com/jonasthim/styr/internal/harness"
 	"github.com/jonasthim/styr/internal/sessions"
 )
 
@@ -119,6 +120,9 @@ type sessionCreateInput struct {
 	// WorktreePath starts the session on an existing worktree (another session's) instead of
 	// a fresh one; the workspace must have worktrees enabled. See sessions.CreateInput.
 	WorktreePath string `json:"worktree_path"`
+	// Harness picks the agentic CLI ("claude" | "codex"). Empty falls back to the profile's
+	// default, then to "claude".
+	Harness string `json:"harness"`
 }
 
 // handleSessionsCreate is POST /api/v1/sessions: the session is owned by
@@ -142,6 +146,7 @@ func handleSessionsCreate(d *Deps) http.HandlerFunc {
 			Model:        in.Model,
 			Effort:       in.Effort,
 			WorktreePath: in.WorktreePath,
+			Harness:      harness.Kind(in.Harness),
 		})
 		if err != nil {
 			WriteError(w, err)

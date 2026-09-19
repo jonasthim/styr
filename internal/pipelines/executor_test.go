@@ -136,7 +136,7 @@ func newEnv(t *testing.T, steps ...fake.Step) *env {
 		Profiles:   db.NewProfiles(database),
 		Tokens:     tokensRepo,
 		Audit:      db.NewAudit(database),
-	}, h, bus, box, sessions.Options{
+	}, harness.SingleRegistry(h), bus, box, sessions.Options{
 		MaxOpen: 8, IdleTimeout: time.Hour, UsersDir: t.TempDir(), ServiceHome: t.TempDir(),
 		Logger: slog.New(slog.DiscardHandler),
 	})

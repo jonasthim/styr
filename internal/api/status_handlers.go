@@ -41,11 +41,22 @@ type statusResponse struct {
 	HiddenCommands []string `json:"hidden_commands"`
 }
 
+// harnessList normalises a nil harness list to an empty array, so the JSON field is always
+// an array and the frontend never has to guard against null.
+func harnessList(in []HarnessInfo) []HarnessInfo {
+	if in == nil {
+		return []HarnessInfo{}
+	}
+	return in
+}
+
 // handleStatus is GET /api/v1/status.
 func handleStatus(d *Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		info := d.Status()
+		info.Harnesses = harnessList(info.Harnesses)
 		WriteJSON(w, http.StatusOK, statusResponse{
-			StatusInfo:     d.Status(),
+			StatusInfo:     info,
 			Models:         statusModels,
 			Efforts:        harness.ValidEfforts,
 			HiddenCommands: claude.HiddenBuiltins(),

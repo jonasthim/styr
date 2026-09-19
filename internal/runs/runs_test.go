@@ -106,7 +106,7 @@ func newEnv(t *testing.T, timeout time.Duration, notifier Notifier, steps ...fak
 		Profiles:   db.NewProfiles(database),
 		Tokens:     tokensRepo,
 		Audit:      db.NewAudit(database),
-	}, h, bus, box, sessions.Options{
+	}, harness.SingleRegistry(h), bus, box, sessions.Options{
 		MaxOpen: 4, IdleTimeout: time.Hour, UsersDir: t.TempDir(), ServiceHome: t.TempDir(),
 		Logger: slog.New(slog.DiscardHandler),
 	})

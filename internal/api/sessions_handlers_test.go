@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -267,5 +268,83 @@ func TestSessionsModel_OtherUsersSessionIs404(t *testing.T) {
 		map[string]any{"model": "haiku"}, nil)
 	if status != http.StatusNotFound {
 		t.Fatalf("POST /sessions/{id}/model on another member's session = %d, want 404", status)
+	}
+}
+
+// POST /sessions accepts a harness, and the created session reports it back.
+func TestSessionsCreate_HarnessChoice(t *testing.T) {
+	e := newEnv(t, createResultStep())
+	ws := e.seedWorkspace("interactive")
+	e.seedToken(e.adminID)
+	e.seedCodexKey(e.adminID)
+
+	var out struct {
+		ID      string `json:"id"`
+		Harness string `json:"harness"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "prompt": "hi", "harness": "codex",
+	}, &out)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /sessions = %d, want 201", status)
+	}
+	if out.Harness != "codex" {
+		t.Fatalf("harness = %q, want codex", out.Harness)
+	}
+}
+
+// Leaving harness out keeps the existing default: a Claude Code session.
+func TestSessionsCreate_HarnessDefaultsToClaude(t *testing.T) {
+	e := newEnv(t, createResultStep())
+	ws := e.seedWorkspace("interactive")
+	e.seedToken(e.adminID)
+
+	var out struct {
+		Harness string `json:"harness"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "prompt": "hi",
+	}, &out)
+	if status != http.StatusCreated {
+		t.Fatalf("POST /sessions = %d, want 201", status)
+	}
+	if out.Harness != "claude" {
+		t.Fatalf("harness = %q, want claude", out.Harness)
+	}
+}
+
+func TestSessionsCreate_UnknownHarnessIs422(t *testing.T) {
+	e := newEnv(t, createResultStep())
+	ws := e.seedWorkspace("interactive")
+	e.seedToken(e.adminID)
+
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "prompt": "hi", "harness": "gemini",
+	}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /sessions with an unknown harness = %d, want 422", status)
+	}
+}
+
+// A codex session with no key for the owner is refused with the same 422 a missing Claude
+// token produces, and says which credential is missing.
+func TestSessionsCreate_CodexWithoutAKeyIs422(t *testing.T) {
+	e := newEnv(t, createResultStep())
+	ws := e.seedWorkspace("interactive")
+	e.seedToken(e.adminID)
+
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/sessions", map[string]any{
+		"workspace_id": ws.ID, "profile_id": "interactive", "prompt": "hi", "harness": "codex",
+	}, &body)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("POST /sessions = %d, want 422", status)
+	}
+	if !strings.Contains(body.Error.Message, "Codex API key") {
+		t.Fatalf("message = %q, want it to name the missing Codex key", body.Error.Message)
 	}
 }

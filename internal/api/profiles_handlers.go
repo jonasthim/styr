@@ -43,14 +43,25 @@ type profileDTO struct {
 	Builtin         bool     `json:"builtin"`
 	Model           string   `json:"model"`
 	Effort          string   `json:"effort"`
+	Harness         string   `json:"harness"`
 }
 
 func profileDTOFrom(p domain.Profile) profileDTO {
 	return profileDTO{
 		ID: p.ID, Name: p.Name, Mode: p.Mode, AllowedTools: p.AllowedTools, DisallowedTools: p.DisallowedTools,
 		MaxTurns: p.MaxTurns, Unattended: p.Unattended, ApprovalTimeout: int(p.ApprovalTimeout / time.Second), Builtin: p.Builtin,
-		Model: p.Model, Effort: p.Effort,
+		Model: p.Model, Effort: p.Effort, Harness: profileHarness(p.Harness),
 	}
+}
+
+// profileHarness reports a profile's harness, defaulting a row written before
+// migration 00011 (or by a caller that left it empty) to claude rather than
+// serving an empty string the UI would have no option for.
+func profileHarness(kind string) string {
+	if kind == "" {
+		return string(harness.KindClaude)
+	}
+	return kind
 }
 
 // handleProfilesList is GET /api/v1/profiles.
@@ -79,6 +90,7 @@ type profileInput struct {
 	ApprovalTimeout *int      `json:"approval_timeout"` // seconds
 	Model           *string   `json:"model"`
 	Effort          *string   `json:"effort"`
+	Harness         *string   `json:"harness"`
 }
 
 // handleProfilesCreate is POST /api/v1/profiles.
@@ -95,6 +107,10 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 		}
 		if in.Effort != nil && !harness.ValidEffort(*in.Effort) {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "effort is not allowed")
+			return
+		}
+		if in.Harness != nil && !harness.ValidKind(harness.Kind(*in.Harness)) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "harness is not allowed")
 			return
 		}
 		p := domain.Profile{ID: uuid.NewString(), Name: *in.Name, Mode: *in.Mode, Builtin: false}
@@ -119,6 +135,9 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 		if in.Effort != nil {
 			p.Effort = *in.Effort
 		}
+		if in.Harness != nil {
+			p.Harness = *in.Harness
+		}
 		if err := d.Profiles.Create(r.Context(), p); err != nil {
 			WriteError(w, err)
 			return
@@ -128,8 +147,8 @@ func handleProfilesCreate(d *Deps) http.HandlerFunc {
 }
 
 // handleProfilesPatch is PATCH /api/v1/profiles/{id}. Builtin rows only allow max_turns,
-// approval_timeout, model and effort to change — the model and effort defaults are an
-// operator preference, not part of what makes a builtin profile safe. Every profile (builtin
+// approval_timeout, model, effort and harness to change — which model, how hard it thinks and
+// which CLI drives it are operator preferences, not part of what makes a builtin profile safe. Every profile (builtin
 // or not) rejects a mode that is not in allowedModes and an effort that is not a valid level.
 func handleProfilesPatch(d *Deps) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -152,8 +171,12 @@ func handleProfilesPatch(d *Deps) http.HandlerFunc {
 			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "effort is not allowed")
 			return
 		}
+		if in.Harness != nil && !harness.ValidKind(harness.Kind(*in.Harness)) {
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "harness is not allowed")
+			return
+		}
 		if p.Builtin && (in.Name != nil || in.Mode != nil || in.AllowedTools != nil || in.DisallowedTools != nil || in.Unattended != nil) {
-			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "builtin profiles only allow max_turns, approval_timeout, model and effort to change")
+			writeErrorCode(w, http.StatusUnprocessableEntity, "invalid", "builtin profiles only allow max_turns, approval_timeout, model, effort and harness to change")
 			return
 		}
 		if in.Name != nil {
@@ -182,6 +205,9 @@ func handleProfilesPatch(d *Deps) http.HandlerFunc {
 		}
 		if in.Effort != nil {
 			p.Effort = *in.Effort
+		}
+		if in.Harness != nil {
+			p.Harness = *in.Harness
 		}
 		if err := d.Profiles.Update(r.Context(), *p); err != nil {
 			WriteError(w, err)

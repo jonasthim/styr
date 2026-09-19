@@ -42,6 +42,10 @@ type Repos struct {
 	Profiles   *db.Profiles
 	Tokens     *db.Tokens
 	Audit      *db.Audit
+	// CodexCredentials holds the sealed OpenAI API keys a session on the
+	// codex harness runs with (per user, plus the service-wide one); the
+	// Claude harness reads Tokens instead.
+	CodexCredentials *db.CodexCredentials
 	// ReviewComments and Checkpoints back the review surface of a worktree
 	// session (see review.go); Users resolves the git author a Commit is
 	// attributed to.
@@ -83,8 +87,11 @@ type procEntry struct {
 // Service is the sessions service: it owns every live harness.Process and
 // mediates all session and approval state changes.
 type Service struct {
-	repos  Repos
-	h      harness.Harness
+	repos Repos
+	// reg holds every harness this build can drive. A session names its
+	// harness on its own row, so the harness is looked up per start and per
+	// resume rather than held as a single implementation.
+	reg    *harness.Registry
 	bus    *events.Bus
 	box    *crypto.Box
 	opt    Options
@@ -115,14 +122,17 @@ type Service struct {
 // New constructs a Service. The returned Service owns no background
 // goroutines beyond one pump per live session process; call RunMaintenance
 // periodically (e.g. once a minute) and Shutdown on server stop.
-func New(r Repos, h harness.Harness, bus *events.Bus, box *crypto.Box, opt Options) *Service {
+func New(r Repos, reg *harness.Registry, bus *events.Bus, box *crypto.Box, opt Options) *Service {
 	logger := opt.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if reg == nil {
+		reg = harness.New()
+	}
 	s := &Service{
 		repos:         r,
-		h:             h,
+		reg:           reg,
 		bus:           bus,
 		box:           box,
 		opt:           opt,
@@ -150,6 +160,10 @@ type CreateInput struct {
 	// the profile's", and an empty profile default in turn means "use the CLI's own".
 	Model  string
 	Effort string
+
+	// Harness picks the agentic CLI this session runs on. Empty falls back to the profile's
+	// own default, and an empty profile default in turn to harness.KindClaude.
+	Harness harness.Kind
 
 	// JSONSchema and SystemPrompt are passed straight through to
 	// harness.StartSpec (--json-schema and --append-system-prompt): an
@@ -213,8 +227,12 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 	if err != nil {
 		return domain.Session{}, err
 	}
-	// Fail fast, before persisting a session row, when there is no token to run with.
-	if _, err := s.resolveToken(ctx, in.Owner); err != nil {
+	kind, err := s.resolveKind(in.Harness, profile.Harness)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	// Fail fast, before persisting a session row, when there is no credential to run with.
+	if _, err := s.credentialEnv(ctx, kind, in.Owner); err != nil {
 		return domain.Session{}, err
 	}
 
@@ -236,7 +254,7 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		Title:        in.Title,
 		WorkspaceID:  in.WorkspaceID,
 		ProfileID:    in.ProfileID,
-		Harness:      string(s.h.Kind()),
+		Harness:      string(kind),
 		State:        domain.SessionRunning,
 		Origin:       in.Origin,
 		OriginRef:    in.originRef(),
@@ -467,6 +485,90 @@ func (s *Service) getVisible(ctx context.Context, actor Actor, id string) (domai
 	return *sess, nil
 }
 
+// resolveKind picks the harness a new session runs on: the caller's choice,
+// then the profile's default, then claude. It fails when the name is not a
+// kind Styr knows, or when this build has no harness registered for it (the
+// codex binary missing from a server that only runs Claude Code, say).
+func (s *Service) resolveKind(requested harness.Kind, profileDefault string) (harness.Kind, error) {
+	kind := requested
+	if kind == "" {
+		kind = harness.Kind(profileDefault)
+	}
+	if kind == "" {
+		kind = harness.KindClaude
+	}
+	if !harness.ValidKind(kind) {
+		return "", fmt.Errorf("%w: unknown harness %q", domain.ErrInvalid, kind)
+	}
+	if _, ok := s.reg.Get(kind); !ok {
+		return "", fmt.Errorf("%w: the %s harness is not available on this server", domain.ErrInvalid, kind)
+	}
+	return kind, nil
+}
+
+// harnessFor resolves a session row's harness name to the registered
+// implementation, at start and at every resume.
+func (s *Service) harnessFor(kind string) (harness.Harness, error) {
+	h, ok := s.reg.Get(harness.Kind(kind))
+	if !ok {
+		return nil, fmt.Errorf("%w: the %s harness is not available on this server", domain.ErrInvalid, kind)
+	}
+	return h, nil
+}
+
+// credentialEnv builds the credential environment for a session's child
+// process: the Claude harness gets CLAUDE_CODE_OAUTH_TOKEN, the Codex
+// harness gets OPENAI_API_KEY and nothing else. The decrypted values are
+// returned only for immediate use in that environment; callers must not
+// persist or log them.
+func (s *Service) credentialEnv(ctx context.Context, kind harness.Kind, ownerID *string) (map[string]string, error) {
+	switch kind {
+	case harness.KindCodex:
+		key, err := s.resolveCodexKey(ctx, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"OPENAI_API_KEY": key}, nil
+	default:
+		token, err := s.resolveToken(ctx, ownerID)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": token}, nil
+	}
+}
+
+// resolveCodexKey decrypts the OpenAI API key to use for ownerID (or the
+// service-wide key when ownerID is nil, for an unattended run). Same
+// handling rule as resolveToken: immediate use only, never persisted or
+// logged.
+func (s *Service) resolveCodexKey(ctx context.Context, ownerID *string) (string, error) {
+	if s.repos.CodexCredentials == nil {
+		return "", fmt.Errorf("%w: the codex harness is not configured on this server", domain.ErrInvalid)
+	}
+	get := s.repos.CodexCredentials.GetService
+	missing := "add a service Codex key in settings"
+	if ownerID != nil {
+		id := *ownerID
+		get = func(ctx context.Context) ([]byte, []byte, string, time.Time, error) {
+			return s.repos.CodexCredentials.Get(ctx, id)
+		}
+		missing = "add a Codex API key in your profile"
+	}
+	ciphertext, nonce, _, _, err := get(ctx)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			return "", fmt.Errorf("%w: %s", domain.ErrInvalid, missing)
+		}
+		return "", err
+	}
+	plain, err := s.box.Open(ciphertext, nonce)
+	if err != nil {
+		return "", err
+	}
+	return string(plain), nil
+}
+
 // resolveToken decrypts the Claude token to use for ownerID (or the service
 // token when ownerID is nil). The decrypted value is returned only for
 // immediate use in a child process's environment; callers must not persist
@@ -521,7 +623,11 @@ func (s *Service) homeDir(ownerID *string) (string, error) {
 // model name it actually resolved, which is itself a valid --model value on
 // the next resume.
 func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws domain.Workspace, profile domain.Profile, resume bool, firstMessage string, opts startOptions) error {
-	token, err := s.resolveToken(ctx, sess.OwnerID)
+	h, err := s.harnessFor(sess.Harness)
+	if err != nil {
+		return err
+	}
+	env, err := s.credentialEnv(ctx, harness.Kind(sess.Harness), sess.OwnerID)
 	if err != nil {
 		return err
 	}
@@ -541,7 +647,7 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 		Title:     sess.Title,
 		Cwd:       sessionCwd(sess, ws),
 		Home:      home,
-		Env:       map[string]string{"CLAUDE_CODE_OAUTH_TOKEN": token},
+		Env:       env,
 		Profile: harness.Profile{
 			Mode:            profile.Mode,
 			AllowedTools:    profile.AllowedTools,
@@ -553,7 +659,7 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 		JSONSchema:   opts.JSONSchema,
 		SystemPrompt: opts.SystemPrompt,
 	}
-	p, err := s.h.Start(ctx, spec)
+	p, err := h.Start(ctx, spec)
 	if err != nil {
 		s.slots.release()
 		return err

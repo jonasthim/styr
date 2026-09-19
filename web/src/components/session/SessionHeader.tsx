@@ -10,6 +10,7 @@ import { Copy, Check, Square, XCircle, Zap } from 'lucide-react'
 import { api } from '../../api/client'
 import type { Session, SessionState } from '../../api/types'
 import { Badge, Button, Tooltip } from '../ui'
+import { CODEX_SANDBOX_NOTE, harnessLabel, hasApprovals } from '../../lib/harness'
 import { ModelSwitcher } from './ModelSwitcher'
 import { ReviewActions } from '../review/ReviewActions'
 
@@ -71,6 +72,14 @@ export function SessionHeader({
         </h1>
         <Badge>{workspaceName}</Badge>
         <Badge>{profileName}</Badge>
+        {/* Which CLI is actually running matters most on a Codex session,
+            where the approval affordances are absent by design - the chip is
+            what says why. */}
+        <Tooltip label={hasApprovals(session.harness) ? 'Harness' : CODEX_SANDBOX_NOTE}>
+          <Badge data-testid="harness-chip" variant="outline">
+            {harnessLabel(session.harness)}
+          </Badge>
+        </Tooltip>
         <span className="flex items-center gap-1.5 text-[12px] text-fg-secondary">
           <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${STATE_DOT[session.state]}`} />
           {STATE_LABEL[session.state]}

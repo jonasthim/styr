@@ -201,7 +201,7 @@ func TestExpireApprovals_NotifyProcessFails_ApprovalExpiresSessionFailsAndIsLogg
 	owner := testAdminID
 	sess := domain.Session{
 		ID: uuid.NewString(), OwnerID: &owner, Title: "t", WorkspaceID: testWorkspaceID,
-		ProfileID: profile.ID, Harness: "fake", State: domain.SessionWaiting, Origin: domain.OriginSchedule,
+		ProfileID: profile.ID, Harness: "claude", State: domain.SessionWaiting, Origin: domain.OriginSchedule,
 		CreatedAt: time.Now(), LastActiveAt: time.Now(),
 	}
 	if err := repos.Sessions.Create(context.Background(), sess); err != nil {

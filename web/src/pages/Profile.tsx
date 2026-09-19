@@ -1,5 +1,6 @@
 // Information architecture #11 ("Profile"): name and avatar from OIDC
-// (read-only), own Claude token, theme, shortcuts, sign out.
+// (read-only), own Claude token and Codex API key (one credential per
+// harness - see docs/HARNESSES.md), theme, shortcuts, sign out.
 import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
@@ -10,6 +11,7 @@ import { useTheme } from '../hooks/useTheme'
 import { useUiStore } from '../store/ui'
 import { ApiTokens } from '../components/profile/ApiTokens'
 import { ClaudeTokenCard } from '../components/profile/ClaudeTokenCard'
+import { CodexKeyCard } from '../components/profile/CodexKeyCard'
 import { Badge, Button, Card, Kbd, PageHeader } from '../components/ui'
 
 function initials(name: string): string {
@@ -86,6 +88,16 @@ export function Profile() {
     await queryClient.invalidateQueries({ queryKey: ['me'] })
   }
 
+  async function handleSaveCodexKey(key: string) {
+    await api('/api/v1/me/codex-key', { method: 'PUT', json: { key } })
+    await queryClient.invalidateQueries({ queryKey: ['me'] })
+  }
+
+  async function handleRemoveCodexKey() {
+    await api('/api/v1/me/codex-key', { method: 'DELETE' })
+    await queryClient.invalidateQueries({ queryKey: ['me'] })
+  }
+
   async function handleSignOut() {
     setSigningOut(true)
     try {
@@ -147,6 +159,17 @@ export function Profile() {
           onSave={handleSaveToken}
           onRemove={handleRemoveToken}
           testId="claude-token-card"
+        />
+      </div>
+
+      <div className="mt-4">
+        <CodexKeyCard
+          title="Codex API key"
+          inputLabel="Codex API key"
+          keyInfo={me?.codex_key}
+          onSave={handleSaveCodexKey}
+          onRemove={handleRemoveCodexKey}
+          testId="codex-key-card"
         />
       </div>
 

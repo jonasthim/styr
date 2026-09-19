@@ -71,6 +71,30 @@ export async function ensureRealToken(page: Page): Promise<void> {
   await ok(res, 'PUT /me/claude-token')
 }
 
+// The dev Codex verifier (cmd/styr/wire.go's devCodexVerifier) accepts
+// anything shaped like an OpenAI API key ("sk-" prefix) without spawning a
+// process, exactly as the Claude one does for "sk-ant-".
+const REAL_CODEX_KEY = 'sk-proj-e2e-codex-key'
+
+// ensureRealCodexKey (idempotent) makes sure the dev user has a working Codex
+// API key, required before the real backend accepts a session on the codex
+// harness (internal/sessions/service.go's Create fails fast without one).
+export async function ensureRealCodexKey(page: Page): Promise<void> {
+  const res = await page.request.put('/api/v1/me/codex-key', { headers: HEADERS, data: { key: REAL_CODEX_KEY } })
+  await ok(res, 'PUT /me/codex-key')
+}
+
+// clearRealCodexKey (idempotent) removes the dev user's Codex key so a spec
+// can start from the card's absent state. Real mode only: the mock seeds the
+// key absent and re-seeds it on every fresh page, so there is nothing to
+// clear there.
+export async function clearRealCodexKey(page: Page, testInfo: TestInfo): Promise<void> {
+  if (!isReal(testInfo)) return
+  const res = await page.request.delete('/api/v1/me/codex-key', { headers: HEADERS })
+  await ok(res, 'DELETE /me/codex-key')
+  await page.reload()
+}
+
 // Cached for the lifetime of the worker process (the real projects run with
 // workers: 1 - see playwright.config.ts - specifically so this in-memory
 // cache, and every other cross-test assumption about a single shared real
@@ -313,6 +337,29 @@ export async function seedToolSession(page: Page, testInfo: TestInfo): Promise<T
   if (!isReal(testInfo)) return { workspaceId: MOCK_WORKSPACE_ID, sessionId: MOCK_TOOL_SESSION_ID }
   const workspaceId = await ensureRealWorkspace(page)
   const sess = await createRealSession(page, 'Read note.txt', 'Read note.txt and reply with its content only. [fixture:02]')
+  await waitForSessionState(page, sess.id, ['open'])
+  return { workspaceId, sessionId: sess.id }
+}
+
+export interface CodexSession {
+  workspaceId: string
+  sessionId: string
+}
+
+// seedCodexSession: a session on the codex harness whose single turn is the
+// Codex fixture 01 (internal/harness/codex/testdata/01_simple_text.jsonl: the
+// text "pong", then a completed turn), in `open` state. Real mode only - the
+// mock has no server-side session store, so a mock-mode Codex session is
+// created through the new-session dialog instead (e2e/session.spec.ts).
+export async function seedCodexSession(page: Page, title: string): Promise<CodexSession> {
+  await ensureRealCodexKey(page)
+  const workspaceId = await ensureRealWorkspace(page)
+  const res = await page.request.post('/api/v1/sessions', {
+    headers: HEADERS,
+    data: { workspace_id: workspaceId, profile_id: REAL_PROFILE_ID, title, prompt: '[fixture:01] hi', harness: 'codex' },
+  })
+  await ok(res, 'POST /sessions (codex)')
+  const sess = (await res.json()) as MinimalSession
   await waitForSessionState(page, sess.id, ['open'])
   return { workspaceId, sessionId: sess.id }
 }

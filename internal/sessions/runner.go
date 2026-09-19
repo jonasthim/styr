@@ -51,7 +51,16 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 				// "claude-fable-5-1", not the alias Styr asked for) and the commands it
 				// would accept as /name turns; both are stored on the session row so the
 				// UI can show them without a live process.
-				_ = s.repos.Sessions.UpdateModel(ctx, sess.ID, ev.Init.Model)
+				// A harness that does not name the model it resolved (the Codex codec
+				// only echoes back what Styr asked for) must not blank the column.
+				if ev.Init.Model != "" {
+					_ = s.repos.Sessions.UpdateModel(ctx, sess.ID, ev.Init.Model)
+				}
+				// Every codec reports which CLI answered, which is the authority on
+				// what the session is actually running under — the row only asked.
+				if ev.Init.Harness != "" {
+					_ = s.repos.Sessions.UpdateHarness(ctx, sess.ID, string(ev.Init.Harness))
+				}
 				_ = s.repos.Sessions.UpdateSlashCommands(ctx, sess.ID, ev.Init.SlashCommands)
 			}
 		case harness.EventToolUse:

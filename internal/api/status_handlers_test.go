@@ -82,3 +82,33 @@ func TestStatus_ModelsEffortsAndHiddenCommands(t *testing.T) {
 		t.Errorf("hidden_commands = %v, want it to include clear", out.HiddenCommands)
 	}
 }
+
+// GET /status lists every harness this build knows, with whether its binary answered
+// `--version` at startup, so the UI can offer (or explain) the choice.
+func TestStatus_Harnesses(t *testing.T) {
+	e := newEnv(t)
+	var out struct {
+		Harnesses []struct {
+			Kind      string `json:"kind"`
+			Available bool   `json:"available"`
+			Version   string `json:"version"`
+			Bin       string `json:"bin"`
+		} `json:"harnesses"`
+	}
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/status", nil, &out); status != http.StatusOK {
+		t.Fatalf("GET /status = %d, want 200", status)
+	}
+	if len(out.Harnesses) != 2 {
+		t.Fatalf("harnesses = %+v, want claude and codex", out.Harnesses)
+	}
+	byKind := map[string]bool{}
+	for _, h := range out.Harnesses {
+		byKind[h.Kind] = h.Available
+	}
+	if avail, ok := byKind["claude"]; !ok || !avail {
+		t.Errorf("harnesses = %+v, want claude available", out.Harnesses)
+	}
+	if avail, ok := byKind["codex"]; !ok || avail {
+		t.Errorf("harnesses = %+v, want codex listed as unavailable", out.Harnesses)
+	}
+}

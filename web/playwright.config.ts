@@ -80,6 +80,12 @@ if (wants('real')) {
       STYR_DATA_DIR: `data/e2e-${process.pid}`,
       STYR_MAX_OPEN_SESSIONS: '100',
       STYR_CLAUDE_BIN: path.join(repoRoot, 'testdata', 'fake-claude', 'fake-claude.sh'),
+      // STYR_CODEX_BIN points the Codex harness at its own shell fake, for the
+      // same reason and in the same absolute form as STYR_CLAUDE_BIN above:
+      // `codex exec` runs with the session's cwd (its worktree, or the
+      // workspace checkout), so a relative program name would not resolve, and
+      // the fake finds its fixture directory from $0.
+      STYR_CODEX_BIN: path.join(repoRoot, 'testdata', 'fake-codex', 'fake-codex.sh'),
     },
     url: 'http://127.0.0.1:8080/healthz',
     reuseExistingServer: false,
