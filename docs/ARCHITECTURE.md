@@ -250,6 +250,76 @@ architectural shape.
   HTTP shutdown sequence, but a schedule's in-flight "Run now" HTTP request or an SSE tab watching
   a loop's session both rely on `reqCancel()` running before `srv.Shutdown` to unblock promptly.
 
+## Pipelines: advancing a DAG on run events (v0.5)
+
+A pipeline is not a separate execution path from a run any more than a schedule or a loop is: a
+pipeline run's step is an ordinary `internal/runs.Engine.Start` call, and the pipeline executor's
+whole job is deciding, from the run engine's own bus events, which step to start next. Full
+behaviour (YAML format, validation, fan-out, retries, worktree modes) is `docs/PIPELINES.md`;
+this section is only the architectural shape.
+
+- **The run engine gained two bus events for this.** `internal/runs/loop.go`'s `finish` — the one
+  place every run closes out, whatever outcome ends it — now calls `publishFinished`, which
+  publishes `run.finished` (success) or `run.failed` (every other outcome) on the bus, carrying
+  `{run_id, step_run_id, outcome}`. `step_run_id` is `nil` for a run outside a pipeline (an
+  ordinary trigger/schedule/loop/UI-started run); a pipeline step's run carries the
+  `internal/pipelines` step-run id it belongs to (`runs.RunInput.StepRunID`, plumbed onto the run
+  row by migration `00008_pipelines.sql`'s `runs.step_run_id` column). It is published **after**
+  the run row is written, so a subscriber that reads the run back over the API always sees the
+  already-finished row — the same ordering guarantee `session.event`/`session.state` already give
+  every other bus consumer.
+- **`internal/pipelines.Executor.Run` subscribes to that bus** (`busBuffer` 512, the same
+  generous depth `runs.Engine.Run`'s own subscription uses) alongside a 30s ticker
+  (`sweepInterval`), structurally identical to `runs.Engine.Run`'s own select loop — started as a
+  third long-lived goroutine in `cmd/styr/serve.go`, alongside `bg.Runs.Run` and
+  `bg.Schedules.Run`, sharing the same `maintCtx`. `handle` ignores every bus message except
+  `run.finished`/`run.failed` carrying a non-nil `step_run_id`, and for those calls
+  `completeStep`, which loads the step run, records success (the report) or failure, and —
+  within the step's retry budget — either opens a new attempt or lets the failure cascade.
+- **The advance loop.** `completeStep` and `Start` both end by calling `advanceLocked`
+  (`internal/pipelines/advance.go`), which re-reads every step-run of the pipeline run, expands
+  any fan-out node whose dependencies just succeeded (`foreach` rendered against the now-available
+  `steps.<id>.report`), starts every pending step-run whose node is now eligible (rendering
+  `with`, resolving the template, calling `runs.Engine.Start` with `Origin: pipeline` and the new
+  step-run's id), and settles the pipeline run out (`success`/`failed`) once nothing is left
+  pending or running. A `sync.Mutex` (`Executor.mu`) serialises every graph mutation: it is held
+  across the whole of `advanceLocked`, including the `runs.Engine.Start` calls inside it, so a bus
+  event arriving mid-`advance` (a fast step finishing while a slower sibling in the same level is
+  still being started) can never see and act on a half-updated set of step-runs.
+- **The timeout sweep doubles as bus-message reconciliation.** `Executor.Tick`, called every 30s
+  by the same goroutine that subscribes to the bus, closes out any pipeline run older than its
+  definition's `timeout` (default 2h, capped at 24h) exactly like `Cancel` does — but for a run
+  still within its timeout, it also re-reads every `running` step-run's underlying `runs` row
+  directly and applies its outcome if it has already finished (`reconcile`). This is the same
+  problem `runs.Engine`'s own reconciliation solves for a session that finishes before its run row
+  exists (see "Triggers, runs and unattended sessions" above): a bus message can be dropped (a
+  full subscriber channel, a server restart between the run finishing and the message being
+  handled), and without this sweep a pipeline could get stuck `running` forever waiting for a
+  message that already came and went.
+- **Sessions gained a way to join an existing worktree.** A `worktree: shared` step continues in
+  a dependency's own worktree rather than creating a fresh one:
+  `sessions.CreateInput.WorktreePath` (migration `00009_worktree_share.sql`'s
+  `sessions.worktree_shared` column, informational only — every git operation still addresses the
+  worktree by its existing path column) routes `sessions.Service.Create` to `attachWorktree`
+  instead of the ordinary `createWorktree`, which resolves the path's branch from git and its base
+  commit from the session that originally created it, rather than creating a new `git worktree`
+  at all. Nothing removes a step's worktree when the pipeline finishes; it survives for review
+  exactly like any other worktree session's, addressed via that step's own session page.
+- **Trigger and schedule targets became nullable, on a single migration connection.** A trigger
+  or schedule now points at either a template or a pipeline (`template_id`/`pipeline_id`, exactly
+  one). Migration `00008_pipelines.sql` added the `pipeline_id` columns, but `template_id` was
+  still `NOT NULL` from earlier migrations, leaving no legal value for a row that targets a
+  pipeline. Migration `00010_pipeline_targets.sql` relaxes both `triggers.template_id` and
+  `schedules.template_id` to nullable — SQLite cannot drop a `NOT NULL` constraint in place, so
+  each table is rebuilt by SQLite's documented procedure (`PRAGMA foreign_keys = OFF`, create a
+  `_new` table with the relaxed schema, copy every row, drop the old table, rename the new one
+  into place, `PRAGMA foreign_keys = ON`). `PRAGMA foreign_keys` is a per-connection setting and a
+  no-op inside a transaction, which is why `internal/db.migrate` opens goose's migration runner on
+  a pool capped at **one** connection (`migrator.SetMaxOpenConns(1)`, closed again before `Open`
+  hands back the application's own pool): a second pooled connection wouldn't share the pragma
+  toggle, and the statements have to run outside a transaction (`-- +goose NO TRANSACTION`) for
+  the pragma to take effect at all.
+
 ## What lives where
 
 ```
@@ -259,8 +329,8 @@ internal/harness/    Harness adapter interface + the Claude Code implementation 
                      scripted fake (fake/) used by tests and dev
 internal/events/     in-process pub/sub bus behind the SSE endpoint
 internal/domain/     core types: Session, Event, Approval, Workspace, Profile, User, Template,
-                     Trigger, Delivery, Run, Schedule, ScheduleFiring, Loop, NotificationChannel,
-                     APIToken, errors
+                     Trigger, Delivery, Run, Schedule, ScheduleFiring, Loop, Pipeline,
+                     PipelineRun, StepRun, NotificationChannel, APIToken, errors
 internal/db/         SQLite open + goose migrations + one repo file per table
 internal/crypto/     AES-GCM seal/open for tokens at rest
 internal/risk/       tool+input → risk tier classification
@@ -280,6 +350,9 @@ internal/runs/       the unattended run engine: starts a session from a rendered
                      (loops.go) on report arrival
 internal/schedules/  cron table, next-run computation (robfig/cron), the 30s scheduler tick that
                      fires due schedules through internal/runs, firings log, cron preview/describe
+internal/pipelines/  YAML DAG parser and validator (def.go), the executor that advances a
+                     pipeline run on internal/runs' bus events and a 30s timeout/reconcile sweep
+                     (executor.go, advance.go), the pipeline-run read model (view.go)
 internal/stats/      read-only fleet views: the Gantt's running/waiting/idle segments derived
                      from events, and cost aggregation by day/owner/origin/template
 internal/notify/     outbound ntfy and generic-webhook senders for run events

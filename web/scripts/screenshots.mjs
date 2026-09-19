@@ -26,6 +26,10 @@ const BASE_URL = `http://${HOST}:${PORT}`
 // (TOOL_FIXTURE_SESSION_ID): a Read tool call followed by a text reply.
 const FIXTURE_SESSION_ID = '00000000-0000-4000-8000-000000000005'
 
+// The seeded, still-running pipeline run (web/src/mocks/pipelinesState.ts's
+// PIPELINE_RUN_RUNNING_ID): the plan's own fix-ci example, mid-flight.
+const PIPELINE_RUN_RUNNING_ID = 'prun-running-1'
+
 function waitForServer(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
   return new Promise((resolve, reject) => {
@@ -233,6 +237,38 @@ async function main() {
         await page.screenshot({ path: path.join(outDir, 'costs.png') })
         await page.close()
         console.log('captured costs.png (1280x800)')
+      }
+
+      // 10. Pipelines list, desktop viewport: the seeded fix-ci and
+      // release-notes pipelines (web/src/mocks/pipelinesState.ts).
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/pipelines`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid^="pipeline-row-"]', { timeout: 15_000 })
+
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'pipelines.png') })
+        await page.close()
+        console.log('captured pipelines.png (1280x800)')
+      }
+
+      // 11. Pipeline run, desktop viewport: the seeded still-running fix-ci
+      // run, so the graph shows a mix of success/running/pending nodes.
+      {
+        const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+        await page.goto(`${BASE_URL}/pipeline-runs/${PIPELINE_RUN_RUNNING_ID}`, { waitUntil: 'networkidle' })
+        await page.waitForSelector('[data-testid="pipeline-run-state"]', { timeout: 15_000 })
+        await page.waitForSelector('[data-testid="pipeline-graph"]', { timeout: 15_000 })
+        await page.waitForSelector('[data-testid="graph-node"]', { timeout: 15_000 })
+
+        // See the sessions.png comment above: settle the hover-expanding
+        // rail before capturing.
+        await page.mouse.move(900, 400)
+        await page.waitForTimeout(250)
+        await page.screenshot({ path: path.join(outDir, 'pipeline-run.png') })
+        await page.close()
+        console.log('captured pipeline-run.png (1280x800)')
       }
     } finally {
       await browser.close()
