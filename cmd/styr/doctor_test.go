@@ -220,6 +220,9 @@ func TestRunDoctor_ExitsZeroWhenHealthy(t *testing.T) {
 	if code := runDoctor(&out, nil); code != 0 {
 		t.Fatalf("runDoctor() = %d, want 0; output:\n%s", code, out.String())
 	}
+	if strings.Contains(out.String(), ": skip: ") || strings.Contains(out.String(), ": warn: ") {
+		t.Fatalf("status prefix doubled in doctor output:\n%s", out.String())
+	}
 	if !containsLine(out.String(), "skip oidc discovery reachable") {
 		t.Fatalf("output missing skip line:\n%s", out.String())
 	}

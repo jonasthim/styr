@@ -354,6 +354,14 @@ func checkOIDCDiscovery(cfg config.Config) error {
 // runDoctor loads the configuration (best effort: a load error is reported
 // as its own FAIL line rather than aborting) and prints one line per check:
 // "ok", "FAIL" or "skip". It returns 1 when any check fails, 0 otherwise.
+// checkReason is err's message without the leading "<sentinel>: " that
+// wrapping errSkip/errWarn with %w adds, so a line reads
+// "skip codex binary found (optional): codex not found" rather than
+// "skip ...: skip: codex not found".
+func checkReason(err, sentinel error) string {
+	return strings.TrimPrefix(err.Error(), sentinel.Error()+": ")
+}
+
 func runDoctor(stdout io.Writer, args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stdout)
@@ -383,9 +391,9 @@ func runDoctor(stdout io.Writer, args []string) int {
 		case err == nil:
 			fmt.Fprintf(stdout, "ok  %s\n", c.name)
 		case errors.Is(err, errSkip):
-			fmt.Fprintf(stdout, "skip %s: %v\n", c.name, err)
+			fmt.Fprintf(stdout, "skip %s: %s\n", c.name, checkReason(err, errSkip))
 		case errors.Is(err, errWarn):
-			fmt.Fprintf(stdout, "warn %s: %v\n", c.name, err)
+			fmt.Fprintf(stdout, "warn %s: %s\n", c.name, checkReason(err, errWarn))
 		default:
 			fmt.Fprintf(stdout, "FAIL %s: %v\n", c.name, err)
 			failed = true

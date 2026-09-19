@@ -7,6 +7,11 @@ starting at `1.0.0`.
 
 ## [Unreleased]
 
+### Fixed
+
+- `styr doctor` no longer doubles the status word in its skip and warn lines
+  (`skip codex binary found (optional): codex not found ...`, not `...: skip: codex not found`).
+
 ## [1.0.1] - 2026-09-19
 
 ### Fixed
