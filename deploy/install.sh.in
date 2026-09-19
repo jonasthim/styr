@@ -423,3 +423,4 @@ Logs: journalctl -u styr -f
 Data: $DATA_DIR   Config: $CONF_DIR
 Upgrade later by re-running this installer.
 MSG
+echo "styr install: OK, running $(run_as_styr "$REAL_BIN" version 2>/dev/null || echo "$REAL_BIN")"

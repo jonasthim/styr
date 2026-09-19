@@ -98,6 +98,13 @@ Docker. `styr` applies every pending database migration itself as part of openin
 startup, so a version bump never needs a separate `styr migrate` step — restarting the service is
 enough. See `deploy/README.md`'s own Upgrading section for the full walkthrough.
 
+### Automating upgrades
+
+Keep the installer's output when you script it. It exits non-zero and prints `error: …` on
+any refusal (for example the downgrade guard), and its very last line on success is
+`styr install: OK, running styr X.Y.Z (sha)`. Discarding output and checking `styr version`
+afterwards hides a refused upgrade behind an unchanged version.
+
 ## Downgrading
 
 `install.sh --version vX.Y.Z` refuses to install a release older than the one already installed,
