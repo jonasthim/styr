@@ -21,3 +21,30 @@ export function pipelineName(yaml: string, fallback = ''): string {
 export function stepCount(yaml: string): number {
   return yaml.match(STEP_LINE)?.length ?? 0
 }
+
+/** The definition "New from template" creates: the plan's sequential
+ * two-step skeleton, with the second step reading the first one's report.
+ *
+ * It is built here rather than being a constant because POST /pipelines
+ * validates before it stores (internal/pipelines' Executor.CreatePipeline):
+ * `workspace` has to be the chosen workspace's own name and every step's
+ * `template` has to be one that exists in it, so a hard-coded skeleton
+ * naming imaginary templates would be rejected 422 instead of opening an
+ * editor. With no template to name yet, the skeleton is the header alone -
+ * still valid, and still something to type into.
+ */
+export function starterYaml(workspaceName: string, templateName?: string): string {
+  const header = `name: new-pipeline\nworkspace: ${workspaceName}\ntimeout: 1h\n`
+  if (!templateName) return `${header}steps: []\n`
+  const template = JSON.stringify(templateName)
+  return (
+    `${header}steps:\n` +
+    `  - id: investigate\n` +
+    `    template: ${template}\n` +
+    `  - id: act\n` +
+    `    needs: [investigate]\n` +
+    `    template: ${template}\n` +
+    `    with: { plan: "{{ .steps.investigate.report.proposed_action }}" }\n` +
+    `    worktree: own\n`
+  )
+}

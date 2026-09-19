@@ -1050,6 +1050,169 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/pipelines": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List pipelines
+         * @description Every pipeline visible to the current user (owned, shared, or — for an admin — all).
+         */
+        get: operations["listPipelines"];
+        put?: never;
+        /**
+         * Create a pipeline
+         * @description The yaml is parsed and validated against workspace_id's templates (unique step ids, acyclic needs, templates exist, limits — see docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md); an invalid definition is rejected with 422 invalid_pipeline and the full problem list. shared marks the pipeline as owned by nobody; only an admin may set it.
+         */
+        post: operations["createPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipelines/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate a pipeline definition without creating it
+         * @description Always 200, even when the definition is invalid — ok is false and errors lists every problem in that case. graph is rendered from whatever steps parsed, regardless of validity, so the UI can draw a broken pipeline while pointing at what's wrong with it. This literal path is matched before /pipelines/{id}, so "validate" is never treated as a pipeline id.
+         */
+        post: operations["validatePipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipelines/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get a pipeline */
+        get: operations["getPipeline"];
+        put?: never;
+        post?: never;
+        /** Delete a pipeline */
+        delete: operations["deletePipeline"];
+        options?: never;
+        head?: never;
+        /**
+         * Update a pipeline
+         * @description A full replace of the pipeline's name, workspace and yaml, re-validated the same way as create.
+         */
+        patch: operations["patchPipeline"];
+        trace?: never;
+    };
+    "/api/v1/pipelines/{id}/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start a pipeline run
+         * @description Starts a run by hand (origin ui), same shape as POST /templates/{id}/run.
+         */
+        post: operations["startPipeline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List pipeline runs */
+        get: operations["listPipelineRuns"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline-runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a pipeline run
+         * @description Includes the pipeline it belongs to, every step-run (each with the Run summary of its current attempt, null until one has started) and the pipeline's graph.
+         */
+        get: operations["getPipelineRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline-runs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Cancel a running pipeline run
+         * @description Cancels every running step-run and closes their sessions. Cancelling a pipeline run that is not running is a 409.
+         */
+        post: operations["cancelPipelineRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/pipeline-runs/{id}/retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retry a pipeline run's failed steps
+         * @description Re-runs every failed step-run as a new attempt and continues the pipeline. Retrying a pipeline run with no failed steps is a 409.
+         */
+        post: operations["retryPipelineRunFailed"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/schedules": {
         parameters: {
             query?: never;
@@ -1130,7 +1293,7 @@ export interface paths {
         put?: never;
         /**
          * Run a schedule now
-         * @description Fires the schedule immediately, ignoring its cron and next_run_at (no overlap check, unlike a tick).
+         * @description Fires the schedule immediately, ignoring its cron and next_run_at (no overlap check, unlike a tick). A schedule that starts a pipeline answers with the "pr:"-prefixed reference in run_id and the bare pipeline run id in pipeline_run_id.
          */
         post: operations["runScheduleNow"];
         delete?: never;
@@ -1463,6 +1626,8 @@ export interface components {
             branch: string;
             /** @description The commit the worktree started from; empty without a worktree. */
             base_ref: string;
+            /** @description Whether this session's worktree started life as another session's (created with worktree_path in the request below), rather than being created fresh for it. */
+            worktree_shared: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -1639,12 +1804,13 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        /** @description The create/update request body for POST/PATCH /triggers(/{id}). */
+        /** @description The create/update request body for POST/PATCH /triggers(/{id}). Exactly one of template_id or pipeline_id must be set (422 otherwise); the trigger starts a template run or a pipeline run accordingly. */
         TriggerInput: {
             name: string;
             /** @enum {string} */
             kind: "generic" | "grafana" | "github";
-            template_id: string;
+            template_id?: string;
+            pipeline_id?: string | null;
             dedupe_key_template?: string;
             cooldown_s?: number;
             storm_cap_per_hour?: number;
@@ -1654,7 +1820,7 @@ export interface components {
             /** @description Update only; omit to leave enabled state unchanged. */
             enabled?: boolean;
         };
-        /** @description Never includes the secret or its hash — see secret_hint. */
+        /** @description Never includes the secret or its hash — see secret_hint. Exactly one of template_id (non-empty) and pipeline_id (non-null) is set. */
         Trigger: {
             id: string;
             owner_id: string | null;
@@ -1664,6 +1830,7 @@ export interface components {
             kind: "generic" | "grafana" | "github";
             secret_hint: string;
             template_id: string;
+            pipeline_id: string | null;
             enabled: boolean;
             dedupe_key_template: string;
             cooldown_s: number;
@@ -1702,6 +1869,8 @@ export interface components {
             trigger_id: string | null;
             delivery_id: string | null;
             origin: string;
+            /** @description Set when this run is one attempt of a pipeline step (origin "pipeline"); null for every other run. */
+            step_run_id: string | null;
             /** @description The loop this run is an iteration of; empty for an ordinary one-shot run. */
             loop_id: string;
             /** @description 1-based iteration number within its loop; 0 when the run belongs to no loop. */
@@ -1721,6 +1890,11 @@ export interface components {
         RunID: {
             run_id: string;
         };
+        /** @description POST /schedules/{id}/run's 202 body. run_id is a run id for a schedule that starts a template, and the "pr:<pipeline run id>" reference (internal/schedules' PipelineRunRefPrefix, the same one a firing's run_id carries) for one that starts a pipeline; pipeline_run_id repeats that id unprefixed, and is absent otherwise. */
+        ScheduleRunStarted: {
+            run_id: string;
+            pipeline_run_id?: string;
+        };
         /** @description A Run plus the records it was started from, each null when unavailable (e.g. the template was since deleted, or the run belongs to no loop). */
         RunView: {
             run: components["schemas"]["Run"];
@@ -1728,6 +1902,10 @@ export interface components {
             delivery: components["schemas"]["Delivery"] | null;
             template: components["schemas"]["Template"] | null;
             loop: components["schemas"]["Loop"] | null;
+            /** @description The pipeline step run this run is one attempt of; null for a run outside a pipeline. */
+            step: components["schemas"]["StepRun"] | null;
+            /** @description The pipeline `step` belongs to; null whenever step is. */
+            pipeline: components["schemas"]["Pipeline"] | null;
         };
         /** @description Never includes the token — see token_present. */
         NotificationChannel: {
@@ -1742,10 +1920,11 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
-        /** @description The create/update request body for POST/PATCH /schedules(/{id}). */
+        /** @description The create/update request body for POST/PATCH /schedules(/{id}). Exactly one of template_id or pipeline_id must be set (422 otherwise); the schedule starts a template run or a pipeline run accordingly. */
         ScheduleInput: {
             name: string;
-            template_id: string;
+            template_id?: string;
+            pipeline_id?: string | null;
             /** @description A standard 5-field cron expression, or a descriptor (@hourly, @daily, @every 1h30m, ...). */
             cron: string;
             /** @description Fixed variables merged into every run this schedule starts, alongside the schedule key (name, fired_at). */
@@ -1755,11 +1934,13 @@ export interface components {
             /** @description Owned by nobody rather than the caller. Admin only. */
             shared?: boolean;
         };
+        /** @description Exactly one of template_id (non-empty) and pipeline_id (non-null) is set. */
         Schedule: {
             id: string;
             owner_id: string | null;
             name: string;
             template_id: string;
+            pipeline_id: string | null;
             cron: string;
             enabled: boolean;
             vars: Record<string, never>;
@@ -1853,6 +2034,118 @@ export interface components {
             total_usd: number;
             /** @description The trailing window size, in days, this dashboard was computed over. */
             window: number;
+        };
+        /** @description The create/update request body for POST/PATCH /pipelines(/{id}). */
+        PipelineInput: {
+            name: string;
+            workspace_id: string;
+            /** @description The pipeline's YAML definition — see docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md for the shape. Parsed and validated on every create/update. */
+            yaml: string;
+            /** @description Owned by nobody rather than the caller. Admin only. */
+            shared?: boolean;
+        };
+        Pipeline: {
+            id: string;
+            owner_id: string | null;
+            name: string;
+            workspace_id: string;
+            yaml: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        /** @description One pipeline validation problem, with the yaml source line when it could be determined (0 otherwise). */
+        Problem: {
+            line: number;
+            message: string;
+        };
+        /** @description The 422 body for POST/PATCH /pipelines when the pipeline's yaml fails validation. */
+        PipelineValidationErrorBody: {
+            error: {
+                /** @enum {string} */
+                code: "invalid_pipeline";
+                message: string;
+            };
+            errors: components["schemas"]["Problem"][];
+        };
+        GraphNode: {
+            id: string;
+            template: string;
+            worktree: string;
+            /** @description True for a step with a `foreach` list (fanned out into N step-runs at run time). */
+            foreach: boolean;
+        };
+        /** @description A needs dependency — from must succeed before to starts. */
+        GraphEdge: {
+            from: string;
+            to: string;
+        };
+        /** @description A rendering-friendly view of a pipeline's step DAG, for the frontend's graph preview. */
+        Graph: {
+            nodes: components["schemas"]["GraphNode"][];
+            edges: components["schemas"]["GraphEdge"][];
+        };
+        /** @description POST /pipelines/validate's payload. ok is false and errors is non-empty for an invalid definition, but the response is still 200 — graph is rendered from whatever steps parsed regardless. */
+        ValidationResult: {
+            ok: boolean;
+            errors: components["schemas"]["Problem"][];
+            graph: components["schemas"]["Graph"];
+        };
+        /** @description The {pipeline_run_id} shape POST /pipelines/{id}/start answers with. */
+        PipelineRunID: {
+            pipeline_run_id: string;
+        };
+        PipelineRun: {
+            id: string;
+            pipeline_id: string;
+            origin: string;
+            origin_ref: string;
+            /** @description The pipeline-level vars payload, available to every step's with/foreach as .payload. */
+            input: Record<string, never>;
+            /** @enum {string} */
+            state: "running" | "success" | "failed" | "cancelled" | "timeout";
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description The sum of every step-run's cost. */
+            cost_usd: number;
+        };
+        /** @description One node's execution within a PipelineRun. A foreach node gets one StepRun per fan-out item; a retried attempt gets a new StepRun (same step_id, incremented attempt). */
+        StepRun: {
+            id: string;
+            pipeline_run_id: string;
+            /** @description The step id from the pipeline's yaml, e.g. "triage". */
+            step_id: string;
+            /** @description 0 for a non-foreach step; the item's position for a foreach one. */
+            index_in_fanout: number;
+            /** @description The foreach item's JSON; empty for a non-foreach step. */
+            item: string;
+            /** @description Null until the run.Engine session for this attempt is started. */
+            run_id: string | null;
+            attempt: number;
+            /** @enum {string} */
+            state: "pending" | "running" | "success" | "failed" | "skipped" | "cancelled";
+            /** @description The step's structured report; null until the step finishes with one. */
+            report: Record<string, never> | null;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description Absolute path of the worktree this step ran in; empty for none, or not yet started. */
+            worktree: string;
+        };
+        /** @description One entry of PipelineRunView.steps — a StepRun plus the Run summary of its current attempt, null until the executor has started one. */
+        PipelineRunStepView: components["schemas"]["StepRun"] & {
+            run: components["schemas"]["Run"] | null;
+        };
+        /** @description A PipelineRun together with the records a UI needs to render it without further round trips. */
+        PipelineRunView: {
+            run: components["schemas"]["PipelineRun"];
+            pipeline: components["schemas"]["Pipeline"];
+            steps: components["schemas"]["PipelineRunStepView"][];
+            graph: components["schemas"]["Graph"];
         };
     };
     responses: {
@@ -2657,6 +2950,8 @@ export interface operations {
                      * @enum {string}
                      */
                     effort?: "" | "low" | "medium" | "high" | "xhigh" | "max";
+                    /** @description Starts the session on an existing worktree (typically another session's, under the workspace's .styr/worktrees/ directory) instead of creating a fresh one, so a pipeline "worktree: shared" step can continue where the previous step left off. Empty (the default) creates a fresh worktree as before. The workspace must have worktrees enabled; otherwise the request is 422. */
+                    worktree_path?: string;
                 };
             };
         };
@@ -2688,7 +2983,7 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
-            /** @description No Claude token available for the current user (add one in profile settings) */
+            /** @description No Claude token available for the current user (add one in profile settings), or worktree_path does not point to an existing worktree registered under the workspace's .styr/worktrees/ directory (or the workspace has worktrees disabled) */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -3933,6 +4228,305 @@ export interface operations {
             404: components["responses"]["NotFound"];
         };
     };
+    listPipelines: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Every visible pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"][];
+                };
+            };
+        };
+    };
+    createPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineInput"];
+            };
+        };
+        responses: {
+            /** @description Created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            /** @description The pipeline's yaml failed validation */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineValidationErrorBody"];
+                };
+            };
+        };
+    };
+    validatePipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    yaml: string;
+                    workspace_id: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The validation result */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ValidationResult"];
+                };
+            };
+        };
+    };
+    getPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    deletePipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+        };
+    };
+    patchPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PipelineInput"];
+            };
+        };
+        responses: {
+            /** @description The updated pipeline */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Pipeline"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            /** @description The pipeline's yaml failed validation */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineValidationErrorBody"];
+                };
+            };
+        };
+    };
+    startPipeline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    input?: Record<string, never>;
+                };
+            };
+        };
+        responses: {
+            /** @description Accepted; the pipeline run has been started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunID"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    listPipelineRuns: {
+        parameters: {
+            query?: {
+                /** @description Filter to runs of this pipeline id. */
+                pipeline?: string;
+                state?: "running" | "success" | "failed" | "cancelled" | "timeout";
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Matching pipeline runs, most recent first */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRun"][];
+                };
+            };
+        };
+    };
+    getPipelineRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The pipeline run */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PipelineRunView"];
+                };
+            };
+            404: components["responses"]["NotFound"];
+        };
+    };
+    cancelPipelineRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The pipeline run is not running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
+    retryPipelineRunFailed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            404: components["responses"]["NotFound"];
+            /** @description The pipeline run has no failed steps to retry */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorBody"];
+                };
+            };
+        };
+    };
     listSchedules: {
         parameters: {
             query?: never;
@@ -4103,7 +4697,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RunID"];
+                    "application/json": components["schemas"]["ScheduleRunStarted"];
                 };
             };
             404: components["responses"]["NotFound"];

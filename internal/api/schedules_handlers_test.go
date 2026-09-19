@@ -31,8 +31,11 @@ type scheduleOut struct {
 // runIDOut is the {run_id} shape every "start a run" endpoint answers with
 // (POST /schedules/{id}/run, POST /templates/{id}/run): shared here since
 // both templates_handlers_test.go and this file assert on it.
+// PipelineRunID is only ever set by POST /schedules/{id}/run, and only for
+// a schedule that starts a pipeline.
 type runIDOut struct {
-	RunID string `json:"run_id"`
+	RunID         string `json:"run_id"`
+	PipelineRunID string `json:"pipeline_run_id"`
 }
 
 type scheduleFiringOut struct {
@@ -201,6 +204,30 @@ func TestSchedulesRun_Returns202WithRunID(t *testing.T) {
 	}
 	if out.RunID != "run-1" {
 		t.Fatalf("run_id = %q, want run-1", out.RunID)
+	}
+	if out.PipelineRunID != "" {
+		t.Fatalf("pipeline_run_id = %q, want empty for a template schedule", out.PipelineRunID)
+	}
+}
+
+// A schedule that starts a pipeline answers with the "pr:" reference in
+// run_id and the bare pipeline run id beside it, so the UI opens the
+// pipeline run page rather than a /runs/{id} that has no row behind it.
+func TestSchedulesRun_PipelineScheduleAlsoReturnsThePipelineRunID(t *testing.T) {
+	e := newEnv(t)
+	e.schedules.RunNowFn = func(context.Context, api.Actor, string) (domain.Run, error) {
+		return domain.Run{ID: schedules.PipelineRunRefPrefix + "prun-7"}, nil
+	}
+	var out runIDOut
+	status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/schedules/sched-1/run", nil, &out)
+	if status != http.StatusAccepted {
+		t.Fatalf("POST /schedules/sched-1/run = %d, want 202", status)
+	}
+	if out.RunID != "pr:prun-7" {
+		t.Fatalf("run_id = %q, want pr:prun-7", out.RunID)
+	}
+	if out.PipelineRunID != "prun-7" {
+		t.Fatalf("pipeline_run_id = %q, want prun-7", out.PipelineRunID)
 	}
 }
 

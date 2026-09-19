@@ -600,12 +600,125 @@ func TestService_TickStartsAPipelineWhenTheScheduleNamesOne(t *testing.T) {
 		t.Fatalf("firing run_id = %v, want the prefixed pipeline run id", firings[0].RunID)
 	}
 
-	// A "pr:" reference is not a run row: the overlap check leaves the
-	// schedule firing rather than skipping forever.
+	// A "pr:" reference is not a run row, and this service was wired
+	// without a pipeline reader: the overlap check leaves the schedule
+	// firing rather than skipping forever.
 	f.now = base.Add(10 * time.Minute)
 	f.svc.Tick(ctx, f.now)
 	if got := len(starter.snapshot()); got != 2 {
 		t.Fatalf("pipeline starts after the second tick = %d, want 2", got)
+	}
+}
+
+// stubPipelineRuns stands in for the executor's IsRunning, letting a test
+// control whether the pipeline run a schedule last started reads back as
+// still going.
+type stubPipelineRuns struct {
+	mu      sync.Mutex
+	running map[string]bool
+	err     error
+	asked   []string
+}
+
+func (s *stubPipelineRuns) IsRunning(_ context.Context, id string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.asked = append(s.asked, id)
+	if s.err != nil {
+		return false, s.err
+	}
+	return s.running[id], nil
+}
+
+func (s *stubPipelineRuns) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.asked...)
+}
+
+// With a pipeline reader attached, a pipeline schedule skips a tick while
+// its previous pipeline run is still going — exactly like a template one —
+// and fires again once that run has finished.
+func TestService_TickSkipsOverlappingPipelineRun(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	starter := &stubPipelineStarter{}
+	runsLookup := &stubPipelineRuns{running: map[string]bool{"prun-1": true}}
+	f.svc.WithPipelines(starter).WithPipelineRuns(runsLookup)
+
+	pl := domain.Pipeline{ID: "pl-overlap", Name: "sweep", WorkspaceID: "ws-1",
+		YAML: "name: sweep\nsteps: []\n", CreatedAt: base, UpdatedAt: base}
+	if err := db.NewPipelines(f.database).Create(ctx, pl); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	sc, err := f.svc.Create(ctx, admin, domain.ScheduleInput{
+		Name: "sweep", PipelineID: pl.ID, Cron: "*/5 * * * *", Shared: true,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	f.now = base.Add(5 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	if got := len(starter.snapshot()); got != 1 {
+		t.Fatalf("pipeline starts after the first tick = %d, want 1", got)
+	}
+
+	// prun-1 is still running, so the second tick is recorded as skipped
+	// rather than starting a second pipeline run.
+	f.now = base.Add(10 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	if got := len(starter.snapshot()); got != 1 {
+		t.Fatalf("pipeline starts after the overlapping tick = %d, want still 1", got)
+	}
+	if asked := runsLookup.snapshot(); len(asked) == 0 || asked[len(asked)-1] != "prun-1" {
+		t.Fatalf("IsRunning asked for %v, want the unprefixed pipeline run id", asked)
+	}
+	firings, err := f.repos.Firings.ListBySchedule(ctx, sc.ID, 10)
+	if err != nil {
+		t.Fatalf("list firings: %v", err)
+	}
+	if len(firings) != 2 || firings[0].Status != domain.FiringSkippedOverlap {
+		t.Fatalf("firings = %+v, want newest skipped_overlap", firings)
+	}
+
+	// Once it has finished, the schedule fires again.
+	runsLookup.mu.Lock()
+	runsLookup.running["prun-1"] = false
+	runsLookup.mu.Unlock()
+	f.now = base.Add(15 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	if got := len(starter.snapshot()); got != 2 {
+		t.Fatalf("pipeline starts after the run finished = %d, want 2", got)
+	}
+}
+
+// A reader that cannot answer must never wedge a schedule: an error reads
+// as "not overlapping", the same rule the run-row lookup follows.
+func TestService_TickFiresWhenThePipelineLookupFails(t *testing.T) {
+	ctx := context.Background()
+	f := newFixture(t)
+	starter := &stubPipelineStarter{}
+	runsLookup := &stubPipelineRuns{err: errors.New("boom")}
+	f.svc.WithPipelines(starter).WithPipelineRuns(runsLookup)
+
+	pl := domain.Pipeline{ID: "pl-err", Name: "sweep-err", WorkspaceID: "ws-1",
+		YAML: "name: sweep-err\nsteps: []\n", CreatedAt: base, UpdatedAt: base}
+	if err := db.NewPipelines(f.database).Create(ctx, pl); err != nil {
+		t.Fatalf("create pipeline: %v", err)
+	}
+	if _, err := f.svc.Create(ctx, admin, domain.ScheduleInput{
+		Name: "sweep-err", PipelineID: pl.ID, Cron: "*/5 * * * *", Shared: true,
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	f.now = base.Add(5 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	f.now = base.Add(10 * time.Minute)
+	f.svc.Tick(ctx, f.now)
+	if got := len(starter.snapshot()); got != 2 {
+		t.Fatalf("pipeline starts = %d, want 2 (a failed lookup never skips)", got)
 	}
 }
 

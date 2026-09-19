@@ -63,6 +63,12 @@ type Repos struct {
 	// window between a session starting and its run row existing (see
 	// Engine.reconcile).
 	Events *db.Events
+	// StepRuns, PipelineRuns and Pipelines resolve the pipeline step a run
+	// belongs to, for RunView (the run page's "Step of pipeline X" chip).
+	// All optional: without them a run view simply carries no step.
+	StepRuns     *db.StepRuns
+	PipelineRuns *db.PipelineRuns
+	Pipelines    *db.Pipelines
 }
 
 // Notifier publishes a run event to a set of already-resolved channels.

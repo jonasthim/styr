@@ -129,7 +129,10 @@ export function graphOf(parsed: ParsedPipeline): PipelineGraph {
   return {
     nodes: parsed.steps
       .filter((step) => step.id)
-      .map((step) => ({ id: step.id, template: step.template, worktree: step.worktree, foreach: step.foreach })),
+      // `foreach` on the wire is "does this step fan out", not the
+      // expression (internal/pipelines' Definition.Graph, and the GraphNode
+      // schema): the editor's preview only ever draws the stacked outline.
+      .map((step) => ({ id: step.id, template: step.template, worktree: step.worktree, foreach: step.foreach !== '' })),
     // An edge to a step that does not exist would draw a node the definition
     // never declared, so unknown `needs` are reported as errors and dropped.
     edges: parsed.steps.flatMap((step) =>

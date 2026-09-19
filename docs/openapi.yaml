@@ -2416,7 +2416,11 @@ paths:
   /api/v1/schedules/{id}/run:
     post:
       summary: Run a schedule now
-      description: Fires the schedule immediately, ignoring its cron and next_run_at (no overlap check, unlike a tick).
+      description: >
+        Fires the schedule immediately, ignoring its cron and next_run_at
+        (no overlap check, unlike a tick). A schedule that starts a pipeline
+        answers with the "pr:"-prefixed reference in run_id and the bare
+        pipeline run id in pipeline_run_id.
       operationId: runScheduleNow
       tags: [schedules]
       parameters:
@@ -2431,7 +2435,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/RunID"
+                $ref: "#/components/schemas/ScheduleRunStarted"
         "404":
           $ref: "#/components/responses/NotFound"
 
@@ -3691,6 +3695,21 @@ components:
           type: string
       required: [run_id]
 
+    ScheduleRunStarted:
+      description: >
+        POST /schedules/{id}/run's 202 body. run_id is a run id for a
+        schedule that starts a template, and the "pr:<pipeline run id>"
+        reference (internal/schedules' PipelineRunRefPrefix, the same one a
+        firing's run_id carries) for one that starts a pipeline;
+        pipeline_run_id repeats that id unprefixed, and is absent otherwise.
+      type: object
+      properties:
+        run_id:
+          type: string
+        pipeline_run_id:
+          type: string
+      required: [run_id]
+
     RunView:
       description: >
         A Run plus the records it was started from, each null when
@@ -3716,7 +3735,17 @@ components:
           oneOf:
             - $ref: "#/components/schemas/Loop"
             - type: "null"
-      required: [run, session, delivery, template, loop]
+        step:
+          description: The pipeline step run this run is one attempt of; null for a run outside a pipeline.
+          oneOf:
+            - $ref: "#/components/schemas/StepRun"
+            - type: "null"
+        pipeline:
+          description: The pipeline `step` belongs to; null whenever step is.
+          oneOf:
+            - $ref: "#/components/schemas/Pipeline"
+            - type: "null"
+      required: [run, session, delivery, template, loop, step, pipeline]
 
     NotificationChannel:
       description: Never includes the token — see token_present.

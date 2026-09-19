@@ -793,3 +793,50 @@ func TestDecodeListAcceptsJSONAndGoSlices(t *testing.T) {
 		t.Fatal("decodeList should reject a non-list")
 	}
 }
+
+// IsRunning is the narrow reader internal/schedules uses to decide whether
+// a pipeline schedule's previous firing is still going. It follows the
+// pipeline run's own state and reports ErrNotFound for a run that is gone -
+// which the caller treats as "not overlapping".
+func TestIsRunningFollowsThePipelineRunState(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t, reportStep(`{"diagnosis":"all good"}`))
+
+	pl := e.pipeline(t, `
+name: one-step
+workspace: pipelines-ws
+steps:
+  - id: triage
+    template: Triage
+`)
+	pr := domain.PipelineRun{
+		ID: "prun-is-running", PipelineID: pl.ID, Origin: string(domain.OriginSchedule),
+		State: domain.PipelineRunRunning, StartedAt: e.now,
+	}
+	if err := e.repos.PipelineRuns.Create(ctx, pr); err != nil {
+		t.Fatalf("create pipeline run: %v", err)
+	}
+
+	running, err := e.exec.IsRunning(ctx, pr.ID)
+	if err != nil {
+		t.Fatalf("IsRunning: %v", err)
+	}
+	if !running {
+		t.Fatalf("IsRunning on a running pipeline run = false, want true")
+	}
+
+	if err := e.repos.PipelineRuns.Finish(ctx, pr.ID, domain.PipelineRunSuccess, 0); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+	running, err = e.exec.IsRunning(ctx, pr.ID)
+	if err != nil {
+		t.Fatalf("IsRunning after Finish: %v", err)
+	}
+	if running {
+		t.Fatalf("IsRunning on a finished pipeline run = true, want false")
+	}
+
+	if _, err := e.exec.IsRunning(ctx, "no-such-run"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("IsRunning on a missing run = %v, want ErrNotFound", err)
+	}
+}

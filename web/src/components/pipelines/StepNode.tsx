@@ -86,7 +86,7 @@ export function StepNode({ data }: NodeProps<StepFlowNode>) {
 
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] text-fg-muted">
           {isFanOut && (
-            <span className="shrink-0 font-medium text-fg-secondary" title={node.foreach}>
+            <span className="shrink-0 font-medium text-fg-secondary" title="Runs once per item of its foreach list">
               Fan-out
             </span>
           )}

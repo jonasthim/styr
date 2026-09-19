@@ -543,10 +543,10 @@ func (e *Executor) RetryFailed(ctx context.Context, actor Actor, id string) erro
 		return fmt.Errorf("%w: pipeline run %s has no failed steps to retry", domain.ErrConflict, id)
 	}
 
-	// PipelineRuns has no "reopen" method: Finish doubles as the state
-	// setter here and re-stamps finished_at, which the Finish that really
-	// ends the retried run overwrites.
-	if err := e.repos.PipelineRuns.Finish(ctx, id, domain.PipelineRunRunning, pr.CostUSD); err != nil {
+	// Reopen, not Finish: the run is going again, so finished_at goes back
+	// to NULL rather than being re-stamped with "now" on a run that has not
+	// finished (which the run page would then read as its elapsed time).
+	if err := e.repos.PipelineRuns.Reopen(ctx, id); err != nil {
 		return err
 	}
 	e.publishState(id, "", string(domain.PipelineRunRunning))

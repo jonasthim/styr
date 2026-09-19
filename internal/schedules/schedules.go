@@ -51,6 +51,16 @@ type PipelineStarter interface {
 		origin domain.Origin, originRef string) (domain.PipelineRun, error)
 }
 
+// PipelineRunLookup answers whether a pipeline run a schedule started is
+// still going. It is the pipeline-side counterpart of RunLookup, and the
+// only thing the overlap check needs for a schedule that starts a pipeline:
+// a pipeline run is not a run row, so RunLookup cannot resolve the "pr:"
+// reference its firings carry. *pipelines.Executor implements it; optional,
+// and without one a pipeline schedule never skips on overlap.
+type PipelineRunLookup interface {
+	IsRunning(ctx context.Context, id string) (bool, error)
+}
+
 // PipelineRunRefPrefix marks a firing's run_id as a pipeline run id rather
 // than a run id. The column has no foreign key (see migration 00006), so
 // one column carries both; everything reading it must strip the prefix to
@@ -76,8 +86,11 @@ type Service struct {
 	// until WithPipelines attaches the executor (the composition root wires
 	// it after both services exist).
 	pipelines PipelineStarter
-	now       func() time.Time
-	logger    *slog.Logger
+	// pipelineRuns resolves the "pr:" references those schedules' firings
+	// record, for the overlap check. Nil until WithPipelineRuns attaches it.
+	pipelineRuns PipelineRunLookup
+	now          func() time.Time
+	logger       *slog.Logger
 }
 
 // New constructs a Service. now is the clock used for next-run
@@ -97,6 +110,16 @@ func New(repos Repos, starter RunStarter, lookup RunLookup, now func() time.Time
 // composition root can wire the two services that reference each other.
 func (s *Service) WithPipelines(p PipelineStarter) *Service {
 	s.pipelines = p
+	return s
+}
+
+// WithPipelineRuns attaches the reader the overlap check uses for a
+// schedule whose last firing started a pipeline run, and returns s. Kept
+// separate from WithPipelines so a caller can start pipelines without
+// granting the scheduler a reader (and so tests can supply one and not the
+// other).
+func (s *Service) WithPipelineRuns(l PipelineRunLookup) *Service {
+	s.pipelineRuns = l
 	return s
 }
 

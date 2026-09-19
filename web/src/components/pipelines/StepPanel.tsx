@@ -79,11 +79,10 @@ export function StepPanel({
         <div className="min-w-0">
           <h2 className="truncate text-[15px] font-semibold tracking-[-0.01em] text-fg-primary">{node.id}</h2>
           <p className="mt-0.5 truncate font-mono text-[12px] text-fg-secondary">{node.template}</p>
-          {node.foreach && (
-            <p className="mt-1 truncate font-mono text-[11px] text-fg-muted" title={node.foreach}>
-              foreach {node.foreach}
-            </p>
-          )}
+          {/* The graph carries "this step fans out", not the expression it
+              fans out over (GET /pipelines/validate's GraphNode.foreach is a
+              boolean); the items themselves are the entries below. */}
+          {node.foreach && <p className="mt-1 text-[11px] text-fg-muted">Runs once per item of its foreach list</p>}
         </div>
         <button
           type="button"

@@ -59,6 +59,10 @@ type runViewDTO struct {
 	Delivery *deliveryDTO `json:"delivery"`
 	Template *templateDTO `json:"template"`
 	Loop     *loopDTO     `json:"loop"`
+	// Step is the pipeline step run this run is one attempt of and
+	// Pipeline the pipeline it belongs to, both nil outside a pipeline.
+	Step     *stepRunDTO  `json:"step"`
+	Pipeline *pipelineDTO `json:"pipeline"`
 }
 
 func runViewDTOFrom(v domain.RunView) runViewDTO {
@@ -78,6 +82,14 @@ func runViewDTOFrom(v domain.RunView) runViewDTO {
 	if v.Loop != nil {
 		l := loopDTOFrom(*v.Loop)
 		out.Loop = &l
+	}
+	if v.Step != nil {
+		sr := stepRunDTOFrom(*v.Step)
+		out.Step = &sr
+	}
+	if v.Pipeline != nil {
+		pl := pipelineDTOFrom(*v.Pipeline)
+		out.Pipeline = &pl
 	}
 	return out
 }

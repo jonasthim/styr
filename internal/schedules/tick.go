@@ -89,11 +89,19 @@ func (s *Service) overlapping(ctx context.Context, scheduleID string) bool {
 	if err != nil {
 		return false
 	}
-	if strings.HasPrefix(runID, PipelineRunRefPrefix) {
-		// A pipeline run is not a run row and this service has no reader for
-		// one, so a pipeline schedule does not skip on overlap yet: its
-		// cadence is expected to be longer than its pipeline's timeout.
-		return false
+	if ref, isPipeline := strings.CutPrefix(runID, PipelineRunRefPrefix); isPipeline {
+		// A pipeline run is not a run row, so RunLookup cannot resolve the
+		// reference: the pipeline-side reader answers instead. Without one
+		// (a Service wired without WithPipelineRuns) the schedule keeps the
+		// pre-v0.5 behaviour and never skips.
+		if s.pipelineRuns == nil {
+			return false
+		}
+		running, err := s.pipelineRuns.IsRunning(ctx, ref)
+		if err != nil {
+			return false
+		}
+		return running
 	}
 	view, err := s.lookup.Get(ctx, runID)
 	if err != nil {

@@ -60,3 +60,18 @@ func (e *Executor) GetRun(ctx context.Context, actor Actor, id string) (RunView,
 	}
 	return view, nil
 }
+
+// IsRunning reports whether a pipeline run is still going. It is the
+// narrowest question a caller outside this package needs answered about a
+// pipeline run it only holds an id for: internal/schedules asks it when a
+// schedule's previous firing started a pipeline run rather than a run, so a
+// pipeline schedule skips an overlapping tick exactly like a template one.
+// Unlike GetRun it takes no actor — the scheduler has no human behind it,
+// and the answer carries nothing but a boolean.
+func (e *Executor) IsRunning(ctx context.Context, id string) (bool, error) {
+	pr, err := e.repos.PipelineRuns.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	return !pr.State.Terminal(), nil
+}

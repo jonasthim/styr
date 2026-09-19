@@ -54,5 +54,21 @@ func (e *Engine) view(ctx context.Context, r domain.Run) domain.RunView {
 			v.Loop = loop
 		}
 	}
+	// A run a pipeline step started carries the step run's id; the step in
+	// turn names the pipeline run, and that the pipeline. Each lookup is
+	// best-effort like the ones above: the run is still worth showing
+	// without the chip that says which graph it belongs to.
+	if r.StepRunID != nil && e.repos.StepRuns != nil {
+		if step, err := e.repos.StepRuns.Get(ctx, *r.StepRunID); err == nil {
+			v.Step = step
+			if e.repos.PipelineRuns != nil && e.repos.Pipelines != nil {
+				if pr, err := e.repos.PipelineRuns.Get(ctx, step.PipelineRunID); err == nil {
+					if pl, err := e.repos.Pipelines.Get(ctx, pr.PipelineID); err == nil {
+						v.Pipeline = pl
+					}
+				}
+			}
+		}
+	}
 	return v
 }

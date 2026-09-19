@@ -167,3 +167,40 @@ func TestPipelineRuns_ListRunningOlderThan(t *testing.T) {
 		t.Fatalf("ListRunningOlderThan = %+v, want only %q", stale, old.ID)
 	}
 }
+
+func TestPipelineRuns_Reopen(t *testing.T) {
+	ctx := context.Background()
+	database := testOpenDB(t)
+	plID := seedPipelineRunFixtures(t, database)
+	runs := NewPipelineRuns(database)
+
+	r := newTestPipelineRun(plID, domain.PipelineRunRunning, time.Now())
+	if err := runs.Create(ctx, r); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := runs.Finish(ctx, r.ID, domain.PipelineRunFailed, 2.5); err != nil {
+		t.Fatalf("Finish: %v", err)
+	}
+
+	if err := runs.Reopen(ctx, r.ID); err != nil {
+		t.Fatalf("Reopen: %v", err)
+	}
+	got, err := runs.Get(ctx, r.ID)
+	if err != nil {
+		t.Fatalf("Get after Reopen: %v", err)
+	}
+	if got.State != domain.PipelineRunRunning {
+		t.Fatalf("State after Reopen = %q, want running", got.State)
+	}
+	if got.FinishedAt != nil {
+		t.Fatalf("FinishedAt after Reopen = %v, want nil", got.FinishedAt)
+	}
+	// The attempts already paid for still count toward the retried run.
+	if got.CostUSD != 2.5 {
+		t.Fatalf("CostUSD after Reopen = %v, want 2.5", got.CostUSD)
+	}
+
+	if err := runs.Reopen(ctx, "no-such-id"); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Reopen unknown id: err = %v, want ErrNotFound", err)
+	}
+}

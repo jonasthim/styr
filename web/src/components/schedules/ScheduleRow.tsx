@@ -7,7 +7,7 @@ import { useNavigate } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
-import type { RunStartedResult, Schedule, ScheduleInput } from '../../api/types'
+import type { Schedule, ScheduleInput, ScheduleRunResult } from '../../api/types'
 import { useToast } from '../../hooks/useToast'
 import { relativeTime } from '../inbox/format'
 import { OutcomeGlyph } from '../runs/OutcomeGlyph'
@@ -65,9 +65,18 @@ export function ScheduleRow({
   async function handleRunNow() {
     setRunning(true)
     try {
-      const result = await api<RunStartedResult>(`/api/v1/schedules/${schedule.id}/run`, { method: 'POST' })
+      const result = await api<ScheduleRunResult>(`/api/v1/schedules/${schedule.id}/run`, { method: 'POST' })
       void queryClient.invalidateQueries({ queryKey: ['schedules'] })
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      // A schedule that starts a pipeline answers with the pipeline run's
+      // own id alongside the "pr:"-prefixed reference in run_id: there is no
+      // run row behind it, so /runs/{id} would find nothing to show.
+      if (result.pipeline_run_id) {
+        void queryClient.invalidateQueries({ queryKey: ['pipeline-runs'] })
+        toast({ title: 'Pipeline run started', description: 'Opening it now.', tone: 'success' })
+        void navigate({ to: '/pipeline-runs/$id', params: { id: result.pipeline_run_id } })
+        return
+      }
       toast({ title: 'Run started', description: 'Opening it now.', tone: 'success' })
       void navigate({ to: '/runs/$id', params: { id: result.run_id } })
     } catch (err) {

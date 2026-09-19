@@ -268,6 +268,12 @@ func decodeOptionalJSON(r *http.Request, dst any) error {
 	return json.Unmarshal(raw, dst)
 }
 
+// runIDDTO is the {run_id} shape every "start a run" endpoint answers
+// with. POST /schedules/{id}/run extends it (see scheduleRunStartedDTO).
+type runIDDTO struct {
+	RunID string `json:"run_id"`
+}
+
 // handleTemplatesRun is POST /api/v1/templates/{id}/run: starts a run of
 // the template by hand, as the UI's "run this template now" does — origin
 // ui, and a looping template (loop_until set) loops from here exactly as
