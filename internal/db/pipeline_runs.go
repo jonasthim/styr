@@ -150,3 +150,20 @@ func (p *PipelineRuns) ListRunningOlderThan(ctx context.Context, t time.Time) ([
 	}
 	return out, rows.Err()
 }
+
+// Reopen puts a finished pipeline run back into state 'running' and clears
+// finished_at, for POST /pipeline-runs/{id}/retry-failed. Finish is the
+// wrong tool for it: it stamps finished_at on a run that has not finished,
+// which every "how long has this been going" reader then has to second
+// guess. Cost is left alone — the attempts already paid for still count.
+func (p *PipelineRuns) Reopen(ctx context.Context, id string) error {
+	res, err := p.d.ExecContext(ctx, `
+		UPDATE pipeline_runs SET state = 'running', finished_at = NULL WHERE id = ?`, id)
+	if err != nil {
+		return fmt.Errorf("reopen pipeline run: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("reopen pipeline run: %w", domain.ErrNotFound)
+	}
+	return nil
+}

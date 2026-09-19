@@ -29,7 +29,11 @@ test.describe('Schedules', () => {
     await page.goto('/schedules')
     await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible()
 
-    await page.getByRole('button', { name: 'New schedule' }).click()
+    // first(): an account with no schedules yet also shows the empty
+    // state's own "New schedule" button, and whether it has rendered by now
+    // depends on whether GET /schedules has come back. Both open the same
+    // dialog, so the header's is taken either way.
+    await page.getByRole('button', { name: 'New schedule' }).first().click()
     const dialog = page.getByRole('dialog')
     await expect(dialog.getByRole('heading', { name: 'New schedule' })).toBeVisible()
 
@@ -218,7 +222,11 @@ test.describe('Schedules against the real backend', () => {
     await page.goto('/schedules')
     await expect(page.getByRole('heading', { name: 'Schedules' })).toBeVisible()
 
-    await page.getByRole('button', { name: 'New schedule' }).click()
+    // first(): an account with no schedules yet also shows the empty
+    // state's own "New schedule" button, and whether it has rendered by now
+    // depends on whether GET /schedules has come back. Both open the same
+    // dialog, so the header's is taken either way.
+    await page.getByRole('button', { name: 'New schedule' }).first().click()
     const dialog = page.getByRole('dialog')
     await dialog.getByLabel('Name').fill(name)
     await dialog.getByRole('combobox', { name: 'Template' }).click()

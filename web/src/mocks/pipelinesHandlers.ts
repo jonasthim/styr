@@ -64,6 +64,7 @@ function seedStepSession(id: string, title: string, running: boolean, startedAt:
     worktree: '',
     branch: '',
     base_ref: '',
+    worktree_shared: false,
     diff_add: 0,
     diff_del: 0,
     created_at: startedAt,
@@ -128,11 +129,17 @@ function graphFor(pipelineId: string): PipelineGraph {
   return validatePipeline(pipeline.yaml).graph
 }
 
-function viewOf(run: PipelineRun): PipelineRunView {
+/** GET /pipeline-runs/{id}'s body. `pipeline` is always present (the real
+ * handler answers 404 rather than a view without it) and every step carries
+ * the Run summary of its attempt, null until one has started - the shape of
+ * internal/api's pipelineRunViewDTO. */
+function viewOf(run: PipelineRun, pipeline: Pipeline): PipelineRunView {
   return {
     run,
-    pipeline: pipelines.find((p) => p.id === run.pipeline_id) ?? null,
-    steps: stepRuns.filter((s) => s.pipeline_run_id === run.id),
+    pipeline,
+    steps: stepRuns
+      .filter((s) => s.pipeline_run_id === run.id)
+      .map((step) => ({ ...step, run: runs.find((r) => r.id === step.run_id) ?? null })),
     graph: graphFor(run.pipeline_id),
   }
 }
@@ -163,6 +170,58 @@ function startStep(pipelineRunId: string, stepId: string, attempt: number, item 
   stepRuns.push(step)
   seedStepRun(step, item ? `${stepId}: ${item}` : stepId)
   return step
+}
+
+/** Creates a pipeline run and its first level of step runs - what POST
+ * /pipelines/{id}/start does, and what a trigger delivery or a schedule
+ * firing does on the real backend (internal/pipelines' Executor.Start).
+ * Exported so ./schedulesHandlers can fire a pipeline schedule without
+ * duplicating the fan-out rules. */
+export function startPipelineRun(
+  pipeline: Pipeline,
+  origin: string,
+  originRef: string,
+  input: Record<string, unknown>,
+): PipelineRun {
+  const graph = validatePipeline(pipeline.yaml).graph
+  const run: PipelineRun = {
+    id: nextId('prun'),
+    pipeline_id: pipeline.id,
+    origin,
+    origin_ref: originRef,
+    input,
+    state: 'running',
+    started_at: iso(0),
+    finished_at: null,
+    cost_usd: 0,
+  }
+  pipelineRuns.unshift(run)
+
+  // Every node starts pending; the ones with no dependency start running
+  // straight away, which is what `advance` does on the real executor's
+  // first pass.
+  const hasDependency = new Set(graph.edges.map((e) => e.to))
+  for (const node of graph.nodes) {
+    if (hasDependency.has(node.id)) {
+      stepRuns.push({
+        id: nextId('step'),
+        pipeline_run_id: run.id,
+        step_id: node.id,
+        index_in_fanout: 0,
+        item: '',
+        run_id: null,
+        attempt: 1,
+        state: 'pending',
+        report: null,
+        started_at: null,
+        finished_at: null,
+        worktree: '',
+      })
+    } else {
+      startStep(run.id, node.id, 1)
+    }
+  }
+  return run
 }
 
 // --- routes ----------------------------------------------------------------
@@ -252,45 +311,7 @@ export const pipelinesHandlers = [
     const pipeline = pipelines.find((p) => p.id === params.id)
     if (!pipeline) return HttpResponse.json(errorBody('not_found', 'No such pipeline.'), { status: 404 })
     const body = (await request.json().catch(() => ({}))) as { input?: Record<string, unknown> }
-    const graph = validatePipeline(pipeline.yaml).graph
-    const run: PipelineRun = {
-      id: nextId('prun'),
-      pipeline_id: pipeline.id,
-      origin: 'ui',
-      origin_ref: '',
-      input: body.input ?? {},
-      state: 'running',
-      started_at: iso(0),
-      finished_at: null,
-      cost_usd: 0,
-    }
-    pipelineRuns.unshift(run)
-
-    // Every node starts pending; the ones with no dependency start running
-    // straight away, which is what `advance` does on the real executor's
-    // first pass.
-    const hasDependency = new Set(graph.edges.map((e) => e.to))
-    for (const node of graph.nodes) {
-      if (hasDependency.has(node.id)) {
-        stepRuns.push({
-          id: nextId('step'),
-          pipeline_run_id: run.id,
-          step_id: node.id,
-          index_in_fanout: 0,
-          item: '',
-          run_id: null,
-          attempt: 1,
-          state: 'pending',
-          report: null,
-          started_at: null,
-          finished_at: null,
-          worktree: '',
-        })
-      } else {
-        startStep(run.id, node.id, 1)
-      }
-    }
-
+    const run = startPipelineRun(pipeline, 'ui', '', body.input ?? {})
     const result: PipelineStartResult = { pipeline_run_id: run.id }
     return HttpResponse.json(result, { status: 202 })
   }),
@@ -308,8 +329,9 @@ export const pipelinesHandlers = [
 
   http.get('/api/v1/pipeline-runs/:id', ({ params }) => {
     const run = pipelineRuns.find((r) => r.id === params.id)
-    if (!run) return HttpResponse.json(errorBody('not_found', 'No such pipeline run.'), { status: 404 })
-    return HttpResponse.json(viewOf(run))
+    const pipeline = run ? pipelines.find((p) => p.id === run.pipeline_id) : undefined
+    if (!run || !pipeline) return HttpResponse.json(errorBody('not_found', 'No such pipeline run.'), { status: 404 })
+    return HttpResponse.json(viewOf(run, pipeline))
   }),
 
   http.post('/api/v1/pipeline-runs/:id/cancel', ({ params }) => {

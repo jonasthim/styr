@@ -112,8 +112,17 @@ function applyWorkspaceState(client: QueryClient, message: BusMessage) {
 
 /** `pipeline.state` carries no session either: it names a pipeline run and,
  * for a step's own move, the step run inside it. The run page reads
- * ['pipeline-run', id], so the frame patches that view in place rather than
- * refetching the whole graph on every step. */
+ * ['pipeline-run', id], so the frame moves the node on screen immediately
+ * rather than waiting a poll for the graph to redraw.
+ *
+ * The frame carries the state and nothing else, though - not the report a
+ * step just produced, the run it started, its worktree or the cost the
+ * pipeline has run up - and the run page's own poll stops the moment the
+ * run leaves "running". So the patch is followed by a refetch of the same
+ * view: the paint is instant, and the rows behind it are the server's.
+ * A step run created after the last fetch (a retry's attempt, or a
+ * fan-out's items) has no row to patch at all, and only the refetch brings
+ * it in. */
 function applyPipelineState(client: QueryClient, message: BusMessage) {
   const patch = message.payload as PipelineStatePayload
   if (!patch?.pipeline_run_id) return
@@ -129,8 +138,8 @@ function applyPipelineState(client: QueryClient, message: BusMessage) {
     }
     return { ...prev, run: { ...prev.run, state: patch.state as PipelineRunState } }
   })
-  // A step-level frame only moves one node; a run-level one changes which
-  // runs the list shows, so that cache is refetched rather than guessed at.
+  void client.invalidateQueries({ queryKey: ['pipeline-run', patch.pipeline_run_id] })
+  // A run-level frame also changes which runs the list shows.
   if (!patch.step_run_id) void client.invalidateQueries({ queryKey: ['pipeline-runs'] })
 }
 

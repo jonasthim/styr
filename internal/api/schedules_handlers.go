@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 
 	"github.com/jonasthim/styr/internal/domain"
+	"github.com/jonasthim/styr/internal/schedules"
 )
 
 // defaultScheduleFiringsLimit is used for GET /schedules/{id}/firings when
@@ -159,8 +161,15 @@ func handleSchedulesDelete(d *Deps) http.HandlerFunc {
 	}
 }
 
-type runIDDTO struct {
-	RunID string `json:"run_id"`
+// scheduleRunStartedDTO is POST /api/v1/schedules/{id}/run's 202 body.
+// RunID is a run id for a schedule that starts a template, and the
+// "pr:<pipeline run id>" reference for one that starts a pipeline (the
+// same form its firings record). PipelineRunID repeats that id unprefixed
+// so the UI can link straight to the pipeline run page — a pipeline run is
+// not a run row, so /runs/{that id} would 404.
+type scheduleRunStartedDTO struct {
+	RunID         string `json:"run_id"`
+	PipelineRunID string `json:"pipeline_run_id,omitempty"`
 }
 
 // handleSchedulesRun is POST /api/v1/schedules/{id}/run: fires the
@@ -172,7 +181,11 @@ func handleSchedulesRun(d *Deps) http.HandlerFunc {
 			WriteError(w, err)
 			return
 		}
-		WriteJSON(w, http.StatusAccepted, runIDDTO{RunID: run.ID})
+		out := scheduleRunStartedDTO{RunID: run.ID}
+		if id, isPipeline := strings.CutPrefix(run.ID, schedules.PipelineRunRefPrefix); isPipeline {
+			out.PipelineRunID = id
+		}
+		WriteJSON(w, http.StatusAccepted, out)
 	}
 }
 

@@ -119,6 +119,11 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Deliveries: deliveriesRepo,
 		Loops:      loopsRepo,
 		Events:     eventsRepo,
+		// A run a pipeline step started resolves back to that step, its
+		// pipeline run and its pipeline, for GET /runs/{id}'s view.
+		StepRuns:     stepRunsRepo,
+		PipelineRuns: pipelineRunsRepo,
+		Pipelines:    pipelinesRepo,
 	}, svc, bus, notifier, box, cfg.BaseURL, runTimeout, slog.Default())
 	triggersSvc := triggers.New(triggers.Repos{
 		Templates:  templatesRepo,
@@ -147,7 +152,10 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 		Workspaces:   workspacesRepo,
 	}, runsEngine, svc, sessionsRepo, bus, pipelines.NewTemplateIndex(templatesRepo), nil, slog.Default())
 	triggersSvc = triggersSvc.WithPipelines(pipelinesExec)
-	schedulesSvc = schedulesSvc.WithPipelines(pipelinesExec)
+	// WithPipelineRuns as well as WithPipelines: the scheduler needs the
+	// executor to start a pipeline, and to read the "pr:" reference back
+	// when deciding whether the previous firing is still going.
+	schedulesSvc = schedulesSvc.WithPipelines(pipelinesExec).WithPipelineRuns(pipelinesExec)
 
 	statsSvc := stats.New(d, sessionsRepo, users, slog.Default())
 

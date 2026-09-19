@@ -27,6 +27,8 @@ type runViewOut struct {
 	Delivery *deliveryOut `json:"delivery"`
 	Template *templateOut `json:"template"`
 	Loop     *loopOut     `json:"loop"`
+	Step     *stepRunOut  `json:"step"`
+	Pipeline *pipelineOut `json:"pipeline"`
 }
 
 // sessionOut mirrors the fields runs_handlers_test.go asserts on; the full
@@ -121,6 +123,45 @@ func TestRunsGet_IncludesStepRunID(t *testing.T) {
 	}
 	if out.Run.StepRunID == nil || *out.Run.StepRunID != "step-1" {
 		t.Fatalf("run.step_run_id = %v, want step-1", out.Run.StepRunID)
+	}
+}
+
+// A run a pipeline step started carries the step and the pipeline it
+// belongs to, so the run page can say which graph it is part of and link
+// back to it without a second round trip.
+func TestRunsGet_IncludesStepAndPipeline(t *testing.T) {
+	e := newEnv(t)
+	stepRunID := "step-1"
+	e.runs.GetFn = func(context.Context, string) (domain.RunView, error) {
+		return domain.RunView{
+			Run:      domain.Run{ID: "run-4", Origin: "pipeline", StepRunID: &stepRunID, Outcome: domain.RunSuccess},
+			Step:     &domain.StepRun{ID: stepRunID, PipelineRunID: "prun-1", StepID: "triage", Attempt: 1, State: domain.StepRunSuccess},
+			Pipeline: &domain.Pipeline{ID: "pl-1", Name: "fix-ci", WorkspaceID: "ws-1"},
+		}, nil
+	}
+	var out runViewOut
+	status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-4", nil, &out)
+	if status != http.StatusOK {
+		t.Fatalf("GET /runs/run-4 = %d, want 200", status)
+	}
+	if out.Step == nil || out.Step.PipelineRunID != "prun-1" || out.Step.StepID != "triage" {
+		t.Fatalf("step = %+v, want the pipeline step run", out.Step)
+	}
+	if out.Pipeline == nil || out.Pipeline.Name != "fix-ci" {
+		t.Fatalf("pipeline = %+v, want fix-ci", out.Pipeline)
+	}
+}
+
+// Every other run has both fields explicitly null rather than missing.
+func TestRunsGet_NoStepOutsideAPipeline(t *testing.T) {
+	e := newEnv(t)
+	e.runs.GetFn = func(context.Context, string) (domain.RunView, error) { return sampleRunView(), nil }
+	var out runViewOut
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/runs/run-1", nil, &out); status != http.StatusOK {
+		t.Fatalf("GET /runs/run-1 = %d, want 200", status)
+	}
+	if out.Step != nil || out.Pipeline != nil {
+		t.Fatalf("step = %+v, pipeline = %+v, want both null", out.Step, out.Pipeline)
 	}
 }
 

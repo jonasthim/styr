@@ -14,6 +14,31 @@ import { useToast } from '../../hooks/useToast'
 import { Button, Dialog, DialogContent, Skeleton } from '../ui'
 import { StatusChip } from './chips'
 
+/** internal/triggers' PipelineRunRefPrefix: a delivery's run_id is a run
+ * id, or a pipeline run id behind this prefix - one nullable column carries
+ * both, so the link has to know which page it is opening. */
+const PIPELINE_RUN_REF_PREFIX = 'pr:'
+
+function RunLink({ runId }: { runId: string }) {
+  const className = 'text-[12px] text-accent no-underline hover:underline'
+  if (runId.startsWith(PIPELINE_RUN_REF_PREFIX)) {
+    return (
+      <Link
+        to="/pipeline-runs/$id"
+        params={{ id: runId.slice(PIPELINE_RUN_REF_PREFIX.length) }}
+        className={className}
+      >
+        View pipeline run
+      </Link>
+    )
+  }
+  return (
+    <Link to="/runs/$id" params={{ id: runId }} className={className}>
+      View run
+    </Link>
+  )
+}
+
 function ReplayButton({ deliveryId }: { deliveryId: string }) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
@@ -27,7 +52,11 @@ function ReplayButton({ deliveryId }: { deliveryId: string }) {
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       toast({
         title: 'Replay started',
-        description: result.run_id ? 'A new run is on the Runs page.' : undefined,
+        description: result.run_id?.startsWith(PIPELINE_RUN_REF_PREFIX)
+          ? 'A new pipeline run is under way.'
+          : result.run_id
+            ? 'A new run is on the Runs page.'
+            : undefined,
         tone: 'success',
       })
     } catch (err) {
@@ -87,11 +116,7 @@ export function DeliveriesDialog({
                   <span className="min-w-0 truncate font-mono text-[11px] text-fg-muted">{delivery.dedupe_key}</span>
                 )}
                 <div className="ml-auto flex items-center gap-2">
-                  {delivery.run_id && (
-                    <Link to="/runs/$id" params={{ id: delivery.run_id }} className="text-[12px] text-accent no-underline hover:underline">
-                      View run
-                    </Link>
-                  )}
+                  {delivery.run_id && <RunLink runId={delivery.run_id} />}
                   <ReplayButton deliveryId={delivery.id} />
                 </div>
               </div>

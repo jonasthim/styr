@@ -673,6 +673,7 @@ export const handlers = [
       worktree: '',
       branch: '',
       base_ref: '',
+      worktree_shared: false,
       diff_add: 0,
       diff_del: 0,
       created_at: iso(0),

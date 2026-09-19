@@ -84,12 +84,14 @@ let realWorkspaceId: string | null = null
 // for a checkout that already exists on the machine - exactly what this repo
 // root is from the running backend's point of view - and the dev account
 // used throughout the suite is always the admin.
+export const REAL_WORKSPACE_NAME = 'styr-e2e'
+
 export async function ensureRealWorkspace(page: Page): Promise<string> {
   if (realWorkspaceId) return realWorkspaceId
   const repoRoot = path.resolve(process.cwd(), '..')
   const res = await page.request.post('/api/v1/workspaces', {
     headers: HEADERS,
-    data: { name: 'styr-e2e', source: 'path', path: repoRoot, default_profile_id: REAL_PROFILE_ID },
+    data: { name: REAL_WORKSPACE_NAME, source: 'path', path: repoRoot, default_profile_id: REAL_PROFILE_ID },
   })
   if (res.status() === 201) {
     const ws = (await res.json()) as MinimalWorkspace
@@ -103,7 +105,7 @@ export async function ensureRealWorkspace(page: Page): Promise<string> {
   const list = await page.request.get('/api/v1/workspaces', { headers: HEADERS })
   await ok(list, 'GET /workspaces')
   const workspaces = (await list.json()) as Array<{ id: string; name: string }>
-  const existing = workspaces.find((w) => w.name === 'styr-e2e')
+  const existing = workspaces.find((w) => w.name === REAL_WORKSPACE_NAME)
   if (!existing) throw new Error(`seed: could not create or find the e2e workspace: ${res.status()} ${await res.text()}`)
   realWorkspaceId = existing.id
   return realWorkspaceId
@@ -462,19 +464,25 @@ function createWorktreeRepo(): string {
   return dir
 }
 
-let realWorktreeWorkspaceId: string | null = null
+let realWorktreeWorkspace: { id: string; name: string } | null = null
 
-// ensureRealWorktreeWorkspace (idempotent, cached for the worker) registers
-// the throwaway repo above as a "path" workspace with worktrees and
-// auto-checkpointing on, so every session created in it runs in its own git
-// worktree and leaves a checkpoint commit after each turn. Source "path" is
-// admin-only, and the dev account the suite runs as is the admin.
-export async function ensureRealWorktreeWorkspace(page: Page): Promise<string> {
-  if (realWorktreeWorkspaceId) return realWorktreeWorkspaceId
+// ensureRealWorktreeWorkspaceRef (idempotent, cached for the worker)
+// registers the throwaway repo above as a "path" workspace with worktrees
+// and auto-checkpointing on, so every session created in it runs in its own
+// git worktree and leaves a checkpoint commit after each turn. Source "path"
+// is admin-only, and the dev account the suite runs as is the admin.
+//
+// The name comes back as well as the id because a pipeline definition names
+// its workspace by name, not by id, and the validator rejects a mismatch
+// (internal/pipelines' Executor.Validate) - and this one's name carries a
+// timestamp, so it cannot be a constant.
+export async function ensureRealWorktreeWorkspaceRef(page: Page): Promise<{ id: string; name: string }> {
+  if (realWorktreeWorkspace) return realWorktreeWorkspace
+  const name = `styr-e2e-worktrees-${Date.now()}`
   const res = await page.request.post('/api/v1/workspaces', {
     headers: HEADERS,
     data: {
-      name: `styr-e2e-worktrees-${Date.now()}`,
+      name,
       source: 'path',
       path: createWorktreeRepo(),
       default_profile_id: REAL_PROFILE_ID,
@@ -484,8 +492,12 @@ export async function ensureRealWorktreeWorkspace(page: Page): Promise<string> {
   })
   await ok(res, 'POST /workspaces (worktrees)')
   const ws = (await res.json()) as MinimalWorkspace
-  realWorktreeWorkspaceId = ws.id
-  return realWorktreeWorkspaceId
+  realWorktreeWorkspace = { id: ws.id, name }
+  return realWorktreeWorkspace
+}
+
+export async function ensureRealWorktreeWorkspace(page: Page): Promise<string> {
+  return (await ensureRealWorktreeWorkspaceRef(page)).id
 }
 
 export interface WorktreeSession {
@@ -664,4 +676,173 @@ export async function ensureRealLoopTemplate(page: Page): Promise<string> {
     shared: true,
   })
   return realLoopTemplateId
+}
+
+// --- pipelines (v0.5) ------------------------------------------------------
+// A pipeline step is an unattended run of a template, so everything below is
+// built out of the same two pieces the v0.4 helpers use: a shared template
+// whose prompt carries a fake-claude.sh marker, and the service token those
+// runs need. What is new is that a pipeline definition names its workspace
+// by *name* and its steps' templates by name, and the validator rejects a
+// definition whose workspace does not match or whose template does not exist
+// in it (internal/pipelines' Executor.Validate) - so the names below are the
+// contract between these helpers and the yaml the specs write.
+
+/** Fixture 06's structured_output carries this phrase in `diagnosis`. A step
+ * that renders an earlier step's diagnosis into its own prompt puts it in
+ * that step's transcript, which is how the real-mode spec proves the report
+ * really flowed from one agent to the next. */
+export const FIXTURE_06_DIAGNOSIS_PHRASE = 'above the alert threshold'
+
+/** Replays fixture 06: a structured report with severity, diagnosis and
+ * confidence. */
+export const PIPELINE_REPORT_TEMPLATE_NAME = 'Pipeline step (reports)'
+/** Renders `.note` - what a `with:` entry feeds it - into its own prompt. */
+export const PIPELINE_NOTE_TEMPLATE_NAME = 'Pipeline step (reads a note)'
+/** Replays fixture 05, whose result is an interrupted turn flagged
+ * is_error, so the run behind the step finishes `failed`. */
+export const PIPELINE_FAILING_TEMPLATE_NAME = 'Pipeline step (fails)'
+/** The two worktree steps: each writes one file into the worktree its
+ * session runs in, so a `worktree: shared` pair leaves both files in one. */
+export const PIPELINE_WRITE_ONE_TEMPLATE_NAME = 'Pipeline step (writes step1)'
+export const PIPELINE_WRITE_TWO_TEMPLATE_NAME = 'Pipeline step (writes step2)'
+
+/** The files those two steps write, relative to their worktree. */
+export const PIPELINE_WORKTREE_FILE_ONE = 'notes/step1.txt'
+export const PIPELINE_WORKTREE_FILE_TWO = 'notes/step2.txt'
+
+let realPipelineTemplates: Record<string, string> | null = null
+
+/** ensureRealPipelineTemplates (idempotent): the three templates the
+ * repo-workspace pipelines below are built from, keyed by name. */
+export async function ensureRealPipelineTemplates(page: Page): Promise<Record<string, string>> {
+  if (realPipelineTemplates) return realPipelineTemplates
+  await ensureRealServiceToken(page)
+  const workspaceId = await ensureRealWorkspace(page)
+  const base = {
+    workspace_id: workspaceId,
+    profile_id: 'investigate',
+    system_prompt: 'You are checking a host read-only. Never change state.',
+    loop_until: '',
+    loop_max: 0,
+    shared: true,
+  }
+  const entries: Array<[string, TemplateBody]> = [
+    [
+      PIPELINE_REPORT_TEMPLATE_NAME,
+      {
+        ...base,
+        name: PIPELINE_REPORT_TEMPLATE_NAME,
+        title_template: 'Pipeline report step',
+        prompt_template: FIXTURE_06_PROMPT,
+        report_schema: FIXTURE_06_REPORT_SCHEMA,
+      },
+    ],
+    [
+      PIPELINE_NOTE_TEMPLATE_NAME,
+      {
+        ...base,
+        name: PIPELINE_NOTE_TEMPLATE_NAME,
+        title_template: 'Pipeline note step',
+        // `.note` is whatever the step's `with:` rendered - for the two-step
+        // pipeline below, the first step's own diagnosis.
+        prompt_template: '[fixture:06] Earlier diagnosis: {{ .note }}',
+        report_schema: FIXTURE_06_REPORT_SCHEMA,
+      },
+    ],
+    [
+      PIPELINE_FAILING_TEMPLATE_NAME,
+      {
+        ...base,
+        name: PIPELINE_FAILING_TEMPLATE_NAME,
+        title_template: 'Pipeline failing step',
+        prompt_template: '[fixture:05] Count slowly from 1 to 300, one number per line, no other text.',
+        report_schema: '',
+      },
+    ],
+  ]
+  const resolved: Record<string, string> = {}
+  for (const [name, body] of entries) {
+    resolved[name] = await ensureRealTemplate(page, body)
+  }
+  realPipelineTemplates = resolved
+  return resolved
+}
+
+let realWorktreePipelineTemplates: Record<string, string> | null = null
+
+/** ensureRealWorktreePipelineTemplates (idempotent): the two templates the
+ * shared-worktree pipeline is built from, on the worktree-enabled
+ * workspace. Each prompt carries fake-claude.sh's "[write:path:text]"
+ * marker, which writes the file into the fake's cwd - the session's own
+ * worktree - before the turn replays. */
+export async function ensureRealWorktreePipelineTemplates(page: Page): Promise<Record<string, string>> {
+  if (realWorktreePipelineTemplates) return realWorktreePipelineTemplates
+  await ensureRealServiceToken(page)
+  const { id: workspaceId } = await ensureRealWorktreeWorkspaceRef(page)
+  const base = {
+    workspace_id: workspaceId,
+    profile_id: 'investigate',
+    system_prompt: 'You are writing one note file and reporting.',
+    report_schema: FIXTURE_06_REPORT_SCHEMA,
+    loop_until: '',
+    loop_max: 0,
+    shared: true,
+  }
+  const resolved: Record<string, string> = {
+    [PIPELINE_WRITE_ONE_TEMPLATE_NAME]: await ensureRealTemplate(page, {
+      ...base,
+      name: PIPELINE_WRITE_ONE_TEMPLATE_NAME,
+      title_template: 'Write step1',
+      prompt_template: `[write:${PIPELINE_WORKTREE_FILE_ONE}:hello][fixture:06] Write the first note.`,
+    }),
+    [PIPELINE_WRITE_TWO_TEMPLATE_NAME]: await ensureRealTemplate(page, {
+      ...base,
+      name: PIPELINE_WRITE_TWO_TEMPLATE_NAME,
+      title_template: 'Write step2',
+      prompt_template: `[write:${PIPELINE_WORKTREE_FILE_TWO}:world][fixture:06] Write the second note.`,
+    }),
+  }
+  realWorktreePipelineTemplates = resolved
+  return resolved
+}
+
+export interface RealPipeline {
+  id: string
+  name: string
+}
+
+/** Creates a shared pipeline over the API, for the specs that need one to
+ * exist without driving the editor to make it. The definition is validated
+ * server-side, so a 422 here means the yaml is wrong, not the test. */
+export async function createRealPipeline(page: Page, name: string, workspaceId: string, yaml: string): Promise<RealPipeline> {
+  const res = await page.request.post('/api/v1/pipelines', {
+    headers: HEADERS,
+    data: { name, workspace_id: workspaceId, yaml, shared: true },
+  })
+  await ok(res, 'POST /pipelines')
+  const created = (await res.json()) as { id: string; name: string }
+  return created
+}
+
+interface MinimalPipelineRunView {
+  run: { id: string; state: string }
+  steps: Array<{ step_id: string; state: string; attempt: number; run_id: string | null }>
+}
+
+/** Polls GET /pipeline-runs/{id} until the run leaves "running". A pipeline
+ * step is a whole session start plus a fixture replay, and a fan-out or a
+ * retry is several of them in a row, so the default budget is generous. */
+export async function waitForPipelineRun(page: Page, id: string, timeoutMs = 90_000): Promise<MinimalPipelineRunView> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const res = await page.request.get(`/api/v1/pipeline-runs/${id}`, { headers: HEADERS })
+    await ok(res, `GET /pipeline-runs/${id}`)
+    const view = (await res.json()) as MinimalPipelineRunView
+    if (view.run.state !== 'running') return view
+    if (Date.now() > deadline) {
+      throw new Error(`seed: pipeline run ${id} was still running after ${timeoutMs}ms`)
+    }
+    await new Promise((r) => setTimeout(r, 300))
+  }
 }

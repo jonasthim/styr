@@ -21,16 +21,20 @@ import type {
   Loop,
   LoopState,
   LoopView,
+  Pipeline,
+  PipelineRun,
   Run,
   RunStartedResult,
   Schedule,
   ScheduleFiring,
+  ScheduleRunResult,
   Session,
   StructuredReport,
 } from '../api/types'
 import { DEV_USER_ID, sessions } from './sessionsState'
 import { LOOP_ID, LOOP_SESSION_ID, TEMPLATE_LOOP_ID, loops } from './loopsState'
 import { pipelines } from './pipelinesState'
+import { startPipelineRun } from './pipelinesHandlers'
 import { runs, startRun, templates } from './triggersHandlers'
 import { previewCron, parseCron, nextRuns } from './cron'
 
@@ -108,6 +112,7 @@ sessions.push({
   worktree: '',
   branch: '',
   base_ref: '',
+  worktree_shared: false,
   diff_add: 12,
   diff_del: 4,
   created_at: iso(34),
@@ -412,6 +417,28 @@ function fireSchedule(schedule: Schedule): Run {
   return run
 }
 
+/** internal/schedules' PipelineRunRefPrefix: a firing's run_id is a run id,
+ * or a pipeline run id behind this prefix. */
+const PIPELINE_RUN_REF_PREFIX = 'pr:'
+
+/** "Run now" on a schedule that starts a pipeline: the same bookkeeping as
+ * fireSchedule, against a pipeline run rather than a run. */
+function firePipelineSchedule(schedule: Schedule, pipeline: Pipeline): PipelineRun {
+  const run = startPipelineRun(pipeline, 'schedule', schedule.id, {})
+  firings.unshift({
+    id: nextId('fire'),
+    schedule_id: schedule.id,
+    fired_at: iso(0),
+    status: 'started',
+    reason: '',
+    run_id: `${PIPELINE_RUN_REF_PREFIX}${run.id}`,
+  })
+  schedule.last_run_at = run.started_at
+  schedule.last_outcome = 'started'
+  schedule.updated_at = iso(0)
+  return run
+}
+
 export const schedulesHandlers = [
   // --- schedules ------------------------------------------------------------
   http.get('/api/v1/schedules', () => HttpResponse.json(schedules)),
@@ -501,7 +528,17 @@ export const schedulesHandlers = [
   http.post('/api/v1/schedules/:id/run', ({ params }) => {
     const schedule = schedules.find((s) => s.id === params.id)
     if (!schedule) return HttpResponse.json(errorBody('not_found', 'schedule not found'), { status: 404 })
-    const result: RunStartedResult = { run_id: fireSchedule(schedule).id }
+    // A schedule that names a pipeline starts a pipeline run, whose id is
+    // recorded (and answered) behind the "pr:" prefix: one nullable column
+    // carries both kinds of reference (internal/schedules' tick.go).
+    if (schedule.pipeline_id) {
+      const pipeline = pipelines.find((p) => p.id === schedule.pipeline_id)
+      if (!pipeline) return HttpResponse.json(errorBody('not_found', 'pipeline not found'), { status: 404 })
+      const run = firePipelineSchedule(schedule, pipeline)
+      const result: ScheduleRunResult = { run_id: `${PIPELINE_RUN_REF_PREFIX}${run.id}`, pipeline_run_id: run.id }
+      return HttpResponse.json(result, { status: 202 })
+    }
+    const result: ScheduleRunResult = { run_id: fireSchedule(schedule).id }
     return HttpResponse.json(result, { status: 202 })
   }),
 

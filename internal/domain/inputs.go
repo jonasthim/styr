@@ -65,6 +65,12 @@ type RunView struct {
 	// Loop is the loop this run is an iteration of, nil for an ordinary
 	// one-shot run (or when the loop row could not be read).
 	Loop *Loop
+	// Step is the pipeline step run this run is one attempt of, and
+	// Pipeline the pipeline that step belongs to. Both nil for a run
+	// outside a pipeline; Pipeline is also nil when the step is known but
+	// its pipeline row could not be read.
+	Step     *StepRun
+	Pipeline *Pipeline
 }
 
 // Inbound is one inbound call to POST /hooks/{slug}. It carries transport

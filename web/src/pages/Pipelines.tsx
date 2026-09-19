@@ -12,7 +12,7 @@ import { q } from '../api/queries'
 import type { Pipeline, PipelineRun } from '../api/types'
 import { StartPipelineDialog } from '../components/pipelines/StartPipelineDialog'
 import { RUN_STATE_LABEL, RUN_STATE_TONE } from '../components/pipelines/stepState'
-import { pipelineName, stepCount } from '../components/pipelines/yamlSummary'
+import { pipelineName, starterYaml, stepCount } from '../components/pipelines/yamlSummary'
 import { relativeTime } from '../components/inbox/format'
 import { useToast } from '../hooks/useToast'
 import { Badge, Button, EmptyState, PageHeader, Skeleton, TableFrame, Td, Th, Tr } from '../components/ui'
@@ -37,6 +37,9 @@ export function Pipelines() {
   const { toast } = useToast()
   const pipelines = useQuery(q.pipelines())
   const workspaces = useQuery(q.workspaces())
+  // Only for the skeleton below: a new definition has to name a template
+  // that really exists in its workspace, or POST /pipelines rejects it.
+  const templates = useQuery(q.templates())
   const lastRuns = useLastRuns()
   const [startTarget, setStartTarget] = useState<Pipeline | null>(null)
   const [creating, setCreating] = useState(false)
@@ -51,9 +54,15 @@ export function Pipelines() {
   async function handleNewFromTemplate() {
     setCreating(true)
     try {
+      const workspace = workspaces.data?.[0]
+      const template = templates.data?.find((t) => t.workspace_id === workspace?.id)
       const pipeline = await api<Pipeline>('/api/v1/pipelines', {
         method: 'POST',
-        json: { name: 'new-pipeline', workspace_id: workspaces.data?.[0]?.id ?? 'w1' },
+        json: {
+          name: 'new-pipeline',
+          workspace_id: workspace?.id ?? 'w1',
+          yaml: starterYaml(workspace?.name ?? 'styr', template?.name),
+        },
       })
       queryClient.setQueryData<Pipeline[]>(['pipelines'], (prev) => (prev ? [pipeline, ...prev] : [pipeline]))
       void navigate({ to: '/pipelines/$id', params: { id: pipeline.id } })

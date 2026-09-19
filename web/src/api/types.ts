@@ -84,18 +84,14 @@ export type TemplateRenderResult = JSONResponse<'renderTemplate', 200>
 
 export type TriggerKind = Schemas['Trigger']['kind']
 
-/** Since T54 a trigger runs either a template or a pipeline: `pipeline_id`
- * is the alternative to `template_id` (exactly one is set; the unused one is
- * '' / null). Written as an intersection because docs/openapi.yaml only
- * learns about the column in T57. */
-export type Trigger = Schemas['Trigger'] & {
-  pipeline_id: string | null
-}
+/** Since v0.5 a trigger runs either a template or a pipeline: `pipeline_id`
+ * is the alternative to `template_id`. Exactly one is set, and the unused
+ * one is '' (template_id, a plain Go string) or null (pipeline_id). */
+export type Trigger = Schemas['Trigger']
 
 /** Only the POST /triggers response carries the plaintext secret - it is
- * never shown again after this. `trigger` is re-stated so it carries T54's
- * `pipeline_id`, which docs/openapi.yaml only learns about in T57. */
-export type TriggerCreateResult = Omit<JSONResponse<'createTrigger', 201>, 'trigger'> & { trigger: Trigger }
+ * never shown again after this. */
+export type TriggerCreateResult = JSONResponse<'createTrigger', 201>
 
 export type RotateSecretResult = JSONResponse<'rotateTriggerSecret', 200>
 
@@ -120,9 +116,6 @@ export type Run = Omit<Schemas['Run'], 'report'> & {
    * template's report_schema asked for - see StructuredReport for the one
    * seeded for Grafana. */
   report: unknown
-  /** Set on every run a pipeline step started (T54); null otherwise. The
-   * schema learns about it in T57. */
-  step_run_id: string | null
 }
 
 /** The report_schema seeded for the Grafana template (plan, "Template
@@ -139,15 +132,16 @@ export interface StructuredReport {
 
 /** GET /runs and GET /runs/{id} both answer with runs in this shape: the run
  * row plus the session it started, the delivery and template it came from,
- * and the loop it is an iteration of - each null when that record is
- * unavailable (the template was since deleted, the run belongs to no loop). */
-export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery'> & {
+ * the loop it is an iteration of, and the pipeline step it is one attempt
+ * of together with that step's pipeline - each null when that record is
+ * unavailable (the template was since deleted, the run belongs to no loop
+ * or to no pipeline). */
+export type RunView = Omit<Schemas['RunView'], 'run' | 'delivery' | 'step'> & {
   run: Run
   delivery: Delivery | null
-  /** The pipeline step this run is (T54) and the pipeline it belongs to;
-   * both null for a run outside a pipeline. */
+  /** The pipeline step this run is one attempt of; null for a run outside a
+   * pipeline, and paired with `pipeline` (also null then). */
   step: StepRun | null
-  pipeline: Pipeline | null
 }
 
 export type NotificationChannelKind = Schemas['NotificationChannel']['kind']
@@ -216,19 +210,11 @@ export type PullRequestResult = JSONResponse<'createSessionPR', 200>
  *
  * `last_outcome` is the scheduler's own word for how the last firing went
  * ('' before the first one) - see components/schedules/lastOutcome.ts. */
-export type Schedule = Omit<Schemas['Schedule'], 'vars'> & {
-  vars: Record<string, unknown>
-  /** The pipeline this schedule starts, or null when it runs a template (T54). */
-  pipeline_id: string | null
-}
+export type Schedule = Omit<Schemas['Schedule'], 'vars'> & { vars: Record<string, unknown> }
 
 /** POST/PATCH /schedules(/{id}). PATCH replaces the mutable fields rather
  * than merging, so the UI always sends the whole row back. */
-export type ScheduleInput = Omit<Schemas['ScheduleInput'], 'vars'> & {
-  vars?: Record<string, unknown>
-  /** Exactly one of template_id / pipeline_id is set (T54). */
-  pipeline_id?: string | null
-}
+export type ScheduleInput = Omit<Schemas['ScheduleInput'], 'vars'> & { vars?: Record<string, unknown> }
 
 /** `skipped_overlap` is the scheduler declining to start a second run while
  * the previous one is still going; `failed` carries the reason in `reason`. */
@@ -241,9 +227,14 @@ export type ScheduleFiring = Schemas['ScheduleFiring']
  * 422 with code `invalid_cron`, not a field on this body. */
 export type CronPreview = Schemas['SchedulePreview']
 
-/** POST /schedules/{id}/run and POST /templates/{id}/run both answer 202
- * with the run they started. */
+/** POST /templates/{id}/run answers 202 with the run it started. */
 export type RunStartedResult = Schemas['RunID']
+
+/** POST /schedules/{id}/run answers 202 with the same `run_id` plus, for a
+ * schedule that starts a pipeline, the bare pipeline run id behind the
+ * "pr:" reference `run_id` carries - so the UI can open the pipeline run
+ * page instead of a run page that has nothing to show. */
+export type ScheduleRunResult = Schemas['ScheduleRunStarted']
 
 export type LoopState = Schemas['Loop']['state']
 
@@ -276,119 +267,76 @@ export type CostBreakdown = Schemas['NamedCost']
  * derives the dates it shows from `days` itself. */
 export type CostStats = Schemas['Costs']
 
-// --- pipelines (v0.5, T54) -------------------------------------------------
-// Hand-written like the T49 block above and for the same reason: the handlers
-// these describe land in T57 and docs/openapi.yaml only gains them then. They
-// are exactly the contract in
-// docs/superpowers/plans/2026-09-19-styr-v0.5-pipelines.md ("API"), which the
-// msw mock implements verbatim, so T58's `npm run gen:api` can replace this
-// block with re-exports without moving a field.
+// --- pipelines (v0.5) ------------------------------------------------------
+// Aliases of the generated schema like everything above: T57's handlers
+// landed with docs/openapi.yaml describing them, so T58's `npm run gen:api`
+// replaced T54's hand-written block with re-exports. Three shapes moved
+// while doing it, because the handler - not the plan's prose - is the
+// contract: a graph node's `foreach` is a boolean ("this step fans out"),
+// not the expression; `PipelineRunView.pipeline` is always present (the
+// handler fails the whole request when it cannot read it); and each entry
+// of its `steps` is a step run *plus* the run summary of its current
+// attempt. The same `Record<string, never>` overrides as everywhere above
+// apply to the two free-form JSON fields (a run's input, a step's report).
 
 /** A YAML DAG of steps, each of which runs a template. `yaml` is the whole
  * definition; the parsed shape only ever reaches the UI as a `PipelineGraph`
  * from POST /pipelines/validate. */
-export interface Pipeline {
-  id: string
-  owner_id: string | null
-  name: string
-  workspace_id: string
-  yaml: string
-  created_at: string
-  updated_at: string
-}
+export type Pipeline = Schemas['Pipeline']
 
 /** POST/PATCH /pipelines(/{id}). PATCH replaces the mutable fields rather
  * than merging, so the UI always sends the whole row back. */
-export interface PipelineInput {
-  name: string
-  workspace_id: string
-  yaml: string
-}
+export type PipelineInput = Schemas['PipelineInput']
 
 /** One node of the validated DAG: the step's id, the template it runs, its
- * worktree mode, and the `foreach` expression when it fans out ('' when it
- * does not). */
-export interface PipelineNode {
-  id: string
-  template: string
-  worktree: 'own' | 'shared'
-  foreach: string
-}
+ * worktree mode ('', 'own' or 'shared' - the handler serves the raw yaml
+ * string, so it is not narrowed to a union) and whether it fans out. */
+export type PipelineNode = Schemas['GraphNode']
 
-export interface PipelineEdge {
-  from: string
-  to: string
-}
+export type PipelineEdge = Schemas['GraphEdge']
 
-export interface PipelineGraph {
-  nodes: PipelineNode[]
-  edges: PipelineEdge[]
-}
+export type PipelineGraph = Schemas['Graph']
 
 /** One validation failure, pointing at the line of the definition it came
- * from (1-based, so it can be shown in the editor's gutter). */
-export interface PipelineError {
-  line: number
-  message: string
-}
+ * from (1-based, so it can be shown in the editor's gutter; 0 when the
+ * validator could not place it). */
+export type PipelineError = Schemas['Problem']
 
 /** POST /pipelines/validate. `graph` is whatever could be parsed even when
  * `ok` is false, so the preview keeps showing the shape while it is edited. */
-export interface PipelineValidation {
-  ok: boolean
-  errors: PipelineError[]
-  graph: PipelineGraph
-}
+export type PipelineValidation = Schemas['ValidationResult']
 
 /** POST /pipelines/{id}/start. */
-export interface PipelineStartResult {
-  pipeline_run_id: string
-}
+export type PipelineStartResult = Schemas['PipelineRunID']
 
-export type PipelineRunState = 'running' | 'success' | 'failed' | 'cancelled' | 'timeout'
+export type PipelineRunState = Schemas['PipelineRun']['state']
 
-export interface PipelineRun {
-  id: string
-  pipeline_id: string
-  origin: string
-  origin_ref: string
-  input: Record<string, unknown>
-  state: PipelineRunState
-  started_at: string
-  finished_at: string | null
-  cost_usd: number
-}
+export type PipelineRun = Omit<Schemas['PipelineRun'], 'input'> & { input: Record<string, unknown> }
 
-export type StepRunState = 'pending' | 'running' | 'success' | 'failed' | 'skipped' | 'cancelled'
+export type StepRunState = Schemas['StepRun']['state']
 
 /** One execution of one node. A fan-out node has one step run per item
- * (`index_in_fanout`, `item`); a retried node has one per attempt. */
-export interface StepRun {
-  id: string
-  pipeline_run_id: string
-  step_id: string
-  index_in_fanout: number
-  item: string
-  run_id: string | null
-  attempt: number
-  state: StepRunState
-  /** The run's structured report once the step succeeds; null before that. */
-  report: unknown
-  started_at: string | null
-  finished_at: string | null
-  worktree: string
-}
+ * (`index_in_fanout`, `item`); a retried node has one per attempt.
+ * `report` is the run's structured report once the step succeeds, null
+ * before that. */
+export type StepRun = Omit<Schemas['StepRun'], 'report'> & { report: unknown }
 
-/** GET /pipeline-runs/{id}. */
-export interface PipelineRunView {
+/** One entry of GET /pipeline-runs/{id}'s `steps`: the step run plus the
+ * Run summary of its current attempt (null until the executor started
+ * one). Assignable to StepRun everywhere the graph and the log take one. */
+export type PipelineRunStep = StepRun & { run: Run | null }
+
+/** GET /pipeline-runs/{id}. `pipeline` is never null: the handler answers
+ * 404 rather than a view without it. */
+export type PipelineRunView = Omit<Schemas['PipelineRunView'], 'run' | 'steps'> & {
   run: PipelineRun
-  pipeline: Pipeline | null
-  steps: StepRun[]
-  graph: PipelineGraph
+  steps: PipelineRunStep[]
 }
 
 /** The SSE `pipeline.state` frame's payload: a pipeline run's own state, or
- * one step run's when `step_run_id` is set. */
+ * one step run's when `step_run_id` is set. Hand-written because
+ * docs/openapi.yaml describes REST bodies, not the bus messages
+ * GET /events streams (the same reason SessionEvent's payload is `unknown`). */
 export interface PipelineStatePayload {
   pipeline_run_id: string
   step_run_id?: string
