@@ -26,6 +26,7 @@ lint:
 	go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
 
 check: vet test
+	bash deploy/test-install.sh
 	@! grep -rn --include='*.go' --include='*.ts' --include='*.tsx' --include='*.sh' --exclude-dir=node_modules --exclude='*_test.go' --exclude='*.spec.ts' -e 'dangerously-skip-permissions' -e 'bypassPermissions' -e 'dangerously-bypass-approvals-and-sandbox' -e 'dangerously-bypass-hook-trust' . || (echo 'forbidden flag found' && exit 1)
 
 dev-backend:

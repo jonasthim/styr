@@ -50,7 +50,17 @@ die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
 # normalize_version strips a leading "v" (release tags are "vX.Y.Z", the
 # installed binary's own `styr version` output is bare "X.Y.Z"), so both
 # sides of a version_lt comparison are in the same shape.
-normalize_version() { printf '%s\n' "${1#v}"; }
+# normalize_version: reduce "v0.5.0", "0.5.0" or the decorated `styr version`
+# output "styr 0.5.0 (1bffe2c)" to the bare "0.5.0". Anything without a
+# dotted triple comes back unchanged so the caller can special-case it.
+normalize_version() {
+  local v="${1#v}"
+  if [[ "$v" =~ ([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  else
+    printf '%s\n' "$v"
+  fi
+}
 
 # version_lt A B: true (exit 0) when version A sorts strictly before version
 # B under `sort -V` (natural/dotted version order, so "0.9.0" sorts before
