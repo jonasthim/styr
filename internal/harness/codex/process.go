@@ -39,7 +39,7 @@ type process struct {
 
 	mu          sync.Mutex
 	closed      bool
-	thread      string        // learned from the first thread.started line
+	thread      string        // seeded from StartSpec.ResumeRef, then kept current from thread.started
 	cur         *exec.Cmd     // the running turn's process, nil when idle
 	turnDone    chan struct{} // closed when the running turn's goroutine is finished
 	interrupted bool          // the running turn was killed by Interrupt
@@ -52,8 +52,14 @@ type process struct {
 // caller sends the first turn. When the spec carries a JSON schema it is written to a temp
 // file here, once per session, because `--output-schema` takes a path rather than the schema
 // text itself.
+//
+// spec.ResumeRef seeds the thread id, so a process object built to reopen an existing Styr
+// session continues the CLI-side conversation from its very first turn (`codex exec resume
+// <thread>`) instead of starting a fresh thread. Without it a Styr resume — reopening a closed
+// session, or restarting after a model switch — would silently lose the Codex context, which
+// is the gap this field closes.
 func newProcess(binary string, spec harness.StartSpec) (*process, error) {
-	p := &process{binary: binary, spec: spec, events: make(chan harness.Event, 256)}
+	p := &process{binary: binary, spec: spec, thread: spec.ResumeRef, events: make(chan harness.Event, 256)}
 	if spec.JSONSchema != "" {
 		f, err := os.CreateTemp("", "styr-codex-schema-*.json")
 		if err != nil {
@@ -197,9 +203,13 @@ func (p *process) runTurn(cmd *exec.Cmd, stdout, stderr io.Reader, done chan str
 	for sc.Scan() {
 		for _, ev := range dec.Line(sc.Bytes(), time.Now()) {
 			switch {
-			case ev.Type == harness.EventInit && ev.Init != nil && ev.Init.SessionID != "":
+			case ev.Type == harness.EventInit && ev.Init != nil && ev.Init.HarnessRef != "":
+				// A resumed turn re-emits thread.started with the same id
+				// (testdata/PROTOCOL.md), so this is normally a no-op after the first
+				// turn; it still assigns, because the CLI is the authority on which
+				// thread actually answered.
 				p.mu.Lock()
-				p.thread = ev.Init.SessionID
+				p.thread = ev.Init.HarnessRef
 				p.mu.Unlock()
 			case ev.Type == harness.EventResult:
 				p.mu.Lock()

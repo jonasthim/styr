@@ -14,22 +14,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderPlus } from 'lucide-react'
 import { q } from '../../api/queries'
 import { api, ApiError } from '../../api/client'
-import type { Effort, HarnessKind, Session } from '../../api/types'
+import type { Effort, HarnessKind, Session, SessionCreateInput } from '../../api/types'
 import { CODEX_SANDBOX_NOTE, HARNESS_LABEL } from '../../lib/harness'
 import { workspaceOptionLabel } from '../workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, Field, Input, Kbd, MOD_KEY, Select, Textarea } from '../ui'
 
 const MAX_PROMPT_ROWS = 8
-
-interface CreateSessionBody {
-  workspace_id: string
-  profile_id: string
-  title: string
-  prompt: string
-  model: string
-  effort: Effort
-  harness: HarnessKind
-}
 
 // The value the model and effort selects show for "whatever the CLI defaults
 // to" — Radix Select has no empty-string item value.
@@ -133,7 +123,7 @@ export function NewSessionDialog({
           model: model === CLI_DEFAULT ? '' : model,
           effort: effort === CLI_DEFAULT ? '' : (effort as Effort),
           harness,
-        } satisfies CreateSessionBody,
+        } satisfies SessionCreateInput,
       }),
     onSuccess: (session) => {
       queryClient.setQueryData<Session[]>(['sessions'], (prev) => (prev ? [session, ...prev] : [session]))

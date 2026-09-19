@@ -31,9 +31,17 @@ type Session struct {
 	WorkspaceID string
 	ProfileID   string
 	Harness     string
-	State       SessionState
-	Origin      Origin
-	OriginRef   string
+	// HarnessRef is the harness's own conversation id, as its init message
+	// reported it (harness.Init.HarnessRef) — the Codex CLI's thread id.
+	// It is what a resumed process is started with
+	// (harness.StartSpec.ResumeRef) so the CLI-side conversation survives a
+	// Styr resume or a model switch. Empty before the first process starts,
+	// and always empty for a harness that resumes by the Styr session id
+	// instead (Claude Code).
+	HarnessRef string
+	State      SessionState
+	Origin     Origin
+	OriginRef  string
 	// Worktree is the absolute path of the git worktree this session runs
 	// in, "" for a session that runs directly in the workspace checkout.
 	Worktree string

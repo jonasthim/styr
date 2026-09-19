@@ -93,10 +93,31 @@ Two consequences:
 
 - `Interrupt` kills the running turn's process; the turn ends with an `interrupted` result.
 - A Styr *resume* — reopening a closed session, or a model switch — builds a **new** process
-  object, which has not yet learned a thread id, so the CLI starts a fresh thread. Styr's own
-  transcript is continuous either way (it is Styr's event log, not the CLI's), but the Codex
-  side loses its conversation context across a restart. Carrying the thread id across restarts
-  is a candidate for a later card.
+  object, which has learned no thread id of its own. Since v1.0 it is handed the stored one,
+  so the CLI continues the same thread instead of starting a fresh one (below).
+
+### Thread continuity across a Styr resume
+
+Not every CLI resumes by the host's session id. Claude Code does (`--resume <session id>`),
+so a Styr resume is enough on its own. Codex resumes by the **thread id it minted itself**,
+which only exists once a turn has run, so Styr has to remember it:
+
+- every codec may report a harness-native id on its init message as `harness.Init.HarnessRef`
+  — the Codex codec fills it with the `thread.started` thread id, the Claude codec leaves it
+  empty because the Styr session id already *is* the id to resume by;
+- the sessions runner stores it on the session row (`sessions.harness_ref`, migration
+  `00013_harness_ref.sql`), the same way it stores the model and the harness the init message
+  reported;
+- `startProcess` hands it back as `harness.StartSpec.ResumeRef` whenever it *resumes* a
+  session — a reopened closed session, or the restart behind a model switch — and the Codex
+  process runs `codex exec resume <thread>` for that process object's first turn, rather than
+  only for its second and later turns.
+
+The column is empty for a session that has never started a process, and stays empty for a
+harness that resumes by the session id, which is why `ResumeRef` is a separate field from
+`SessionID` rather than being read off it. A ref the CLI no longer knows (a rollout that was
+cleaned up) fails that turn with `no rollout found` on stderr — fixture `05_resume_missing` —
+rather than silently starting a different conversation.
 
 ## Credentials
 
@@ -146,7 +167,9 @@ An unattended session (a webhook, schedule or pipeline run, which has no owner) 
    lifecycle. Return `harness.ErrUnsupported` from anything the CLI genuinely cannot do, rather
    than faking it — callers degrade on `errors.Is` and hide the affordance.
    Every codec must set `Init.Harness`: the init message is the authority on what actually
-   answered, and `sessions` stores it back on the session row.
+   answered, and `sessions` stores it back on the session row. A CLI that resumes by an id of
+   its own rather than by the host's session id also sets `Init.HarnessRef` and honours
+   `StartSpec.ResumeRef` (see "Thread continuity across a Styr resume").
 4. **Add a shell fake** under `testdata/fake-<name>/` that replays the fixtures, and test the
    process against it. Tests never run the real CLI.
 5. **Add a verifier** if the credential is not already one Styr stores.

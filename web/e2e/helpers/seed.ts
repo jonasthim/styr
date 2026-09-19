@@ -12,7 +12,7 @@
 // carrying the marker replays internal/harness/claude/testdata/NN_*.jsonl
 // for that turn instead of the shell fake's default fixture.
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import type { Page, TestInfo } from '@playwright/test'
@@ -44,6 +44,45 @@ const MOCK_CLOSED_SESSION_TITLE = 'Summarize changelog'
 
 export function isReal(testInfo: TestInfo): boolean {
   return testInfo.project.name.startsWith('real')
+}
+
+// The file testdata/fake-codex/fake-codex.sh appends one tab-separated argv
+// line to per invocation, which is how a real-mode test can see *how* the CLI
+// was invoked - specifically whether the turn after a Styr resume ran
+// `exec resume <thread id>` rather than starting a fresh Codex thread.
+//
+// The fake takes the path from a "[argvlog:PATH]" marker in the prompt rather
+// than from its FAKE_CODEX_ARGV_LOG environment variable (which its own Go
+// tests use), because Styr deliberately hands a child process almost no
+// environment: HOME, the PATH/TERM/LANG passthrough and that harness's own
+// credential, and nothing else (internal/harness/codex/process.go's
+// passthroughEnvVars). A variable set on the server therefore never reaches
+// the CLI, while the prompt always does - the same reason every other fake
+// behaviour in this suite is selected by a "[fixture:NN]"-style marker.
+//
+// Deliberately a fixed path rather than a per-run temp file, so a stale log
+// from an earlier run is possible: readCodexArgvLines is therefore always used
+// as a *delta* (count the lines before the action, inspect only the ones added
+// after it) rather than as an absolute assertion.
+export const FAKE_CODEX_ARGV_LOG = path.join(tmpdir(), 'styr-e2e-fake-codex-argv.log')
+
+/** Prefixes a prompt with the marker that makes the Codex fake record its argv
+ * for that turn. Every real-mode Codex prompt goes through this, so any turn of
+ * a seeded session can be inspected afterwards. */
+export function codexPrompt(text: string): string {
+  return `[argvlog:${FAKE_CODEX_ARGV_LOG}]${text}`
+}
+
+/** Every argv line the Codex fake has recorded so far, oldest first. Missing
+ * file (nothing has run yet) reads as no lines. */
+export function readCodexArgvLines(): string[] {
+  let text: string
+  try {
+    text = readFileSync(FAKE_CODEX_ARGV_LOG, 'utf8')
+  } catch {
+    return []
+  }
+  return text.split('\n').filter((line) => line !== '')
 }
 
 interface MinimalSession {
@@ -356,12 +395,37 @@ export async function seedCodexSession(page: Page, title: string): Promise<Codex
   const workspaceId = await ensureRealWorkspace(page)
   const res = await page.request.post('/api/v1/sessions', {
     headers: HEADERS,
-    data: { workspace_id: workspaceId, profile_id: REAL_PROFILE_ID, title, prompt: '[fixture:01] hi', harness: 'codex' },
+    data: {
+      workspace_id: workspaceId,
+      profile_id: REAL_PROFILE_ID,
+      title,
+      prompt: codexPrompt('[fixture:01] hi'),
+      harness: 'codex',
+    },
   })
   await ok(res, 'POST /sessions (codex)')
   const sess = (await res.json()) as MinimalSession
   await waitForSessionState(page, sess.id, ['open'])
   return { workspaceId, sessionId: sess.id }
+}
+
+// closeRealSession ends a session's harness process (the button in the session
+// header, and what the idle timeout would eventually do on its own). Used by
+// the resume specs: the interesting path is the *next* message, which has to
+// start a new process.
+export async function closeRealSession(page: Page, sessionId: string): Promise<void> {
+  const res = await page.request.post(`/api/v1/sessions/${sessionId}/close`, { headers: HEADERS })
+  await ok(res, 'POST /sessions/{id}/close')
+  await waitForSessionState(page, sessionId, ['closed'])
+}
+
+// sendRealMessage delivers one turn over the API and waits for the session to
+// settle again. On a closed session this is what reopens it, which is the
+// resume path under test.
+export async function sendRealMessage(page: Page, sessionId: string, text: string): Promise<void> {
+  const res = await page.request.post(`/api/v1/sessions/${sessionId}/messages`, { headers: HEADERS, data: { text } })
+  await ok(res, 'POST /sessions/{id}/messages')
+  await waitForSessionState(page, sessionId, ['open'])
 }
 
 export interface WaitingSession {

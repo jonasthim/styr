@@ -1,5 +1,17 @@
 import { test, expect, type Page } from '@playwright/test'
-import { isReal, seedCodexSession, seedToolSession } from './helpers/seed'
+import {
+  closeRealSession,
+  codexPrompt,
+  ensureRealCodexKey,
+  ensureRealToken,
+  ensureRealWorkspace,
+  isReal,
+  readCodexArgvLines,
+  REAL_WORKSPACE_NAME,
+  seedCodexSession,
+  seedToolSession,
+  sendRealMessage,
+} from './helpers/seed'
 
 // Runs against both backends. Mock: msw handlers seed a fixed session
 // (TOOL_FIXTURE_SESSION_ID there) whose transcript is fixture 02
@@ -377,3 +389,87 @@ test('a real Codex session replays its fixture and can be interrupted', async ({
     )
     .toBe('open')
 })
+
+// The harness select is not only a mock fixture: against the real backend the
+// two kinds really are two different CLIs (two shell fakes behind
+// STYR_CLAUDE_BIN and STYR_CODEX_BIN), started back to back from the same
+// dialog, and each session keeps the harness it was started on.
+test('the new-session dialog starts a Claude session and a Codex session back to back', async ({ page }, testInfo) => {
+  test.skip(!isReal(testInfo), 'real-only: the mock version of this is the dialog test above')
+
+  await ensureRealToken(page)
+  await ensureRealCodexKey(page)
+  await ensureRealWorkspace(page)
+
+  const claudeId = await startThroughDialog(page, 'Claude Code', `Dialog claude ${Date.now()}`)
+  await expect(page.getByTestId('harness-chip')).toHaveText('Claude Code')
+
+  const codexId = await startThroughDialog(page, 'Codex', `Dialog codex ${Date.now()}`)
+  await expect(page.getByTestId('harness-chip')).toHaveText('Codex')
+  await expect(page.getByTestId('permission-card')).toHaveCount(0)
+
+  expect(codexId).not.toBe(claudeId)
+  // The chip reads the session row, so the first session is still on Claude
+  // after a Codex one was started next to it.
+  await page.goto(`/sessions/${claudeId}`)
+  await expect(page.getByTestId('harness-chip')).toHaveText('Claude Code')
+})
+
+/** Starts one session through the new-session dialog on the named harness and
+ * returns its id. The workspace is chosen explicitly (the select defaults to
+ * whichever workspace happens to be first, and this run has several) so both
+ * sessions run in the plain repo workspace rather than a worktree one. */
+async function startThroughDialog(page: Page, harnessLabel: string, title: string): Promise<string> {
+  await page.goto('/sessions?new=1')
+  const dialog = page.getByRole('dialog')
+  await expect(dialog).toBeVisible()
+
+  await dialog.getByRole('combobox', { name: 'Workspace' }).click()
+  await page.getByRole('option', { name: new RegExp(`^${REAL_WORKSPACE_NAME} `) }).click()
+  await dialog.getByRole('combobox', { name: 'Harness' }).click()
+  await page.getByRole('option', { name: harnessLabel, exact: true }).click()
+
+  await dialog.getByLabel('Title').fill(title)
+  await dialog.getByLabel('Prompt').fill('[fixture:01] say pong')
+  await dialog.getByRole('button', { name: 'Start session' }).click()
+
+  await expect(page).toHaveURL(/\/sessions\/[0-9a-f-]{36}$/)
+  await expect(page.getByTestId('session-view')).toBeVisible()
+  return page.url().split('/').pop()!
+}
+
+// Thread continuity (T65): `codex exec` runs one process per turn, and a Styr
+// resume builds a whole new process object. Before the session row carried the
+// CLI's thread id, that new process started a fresh Codex thread and the
+// CLI-side context was gone. This drives the real path - close the session,
+// send again - and reads the Codex fake's argv log to prove the reopened
+// process ran `exec resume <thread id>` rather than a bare `exec`.
+//
+// A close is used rather than waiting out the idle timeout, which is minutes
+// long by design; both end in the same place, a session with no live process.
+test('resuming a closed Codex session continues its thread', async ({ page }, testInfo) => {
+  test.skip(!isReal(testInfo), "real-only: reads the Codex shell fake's argv log")
+
+  const { sessionId } = await seedCodexSession(page, `Codex resume ${Date.now()}`)
+  await closeRealSession(page, sessionId)
+
+  // Only the lines this turn adds are inspected: the log file is at a fixed
+  // path, so it may still carry an earlier run's lines.
+  const before = readCodexArgvLines().length
+  await sendRealMessage(page, sessionId, codexPrompt('[fixture:04] what did you say before?'))
+  const added = readCodexArgvLines().slice(before)
+
+  expect(added.length).toBeGreaterThan(0)
+  // The thread id fixtures 01 and 04 were recorded under: the reopened process
+  // resumed the same conversation the first one started.
+  const resumed = added.filter((line) => line.includes(`resume\t${CODEX_FIXTURE_THREAD}`))
+  expect(resumed.length, `no resumed invocation in:\n${added.join('\n')}`).toBeGreaterThan(0)
+
+  await page.goto(`/sessions/${sessionId}`)
+  await expect(page.getByTestId('harness-chip')).toHaveText('Codex')
+})
+
+/** The thread id internal/harness/codex/testdata/01_simple_text.jsonl and
+ * 04_resume.jsonl were recorded under - what the fake reports as its
+ * `thread.started` id, and therefore what Styr stores and resumes by. */
+const CODEX_FIXTURE_THREAD = '01a0b707-ce58-7660-b301-4939ce14c766'

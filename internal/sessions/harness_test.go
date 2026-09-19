@@ -405,3 +405,144 @@ func TestPump_EmptyInitModelKeepsTheSessionsModel(t *testing.T) {
 		t.Fatalf("harness = %q, want codex", got.Harness)
 	}
 }
+
+// codexTurn is one scripted Codex turn: the init message naming the CLI's own thread id
+// (what `thread.started` carries, which the real codec reports as Init.HarnessRef), then a
+// completed turn.
+func codexTurn(thread string) fake.Step {
+	return fake.Step{Events: []harness.Event{
+		{Type: harness.EventInit, Init: &harness.Init{Harness: harness.KindCodex, SessionID: thread, HarnessRef: thread}},
+		{Type: harness.EventResult, Result: &harness.Result{Subtype: "success", NumTurns: 1}},
+	}}
+}
+
+// The gap T61 documented, closed: reopening a closed Codex session starts a new process
+// object, and that process is handed the thread id the first one reported, so the CLI
+// continues the same conversation instead of starting a fresh thread.
+func TestSend_CodexResumeCarriesTheThreadAcrossProcesses(t *testing.T) {
+	const thread = "01a0b707-ce58-7660-b301-4939ce14c766"
+	svc, repos, _ := newService(t, createResult(1))
+	codexFake := withCodex(t, svc, repos, codexTurn(thread), codexTurn(thread))
+
+	ctx := context.Background()
+	owner := testAdminID
+	actor := Actor{UserID: testAdminID, IsAdmin: true}
+	sess, err := svc.Create(ctx, actor, CreateInput{
+		WorkspaceID: testWorkspaceID, ProfileID: "interactive", Title: "t", Prompt: "hi", Owner: &owner,
+		Harness: harness.KindCodex,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	// The first process had nothing to continue, and its thread id was stored.
+	if got := codexFake.Procs[0].Spec.ResumeRef; got != "" {
+		t.Errorf("the first process was started with ResumeRef %q, want empty", got)
+	}
+	stored, err := repos.Sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if stored.HarnessRef != thread {
+		t.Fatalf("stored harness ref = %q, want the thread id %q", stored.HarnessRef, thread)
+	}
+
+	if err := svc.Close(ctx, actor, sess.ID); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionClosed)
+
+	if err := svc.Send(ctx, actor, sess.ID, "again"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	if len(codexFake.Procs) != 2 {
+		t.Fatalf("codex processes = %d, want 2", len(codexFake.Procs))
+	}
+	second := codexFake.Procs[1].Spec
+	if !second.Resume {
+		t.Error("the reopened process was not started with Resume")
+	}
+	if second.ResumeRef != thread {
+		t.Errorf("the reopened process got ResumeRef %q, want the stored thread %q", second.ResumeRef, thread)
+	}
+}
+
+// A model switch restarts the process the same way, and carries the thread with it.
+func TestSwitchModel_CodexKeepsTheThread(t *testing.T) {
+	const thread = "01a0b707-ce58-7660-b301-4939ce14c766"
+	svc, repos, _ := newService(t, createResult(1))
+	codexFake := withCodex(t, svc, repos, codexTurn(thread), codexTurn(thread))
+
+	ctx := context.Background()
+	owner := testAdminID
+	actor := Actor{UserID: testAdminID, IsAdmin: true}
+	sess, err := svc.Create(ctx, actor, CreateInput{
+		WorkspaceID: testWorkspaceID, ProfileID: "interactive", Title: "t", Prompt: "hi", Owner: &owner,
+		Harness: harness.KindCodex,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	if err := svc.SwitchModel(ctx, actor, sess.ID, "gpt-5-codex", ""); err != nil {
+		t.Fatalf("SwitchModel: %v", err)
+	}
+	if len(codexFake.Procs) != 2 {
+		t.Fatalf("codex processes = %d, want 2", len(codexFake.Procs))
+	}
+	if got := codexFake.Procs[1].Spec.ResumeRef; got != thread {
+		t.Errorf("the restarted process got ResumeRef %q, want the stored thread %q", got, thread)
+	}
+}
+
+// The Claude path is untouched: its codec reports no harness ref (it resumes by the Styr
+// session id), so nothing is stored and a resumed process is started without one.
+func TestSend_ClaudeResumeCarriesNoHarnessRef(t *testing.T) {
+	svc, repos, claudeFake := newService(t, fake.Step{Events: []harness.Event{
+		{Type: harness.EventInit, Init: &harness.Init{Harness: harness.KindClaude, SessionID: "s", Model: "claude-fable-5-1"}},
+		{Type: harness.EventResult, Result: &harness.Result{Subtype: "success", NumTurns: 1}},
+	}}, createResult(1))
+
+	ctx := context.Background()
+	owner := testAdminID
+	actor := Actor{UserID: testAdminID, IsAdmin: true}
+	sess, err := svc.Create(ctx, actor, CreateInput{
+		WorkspaceID: testWorkspaceID, ProfileID: "interactive", Title: "t", Prompt: "hi", Owner: &owner,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	stored, err := repos.Sessions.Get(ctx, sess.ID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if stored.HarnessRef != "" {
+		t.Errorf("claude session stored a harness ref %q, want none", stored.HarnessRef)
+	}
+
+	if err := svc.Close(ctx, actor, sess.ID); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionClosed)
+	if err := svc.Send(ctx, actor, sess.ID, "again"); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	waitForState(t, repos, sess.ID, domain.SessionOpen)
+
+	if len(claudeFake.Procs) != 2 {
+		t.Fatalf("claude processes = %d, want 2", len(claudeFake.Procs))
+	}
+	second := claudeFake.Procs[1].Spec
+	if !second.Resume || second.SessionID != sess.ID {
+		t.Errorf("claude resumed with Resume=%v session id %q, want true and %q", second.Resume, second.SessionID, sess.ID)
+	}
+	if second.ResumeRef != "" {
+		t.Errorf("claude resumed with ResumeRef %q, want empty: it resumes by the session id", second.ResumeRef)
+	}
+}

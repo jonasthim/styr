@@ -18,6 +18,16 @@ type Schemas = components['schemas']
 type JSONResponse<O extends keyof operations, S extends keyof operations[O]['responses']> =
   operations[O]['responses'][S] extends { content: { 'application/json': infer T } } ? T : never
 
+/** The JSON request body of one operation, for the endpoints whose body
+ * docs/openapi.yaml declares inline rather than as a named component. Same
+ * rule as everything else in this file: the spec the handlers are checked
+ * against is the contract, so a body the UI sends is never re-typed by hand. */
+type JSONRequest<O extends keyof operations> = operations[O] extends {
+  requestBody: { content: { 'application/json': infer T } }
+}
+  ? T
+  : never
+
 export type Role = Schemas['User']['role']
 
 export type ClaudeTokenInfo = Schemas['ClaudeToken']
@@ -64,6 +74,11 @@ export type Origin = Schemas['Session']['origin']
  * `branch`, `base_ref`) and the diff counters `session.stats` patches
  * (`diff_add`, `diff_del`), all of them required by the schema. */
 export type Session = Schemas['Session']
+
+/** POST /sessions. `harness` is the kind to run on; the spec allows it to be
+ * omitted (the profile's default, then claude), and the new-session dialog
+ * always sends one it resolved itself. */
+export type SessionCreateInput = JSONRequest<'createSession'>
 
 export type SessionEvent = Omit<Schemas['Event'], 'payload'> & { payload: unknown }
 
