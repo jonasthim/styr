@@ -321,6 +321,7 @@ install -d -o styr -g styr -m 0750 "$DATA_DIR"
 install -d -o root -g styr -m 0750 "$CONF_DIR"
 
 log "Installing binary"
+before="$(normalize_version "$(installed_version)")"
 if [[ -n "$BINARY" ]]; then
   [[ -f "$BINARY" ]] || die "--binary $BINARY not found"
   log "Installing local binary $BINARY"
@@ -423,4 +424,11 @@ Logs: journalctl -u styr -f
 Data: $DATA_DIR   Config: $CONF_DIR
 Upgrade later by re-running this installer.
 MSG
-echo "styr install: OK, running $(run_as_styr "$REAL_BIN" version 2>/dev/null || echo "$REAL_BIN")"
+after="$(normalize_version "$(installed_version)")"
+if [[ "$before" == "$after" ]]; then
+  echo "styr install: OK, already current at $after"
+elif [[ "$before" == "(not installed)" || "$before" == "unknown" ]]; then
+  echo "styr install: OK, installed $after"
+else
+  echo "styr install: OK, upgraded $before -> $after"
+fi
