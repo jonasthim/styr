@@ -7,6 +7,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Send } from 'lucide-react'
 import { api } from '../../api/client'
 import type { Trigger } from '../../api/types'
+import { useCanWrite } from '../../hooks/useCanWrite'
 import { relativeTime } from '../inbox/format'
 import { Button, Switch, Td, Tr } from '../ui'
 import { KindChip } from './chips'
@@ -24,6 +25,7 @@ export function TriggerRow({
   onOpenTest: (trigger: Trigger) => void
 }) {
   const queryClient = useQueryClient()
+  const canWrite = useCanWrite()
   const [pending, setPending] = useState(false)
 
   async function handleToggle(checked: boolean) {
@@ -69,7 +71,7 @@ export function TriggerRow({
       <Td>
         <Switch
           checked={trigger.enabled}
-          disabled={pending}
+          disabled={pending || !canWrite}
           onCheckedChange={(checked) => void handleToggle(checked)}
           aria-label={`Enabled for ${trigger.name}`}
         />
@@ -79,9 +81,11 @@ export function TriggerRow({
           <Button size="sm" variant="ghost" onClick={() => onOpenDeliveries(trigger)}>
             Deliveries
           </Button>
-          <Button size="sm" variant="ghost" icon={<Send size={12} aria-hidden />} onClick={() => onOpenTest(trigger)}>
-            Send test
-          </Button>
+          {canWrite && (
+            <Button size="sm" variant="ghost" icon={<Send size={12} aria-hidden />} onClick={() => onOpenTest(trigger)}>
+              Send test
+            </Button>
+          )}
         </div>
       </Td>
     </Tr>

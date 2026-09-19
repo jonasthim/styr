@@ -73,6 +73,37 @@ Styr uses two distinct kinds of Claude token:
   `DELETE /me/api-tokens/{id}`; only its hash is stored, so a lost token cannot be recovered, only
   replaced.
 
+## Roles and access
+
+Every user has exactly one role, set on `users.role` (no `config.yaml` key — this is
+per-account admin state, not deployment configuration):
+
+| Role | Can see | Can change |
+|---|---|---|
+| `admin` | Everything: every workspace regardless of its access list, every user's sessions, `/settings`, `/users`. | Everything a `member` can, plus other users' roles, server-wide settings, and a shared workspace's own access mode/allowlist. |
+| `member` | Their own sessions and workspaces, plus every shared workspace they have access to (see below). | Their own sessions, workspaces they own, and any shared workspace they may use — start sessions, approve/deny, edit templates/triggers/pipelines/schedules they own, etc. |
+| `viewer` | The same as `member`. | Only their own account: profile prefs (`PATCH /me`), personal API tokens, and their own Claude token. Every other state-changing request is refused with 403 code `read_only` (`internal/auth.RequireWriter`, applied by `internal/api/middleware.go`'s `writerGuard` to every route except those three). |
+
+The first user to ever sign in becomes `admin` (`internal/auth.Service`'s OIDC callback);
+that user can never be demoted, by themselves or by another admin, so there is always at least
+one admin able to fix a role mistake. An admin's own row is otherwise editable by another admin,
+but the UsersTable in Settings disables an admin's own row for changing away from `admin` too,
+as a second line of defense against locking yourself out.
+
+A shared (owner-less) workspace additionally has its own `access` column, admin-only
+(`GET`/`PUT /api/v1/workspaces/{id}/access`):
+
+| `access` | Who sees and may use the workspace |
+|---|---|
+| `everyone` (default) | Every signed-in user, same as before this feature existed. |
+| `listed` | Only the users named in `workspace_access` (migration `00012_workspace_access.sql`), plus every admin regardless of the list. Everyone else gets the same `404` a nonexistent workspace would (visibility is not leaked), and cannot start a session against it by hand. |
+
+Unattended starts (a webhook, a schedule, or a pipeline step) always run as the service actor
+(`IsAdmin: true` internally), so a workspace's `listed` access never blocks them — only a
+by-hand start from the UI or the API is affected. Switching a workspace back to `everyone`
+clears any previously set allowlist, so a later switch to `listed` starts from an explicit,
+intentional list rather than reviving a stale one.
+
 ## Workspaces and worktrees
 
 A workspace's own `worktrees` flag (`POST /workspaces`, `PATCH /workspaces/{id}`) opts every

@@ -21,6 +21,21 @@ const (
 	WorkspaceFailed  WorkspaceState = "failed"
 )
 
+// WorkspaceAccessMode controls which signed-in users may see and use a
+// shared (OwnerID nil) workspace. It has no effect on an owned workspace,
+// which is always visible only to its owner and to admins regardless of
+// this value.
+type WorkspaceAccessMode string
+
+const (
+	// WorkspaceAccessEveryone (the default) is the pre-T64 behaviour: every
+	// signed-in user can see and use the workspace.
+	WorkspaceAccessEveryone WorkspaceAccessMode = "everyone"
+	// WorkspaceAccessListed restricts the workspace to the users named in
+	// its workspace_access rows, plus admins.
+	WorkspaceAccessListed WorkspaceAccessMode = "listed"
+)
+
 // Workspace is a working directory (optionally worktree-enabled) that
 // sessions run in. A workspace is either owned by a member (OwnerID set,
 // Styr manages its directory under UsersDir) or shared and admin-registered
@@ -48,6 +63,11 @@ type Workspace struct {
 	// AutoCheckpoint makes Styr commit the worktree after every turn, so
 	// the session can be rewound turn by turn.
 	AutoCheckpoint bool
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// Access controls, for a shared (OwnerID nil) workspace, which
+	// non-admin users may see and use it: "everyone" (the default) or
+	// "listed" (only the users in workspace_access). Meaningless for an
+	// owned workspace.
+	Access    WorkspaceAccessMode
+	CreatedAt time.Time
+	UpdatedAt time.Time
 }

@@ -69,6 +69,7 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	codexCreds := db.NewCodexCredentials(d)
 	logins := db.NewLoginSessions(d)
 	workspacesRepo := db.NewWorkspaces(d)
+	workspaceAccessRepo := db.NewWorkspaceAccess(d)
 	profiles := db.NewProfiles(d)
 	sessionsRepo := db.NewSessions(d)
 	eventsRepo := db.NewEvents(d)
@@ -95,19 +96,20 @@ func wireServices(cfg config.Config, d *db.DB, bus *events.Bus) (*api.Deps, *ses
 	registry.Register(claude.New(cfg.ClaudeBin))
 	registry.Register(codex.New(cfg.CodexBin))
 
-	workspacesSvc := workspaces.New(workspacesRepo, sessionsRepo, bus, cfg.UsersDir(), nil)
+	workspacesSvc := workspaces.New(workspacesRepo, sessionsRepo, workspaceAccessRepo, bus, cfg.UsersDir(), nil)
 
 	svc := sessions.New(sessions.Repos{
-		Sessions:       sessionsRepo,
-		Events:         eventsRepo,
-		Approvals:      approvals,
-		Workspaces:     workspacesRepo,
-		Profiles:       profiles,
-		Tokens:         tokens,
-		Audit:          audit,
-		ReviewComments: reviewCommentsRepo,
-		Checkpoints:    checkpointsRepo,
-		Users:          users,
+		Sessions:        sessionsRepo,
+		Events:          eventsRepo,
+		Approvals:       approvals,
+		Workspaces:      workspacesRepo,
+		WorkspaceAccess: workspaceAccessRepo,
+		Profiles:        profiles,
+		Tokens:          tokens,
+		Audit:           audit,
+		ReviewComments:  reviewCommentsRepo,
+		Checkpoints:     checkpointsRepo,
+		Users:           users,
 
 		CodexCredentials: codexCreds,
 	}, registry, bus, box, sessions.Options{

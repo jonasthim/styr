@@ -47,6 +47,35 @@ func csrfGuard(next http.Handler) http.Handler {
 	})
 }
 
+// meWriteExempt is the path prefix under which every write route belongs to
+// the caller's own account (PATCH /me, POST /me/api-tokens, DELETE
+// /me/api-tokens/{id}, PUT/DELETE /me/claude-token) and so is exempt from
+// writerGuard: a viewer must still be able to manage their own prefs and
+// tokens (T64 card, deliverable 1).
+const meWriteExempt = "/api/v1/me"
+
+// writerGuard applies auth.RequireWriter (member or admin; 403 code
+// "read_only" for a viewer) to every state-changing request except a
+// caller's own /me routes. It runs on the router.go group that already
+// requires auth.RequireUser, so a request reaching it always carries a
+// principal — auth.RequireWriter's own 401 branch is defence in depth, not
+// something this guard's placement can actually trigger.
+func writerGuard(next http.Handler) http.Handler {
+	guarded := auth.RequireWriter(next)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, meWriteExempt) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		guarded.ServeHTTP(w, r)
+	})
+}
+
 // realIP trusts X-Forwarded-For only when the direct peer is loopback (a
 // reverse proxy on the same host), mirroring the documented deployment.
 func realIP(next http.Handler) http.Handler {

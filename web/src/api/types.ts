@@ -40,8 +40,12 @@ export type User = Omit<Schemas['User'], 'prefs'> & { prefs: Record<string, unkn
 
 export type WorkspaceSource = Schemas['Workspace']['source']
 export type WorkspaceState = Schemas['Workspace']['state']
+export type WorkspaceAccessMode = Schemas['Workspace']['access']
 
 export type Workspace = Schemas['Workspace']
+
+/** GET /workspaces/{id}/access (admin-only, T64). */
+export type WorkspaceAccess = Schemas['WorkspaceAccess']
 
 export type ProfileMode = Schemas['Profile']['mode']
 

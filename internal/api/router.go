@@ -60,6 +60,7 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 		api.Group(func(g chi.Router) {
 			g.Use(auth.RequireUser)
 			g.Use(csrfGuard)
+			g.Use(writerGuard)
 			g.Use(middleware.Timeout(requestTimeout))
 
 			registerMeRoutes(g, d)

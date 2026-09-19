@@ -39,9 +39,14 @@ type Repos struct {
 	Events     *db.Events
 	Approvals  *db.Approvals
 	Workspaces *db.Workspaces
-	Profiles   *db.Profiles
-	Tokens     *db.Tokens
-	Audit      *db.Audit
+	// WorkspaceAccess backs the "listed" shared-workspace check
+	// workspaceAccessAllowed adds on top of workspaceVisible in Create
+	// (T64); nil is safe (Create then fails open to "everyone") for the
+	// other packages' tests that build a Repos literal without it.
+	WorkspaceAccess *db.WorkspaceAccess
+	Profiles        *db.Profiles
+	Tokens          *db.Tokens
+	Audit           *db.Audit
 	// CodexCredentials holds the sealed OpenAI API keys a session on the
 	// codex harness runs with (per user, plus the service-wide one); the
 	// Claude harness reads Tokens instead.
@@ -218,6 +223,13 @@ func (s *Service) Create(ctx context.Context, actor Actor, in CreateInput) (doma
 		return domain.Session{}, err
 	}
 	if !workspaceVisible(actor, *ws) {
+		return domain.Session{}, fmt.Errorf("workspace %s: %w", in.WorkspaceID, domain.ErrNotFound)
+	}
+	allowed, err := s.workspaceAccessAllowed(ctx, actor, *ws)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	if !allowed {
 		return domain.Session{}, fmt.Errorf("workspace %s: %w", in.WorkspaceID, domain.ErrNotFound)
 	}
 	if ws.State != domain.WorkspaceReady {
@@ -470,6 +482,28 @@ func visible(actor Actor, sess domain.Session) bool {
 // Service.Create's visibility and readiness check.
 func workspaceVisible(actor Actor, ws domain.Workspace) bool {
 	return actor.IsAdmin || ws.OwnerID == nil || *ws.OwnerID == actor.UserID
+}
+
+// workspaceAccessAllowed extends workspaceVisible with a shared workspace's
+// own access list (T64): a "listed" shared workspace additionally requires
+// actor to be on its workspace_access allowlist, or to be an admin. It
+// assumes workspaceVisible(actor, ws) already returned true.
+//
+// An unattended origin (webhook, schedule, pipeline) always starts a
+// session as the service actor (internal/runs.serviceActor,
+// internal/triggers.serviceActor, ...), which has IsAdmin true — so this
+// check is always bypassed for those, matching the product rule that
+// unattended starts run as the service and are unaffected by a workspace's
+// access list; only a by-hand (origin "ui") Create by a specific member or
+// viewer can be refused here.
+func (s *Service) workspaceAccessAllowed(ctx context.Context, actor Actor, ws domain.Workspace) (bool, error) {
+	if ws.OwnerID != nil || ws.Access != domain.WorkspaceAccessListed || actor.IsAdmin {
+		return true, nil
+	}
+	if s.repos.WorkspaceAccess == nil {
+		return true, nil // access repo not wired: fail open to "everyone"
+	}
+	return s.repos.WorkspaceAccess.HasAccess(ctx, ws.ID, actor.UserID)
 }
 
 // getVisible loads a session and enforces visibility, returning

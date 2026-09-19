@@ -7,6 +7,7 @@ import { forwardRef, useState } from 'react'
 import { Link } from '@tanstack/react-router'
 import clsx from 'clsx'
 import type { Approval } from '../../api/types'
+import { useCanWrite } from '../../hooks/useCanWrite'
 import { ToolInput } from '../common/ToolInput'
 import { PlanBody } from '../session/PlanCard'
 import { planOf } from '../session/planMarkdown'
@@ -58,6 +59,7 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
   },
   ref,
 ) {
+  const canWrite = useCanWrite()
   const [draft, setDraft] = useState('')
   const [draftError, setDraftError] = useState<string | null>(null)
   // A plan-mode session asks to leave plan mode; what it is really asking is
@@ -136,7 +138,7 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
       )}
 
       <div className="grid grid-cols-2 gap-2 min-[640px]:flex min-[640px]:flex-wrap">
-        {editing ? (
+        {editing && canWrite ? (
           <>
             <Button variant="primary" onClick={submit} disabled={pending} className={ACTION_HEIGHT}>
               Send
@@ -147,22 +149,26 @@ export const ApprovalCard = forwardRef<HTMLDivElement, ApprovalCardProps>(functi
           </>
         ) : (
           <>
-            <Button variant="primary" onClick={onAllow} disabled={pending} className={ACTION_HEIGHT}>
-              Allow
-            </Button>
-            <Button onClick={onDeny} disabled={pending} className={ACTION_HEIGHT}>
-              Deny
-            </Button>
-            <Button onClick={startEdit} disabled={pending} className={ACTION_HEIGHT}>
-              Edit and allow
-            </Button>
-            <SnoozeMenu
-              open={snoozeMenuOpen}
-              onOpenChange={onSnoozeOpenChange}
-              onSelect={onSnoozeSelect}
-              disabled={pending}
-              buttonClassName={buttonClasses('secondary', 'md', ACTION_HEIGHT)}
-            />
+            {canWrite && (
+              <>
+                <Button variant="primary" onClick={onAllow} disabled={pending} className={ACTION_HEIGHT}>
+                  Allow
+                </Button>
+                <Button onClick={onDeny} disabled={pending} className={ACTION_HEIGHT}>
+                  Deny
+                </Button>
+                <Button onClick={startEdit} disabled={pending} className={ACTION_HEIGHT}>
+                  Edit and allow
+                </Button>
+                <SnoozeMenu
+                  open={snoozeMenuOpen}
+                  onOpenChange={onSnoozeOpenChange}
+                  onSelect={onSnoozeSelect}
+                  disabled={pending}
+                  buttonClassName={buttonClasses('secondary', 'md', ACTION_HEIGHT)}
+                />
+              </>
+            )}
             <Link
               to="/sessions/$id"
               params={{ id: approval.session_id }}

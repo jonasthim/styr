@@ -1,14 +1,26 @@
 // Desktop (>= 900px) left rail: 56px icons-only, expands to 220px on hover
 // or when pinned (`[`). Active item gets a 2px accent bar on the left.
 // Settings only shows for admins. Profile (with avatar) anchors the bottom,
-// above the live-connection dot.
+// above the live-connection dot; a viewer additionally gets a subtle
+// "Read-only" chip there (T64).
 import { useState, type ComponentType } from 'react'
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import * as Tooltip from '@radix-ui/react-tooltip'
-import { Activity, Clock, FolderKanban, Inbox as InboxIcon, MessagesSquare, Settings as SettingsIcon, Workflow, Zap } from 'lucide-react'
+import {
+  Activity,
+  Clock,
+  Eye,
+  FolderKanban,
+  Inbox as InboxIcon,
+  MessagesSquare,
+  Settings as SettingsIcon,
+  Workflow,
+  Zap,
+} from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
+import { useCanWrite } from '../../hooks/useCanWrite'
 import { useMe } from '../../hooks/useMe'
 import { useUiStore } from '../../store/ui'
 import { useLiveStatusStore } from '../../store/live'
@@ -81,6 +93,39 @@ function LiveDot() {
   )
 }
 
+// ReadOnlyChip is a small always-present badge (not gated on rail hover
+// expansion, unlike the nav item labels) so it's discoverable whether the
+// rail is pinned open or not: an icon-only dot collapsed, "Read-only" text
+// once expanded, and a tooltip either way.
+function ReadOnlyChip({ expanded }: { expanded: boolean }) {
+  return (
+    <Tooltip.Root delayDuration={200}>
+      <Tooltip.Trigger asChild>
+        <span
+          data-testid="rail-readonly-chip"
+          aria-label="Read-only account"
+          className={clsx(
+            'mx-2.5 mt-1 flex h-4 items-center gap-1 rounded-full border border-hairline bg-surface-2 px-1.5 font-mono text-[9px] font-medium uppercase tracking-wide text-fg-muted',
+            !expanded && 'w-4 justify-center px-0',
+          )}
+        >
+          <Eye size={10} aria-hidden />
+          {expanded && 'Read-only'}
+        </span>
+      </Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content
+          side="right"
+          sideOffset={8}
+          className="rounded-[var(--radius-1)] border border-hairline bg-surface-3 px-2 py-1 text-[12px] text-fg-primary shadow-[var(--shadow-popover)]"
+        >
+          Read-only account — an admin can change this in Settings
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  )
+}
+
 function initials(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean)
   if (parts.length === 0) return '?'
@@ -95,6 +140,7 @@ export function Rail() {
   const pinned = useUiStore((s) => s.railPinned)
   const expanded = pinned || hovering
   const { data: me } = useMe()
+  const canWrite = useCanWrite()
   const approvals = useQuery(q.approvals())
   const pendingCount = approvals.data?.length ?? 0
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -147,6 +193,7 @@ export function Rail() {
             expanded={expanded}
             active={pathname.startsWith('/profile')}
           />
+          {!canWrite && <ReadOnlyChip expanded={expanded} />}
         </div>
 
         <LiveDot />

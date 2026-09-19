@@ -160,6 +160,7 @@ const workspaces: Workspace[] = [
     worktrees: false,
     base_branch: '',
     auto_checkpoint: true,
+    access: 'everyone',
     created_at: iso(60 * 24),
     updated_at: iso(60 * 24),
   },
@@ -178,12 +179,32 @@ const workspaces: Workspace[] = [
     worktrees: true,
     base_branch: 'main',
     auto_checkpoint: true,
+    access: 'everyone',
     created_at: iso(60 * 24),
     updated_at: iso(60 * 24),
   },
 ]
 
 let nextWorkspaceSeq = workspaces.length + 1
+
+// T64: per-workspace access lists. Maps a shared workspace's id to the user
+// ids allowed to see/use it while its access mode is "listed"; absent (or
+// the workspace's own access !== 'listed') means "everyone". Only DEV_USER_ID
+// and 'u2' (seeded below) exist as candidate users in the mock, matching
+// GET /api/v1/users.
+const workspaceAccessLists = new Map<string, string[]>()
+
+// visibleToCurrentUser mirrors internal/workspaces.Service's visibility
+// rule: an admin sees everything; anyone else sees their own workspaces,
+// every "everyone" shared workspace, and only the "listed" shared
+// workspaces they are named on.
+function visibleToCurrentUser(w: Workspace): boolean {
+  if (devRole === 'admin') return true
+  if (w.owner_id === DEV_USER_ID) return true
+  if (w.owner_id !== null) return false
+  if (w.access !== 'listed') return true
+  return (workspaceAccessLists.get(w.id) ?? []).includes(DEV_USER_ID)
+}
 
 // Real clone attempts take a moment; the mock simulates the same "cloning"
 // -> "ready"/"failed" transition on a short timer, publishing the same
@@ -333,6 +354,19 @@ const users: User[] = [
     role: 'admin',
     prefs: {},
   },
+  // A second user (T64) so the Workspaces "Access" multi-select and the
+  // Settings "Users" role table both have someone to pick besides the dev
+  // account itself - roles.spec.ts sets a shared workspace's access to just
+  // this user, excluding DEV_USER_ID, then switches the dev user's own role
+  // to member/viewer via /__mock/set-role to prove they lose visibility.
+  {
+    id: 'u2',
+    email: 'sam@styr.local',
+    display_name: 'Sam Rivera',
+    avatar_url: '',
+    role: 'member',
+    prefs: {},
+  },
 ]
 
 const providers: Provider[] = [{ name: 'Authentik', slug: 'authentik' }]
@@ -458,7 +492,7 @@ export const handlers = [
 
   http.post('/__mock/set-role', async ({ request }) => {
     const body = (await request.json()) as { role?: Role }
-    if (body.role === 'admin' || body.role === 'member') devRole = body.role
+    if (body.role === 'admin' || body.role === 'member' || body.role === 'viewer') devRole = body.role
     return new HttpResponse(null, { status: 204 })
   }),
 
@@ -538,7 +572,7 @@ export const handlers = [
   // registered for a repo that only exists on this box, per the product
   // decision that Styr otherwise owns every workspace's path.
   http.get('/api/v1/workspaces', () => {
-    const visible = devRole === 'admin' ? workspaces : workspaces.filter((w) => w.owner_id === null || w.owner_id === DEV_USER_ID)
+    const visible = workspaces.filter(visibleToCurrentUser)
     return HttpResponse.json(visible)
   }),
 
@@ -596,6 +630,7 @@ export const handlers = [
       // Omitted means on, the same default internal/api's workspaceInput
       // (*bool) applies.
       auto_checkpoint: body.auto_checkpoint ?? true,
+      access: 'everyone',
       created_at: now,
       updated_at: now,
     }
@@ -606,8 +641,40 @@ export const handlers = [
 
   http.get('/api/v1/workspaces/:id', ({ params }) => {
     const workspace = workspaces.find((w) => w.id === params.id)
-    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    if (!workspace || !visibleToCurrentUser(workspace)) {
+      return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    }
     return HttpResponse.json(workspace)
+  }),
+
+  http.get('/api/v1/workspaces/:id/access', ({ params }) => {
+    if (devRole !== 'admin') return HttpResponse.json(errorBody('forbidden', 'admin role required'), { status: 403 })
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    if (workspace.owner_id !== null) {
+      return HttpResponse.json(errorBody('invalid', 'access lists only apply to shared workspaces'), { status: 422 })
+    }
+    const userIds = workspaceAccessLists.get(workspace.id) ?? []
+    return HttpResponse.json({
+      access: workspace.access,
+      users: users.filter((u) => userIds.includes(u.id)).map((u) => ({ id: u.id, display_name: u.display_name })),
+    })
+  }),
+
+  http.put('/api/v1/workspaces/:id/access', async ({ request, params }) => {
+    if (devRole !== 'admin') return HttpResponse.json(errorBody('forbidden', 'admin role required'), { status: 403 })
+    const workspace = workspaces.find((w) => w.id === params.id)
+    if (!workspace) return HttpResponse.json(errorBody('not_found', 'workspace not found'), { status: 404 })
+    if (workspace.owner_id !== null) {
+      return HttpResponse.json(errorBody('invalid', 'access lists only apply to shared workspaces'), { status: 422 })
+    }
+    const body = (await request.json()) as { access?: Workspace['access']; user_ids?: string[] }
+    if (body.access !== 'everyone' && body.access !== 'listed') {
+      return HttpResponse.json(errorBody('invalid', 'access must be everyone or listed'), { status: 422 })
+    }
+    workspace.access = body.access
+    workspaceAccessLists.set(workspace.id, body.access === 'listed' ? (body.user_ids ?? []) : [])
+    return new HttpResponse(null, { status: 204 })
   }),
 
   http.patch('/api/v1/workspaces/:id', async ({ request, params }) => {

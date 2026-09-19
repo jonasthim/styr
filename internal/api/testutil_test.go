@@ -149,28 +149,29 @@ type testEnv struct {
 
 	ts *httptest.Server
 
-	users          *db.Users
-	tokens         *db.Tokens
-	workspaces     *db.Workspaces
-	workspaceSvc   *workspaces.Service
-	profiles       *db.Profiles
-	sessions       *db.Sessions
-	events         *db.Events
-	approvals      *db.Approvals
-	reviewComments *db.ReviewComments
-	checkpoints    *db.Checkpoints
-	logins         *db.LoginSessions
-	box            *crypto.Box
-	bus            *events.Bus
-	harness        *fake.Harness
-	codexHarness   *fake.Harness
-	codexCreds     *db.CodexCredentials
-	codexVerifier  *stubVerifier
-	verifier       *stubVerifier
-	tokenStore     *fakeTokenStore
-	svc            *sessions.Service
-	usersDir       string
-	notifications  *db.NotificationChannels
+	users           *db.Users
+	tokens          *db.Tokens
+	workspaces      *db.Workspaces
+	workspaceSvc    *workspaces.Service
+	profiles        *db.Profiles
+	sessions        *db.Sessions
+	events          *db.Events
+	approvals       *db.Approvals
+	reviewComments  *db.ReviewComments
+	checkpoints     *db.Checkpoints
+	logins          *db.LoginSessions
+	box             *crypto.Box
+	bus             *events.Bus
+	harness         *fake.Harness
+	codexHarness    *fake.Harness
+	codexCreds      *db.CodexCredentials
+	codexVerifier   *stubVerifier
+	verifier        *stubVerifier
+	tokenStore      *fakeTokenStore
+	svc             *sessions.Service
+	usersDir        string
+	notifications   *db.NotificationChannels
+	workspaceAccess *db.WorkspaceAccess
 
 	triggers  *fakeTriggersService
 	runs      *fakeRunsEngine
@@ -211,32 +212,33 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	t.Cleanup(func() { _ = database.Close() })
 
 	e := &testEnv{
-		t:             t,
-		users:         db.NewUsers(database),
-		tokens:        db.NewTokens(database),
-		workspaces:    db.NewWorkspaces(database),
-		profiles:      db.NewProfiles(database),
-		sessions:      db.NewSessions(database),
-		events:        db.NewEvents(database),
-		approvals:     db.NewApprovals(database),
-		logins:        db.NewLoginSessions(database),
-		bus:           events.New(),
-		harness:       fake.New(steps...),
-		codexHarness:  fake.NewKind(harness.KindCodex, steps...),
-		codexCreds:    db.NewCodexCredentials(database),
-		verifier:      &stubVerifier{},
-		codexVerifier: &stubVerifier{},
-		tokenStore:    newFakeTokenStore(),
-		usersDir:      t.TempDir(),
-		notifications: db.NewNotificationChannels(database),
-		triggers:      newFakeTriggersService(),
-		runs:          newFakeRunsEngine(),
-		notifier:      newFakeNotifier(),
-		schedules:     newFakeSchedulesService(),
-		stats:         newFakeStatsService(),
-		pipelines:     newFakePipelinesService(),
+		t:               t,
+		users:           db.NewUsers(database),
+		tokens:          db.NewTokens(database),
+		workspaces:      db.NewWorkspaces(database),
+		profiles:        db.NewProfiles(database),
+		sessions:        db.NewSessions(database),
+		events:          db.NewEvents(database),
+		approvals:       db.NewApprovals(database),
+		logins:          db.NewLoginSessions(database),
+		bus:             events.New(),
+		harness:         fake.New(steps...),
+		codexHarness:    fake.NewKind(harness.KindCodex, steps...),
+		codexCreds:      db.NewCodexCredentials(database),
+		verifier:        &stubVerifier{},
+		codexVerifier:   &stubVerifier{},
+		tokenStore:      newFakeTokenStore(),
+		usersDir:        t.TempDir(),
+		notifications:   db.NewNotificationChannels(database),
+		triggers:        newFakeTriggersService(),
+		runs:            newFakeRunsEngine(),
+		notifier:        newFakeNotifier(),
+		schedules:       newFakeSchedulesService(),
+		stats:           newFakeStatsService(),
+		pipelines:       newFakePipelinesService(),
+		workspaceAccess: db.NewWorkspaceAccess(database),
 	}
-	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.bus, e.usersDir, nil)
+	e.workspaceSvc = workspaces.New(e.workspaces, e.sessions, e.workspaceAccess, e.bus, e.usersDir, nil)
 
 	box, err := crypto.NewBox(testSecret)
 	if err != nil {
@@ -247,16 +249,17 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 	e.reviewComments = db.NewReviewComments(database)
 	e.checkpoints = db.NewCheckpoints(database)
 	e.svc = sessions.New(sessions.Repos{
-		Sessions:       e.sessions,
-		Events:         e.events,
-		Approvals:      e.approvals,
-		Workspaces:     e.workspaces,
-		Profiles:       e.profiles,
-		Tokens:         e.tokens,
-		Audit:          db.NewAudit(database),
-		ReviewComments: e.reviewComments,
-		Checkpoints:    e.checkpoints,
-		Users:          e.users,
+		Sessions:        e.sessions,
+		Events:          e.events,
+		Approvals:       e.approvals,
+		Workspaces:      e.workspaces,
+		Profiles:        e.profiles,
+		Tokens:          e.tokens,
+		Audit:           db.NewAudit(database),
+		ReviewComments:  e.reviewComments,
+		Checkpoints:     e.checkpoints,
+		Users:           e.users,
+		WorkspaceAccess: e.workspaceAccess,
 
 		CodexCredentials: e.codexCreds,
 	}, harnessRegistry(e.harness, e.codexHarness), e.bus, box, sessions.Options{
@@ -337,14 +340,29 @@ func newEnvWithDevUser(t *testing.T, devUser string, steps ...fake.Step) *testEn
 // cookie name "styr_session").
 func (e *testEnv) memberClient(email string) (domain.User, *http.Client) {
 	e.t.Helper()
+	return e.roleClient(email, domain.RoleMember)
+}
+
+// viewerClient is memberClient for a viewer (T64): read-only everywhere
+// except its own /me routes.
+func (e *testEnv) viewerClient(email string) (domain.User, *http.Client) {
+	e.t.Helper()
+	return e.roleClient(email, domain.RoleViewer)
+}
+
+// roleClient is memberClient/viewerClient's shared implementation: it
+// creates a user with the given role directly and mints a login session the
+// same way a real login would.
+func (e *testEnv) roleClient(email string, role domain.Role) (domain.User, *http.Client) {
+	e.t.Helper()
 	ctx := context.Background()
 	now := time.Now()
 	usr := domain.User{
 		ID: email, Issuer: "test", Subject: email, Email: email, DisplayName: email,
-		Role: domain.RoleMember, CreatedAt: now, LastLoginAt: now, Prefs: json.RawMessage(`{}`),
+		Role: role, CreatedAt: now, LastLoginAt: now, Prefs: json.RawMessage(`{}`),
 	}
 	if err := e.users.Create(ctx, usr); err != nil {
-		e.t.Fatalf("create member %s: %v", email, err)
+		e.t.Fatalf("create user %s: %v", email, err)
 	}
 
 	raw := make([]byte, 32)

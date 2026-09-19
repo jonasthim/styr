@@ -25,6 +25,14 @@ import (
 // state directly.
 func newTestService(t *testing.T) (svc *Service, repo *db.Workspaces, sessionsRepo *db.Sessions, usersDir string) {
 	t.Helper()
+	svc, repo, sessionsRepo, _, usersDir = newTestServiceWithAccess(t)
+	return svc, repo, sessionsRepo, usersDir
+}
+
+// newTestServiceWithAccess is newTestService plus the WorkspaceAccess repo,
+// for tests that seed or inspect a "listed" workspace's allowlist directly.
+func newTestServiceWithAccess(t *testing.T) (svc *Service, repo *db.Workspaces, sessionsRepo *db.Sessions, access *db.WorkspaceAccess, usersDir string) {
+	t.Helper()
 	database, err := db.Open(filepath.Join(t.TempDir(), "t.db"))
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -33,6 +41,7 @@ func newTestService(t *testing.T) (svc *Service, repo *db.Workspaces, sessionsRe
 
 	repo = db.NewWorkspaces(database)
 	sessionsRepo = db.NewSessions(database)
+	access = db.NewWorkspaceAccess(database)
 	users := db.NewUsers(database)
 	usersDir = t.TempDir()
 
@@ -48,8 +57,8 @@ func newTestService(t *testing.T) (svc *Service, repo *db.Workspaces, sessionsRe
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	svc = New(repo, sessionsRepo, events.New(), usersDir, logger)
-	return svc, repo, sessionsRepo, usersDir
+	svc = New(repo, sessionsRepo, access, events.New(), usersDir, logger)
+	return svc, repo, sessionsRepo, access, usersDir
 }
 
 // runGitT runs a git command for test fixture setup, failing the test on
@@ -568,5 +577,143 @@ func TestCreate_AutoCheckpointExplicitlyOff(t *testing.T) {
 	}
 	if ws.AutoCheckpoint {
 		t.Fatal("auto checkpoint = true, want false")
+	}
+}
+
+// --- workspace access (T64) -------------------------------------------------
+
+func TestCreate_DefaultsAccessToEveryone(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	admin := sessions.Actor{UserID: "admin", IsAdmin: true}
+
+	ws, err := svc.Create(context.Background(), admin, CreateInput{Name: "access-default", Source: "path", Path: dir, DefaultProfileID: "interactive"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if ws.Access != domain.WorkspaceAccessEveryone {
+		t.Fatalf("Access = %q, want %q", ws.Access, domain.WorkspaceAccessEveryone)
+	}
+}
+
+func TestSetAccess_RequiresAdmin(t *testing.T) {
+	svc, repo, _, _, _ := newTestServiceWithAccess(t)
+	ws := domain.Workspace{ID: "shared-1", Name: "shared", Path: "/srv/shared", Source: domain.WorkspaceSourcePath,
+		DefaultProfileID: "interactive", State: domain.WorkspaceReady, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := repo.Create(context.Background(), ws); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	member := sessions.Actor{UserID: "u1"}
+	if err := svc.SetAccess(context.Background(), member, ws.ID, domain.WorkspaceAccessListed, []string{"u2"}); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("SetAccess as member: err = %v, want ErrForbidden", err)
+	}
+	if _, _, err := svc.GetAccess(context.Background(), member, ws.ID); !errors.Is(err, domain.ErrForbidden) {
+		t.Fatalf("GetAccess as member: err = %v, want ErrForbidden", err)
+	}
+}
+
+func TestSetAccess_RejectsOwnedWorkspace(t *testing.T) {
+	svc, _, _, _ := newTestService(t)
+	admin := sessions.Actor{UserID: "admin", IsAdmin: true}
+
+	owned, err := svc.Create(context.Background(), sessions.Actor{UserID: "u1"}, CreateInput{Name: "owned", Source: "empty", DefaultProfileID: "interactive"})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if err := svc.SetAccess(context.Background(), admin, owned.ID, domain.WorkspaceAccessListed, []string{"u2"}); !errors.Is(err, domain.ErrInvalid) {
+		t.Fatalf("SetAccess on owned workspace: err = %v, want ErrInvalid", err)
+	}
+}
+
+// TestListAndGet_ListedRestrictsToAllowlist confirms List and Get honour a
+// shared workspace's "listed" access mode: only users on the allowlist (and
+// admins) see it; a member left off the list gets it filtered from List and
+// domain.ErrNotFound from Get, same as a workspace that doesn't exist.
+func TestListAndGet_ListedRestrictsToAllowlist(t *testing.T) {
+	svc, repo, _, access, _ := newTestServiceWithAccess(t)
+	ws := domain.Workspace{ID: "shared-listed", Name: "shared-listed", Path: "/srv/shared-listed",
+		Source: domain.WorkspaceSourcePath, DefaultProfileID: "interactive", State: domain.WorkspaceReady,
+		Access: domain.WorkspaceAccessListed, CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := repo.Create(context.Background(), ws); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := access.Set(context.Background(), ws.ID, []string{"u1"}); err != nil {
+		t.Fatalf("seed access: %v", err)
+	}
+
+	allowed := sessions.Actor{UserID: "u1"}
+	excluded := sessions.Actor{UserID: "u2"}
+	admin := sessions.Actor{UserID: "admin", IsAdmin: true}
+
+	if _, err := svc.Get(context.Background(), allowed, ws.ID); err != nil {
+		t.Fatalf("Get (allowed): %v", err)
+	}
+	if _, err := svc.Get(context.Background(), admin, ws.ID); err != nil {
+		t.Fatalf("Get (admin): %v", err)
+	}
+	if _, err := svc.Get(context.Background(), excluded, ws.ID); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get (excluded): err = %v, want ErrNotFound", err)
+	}
+
+	allowedList, err := svc.List(context.Background(), allowed)
+	if err != nil {
+		t.Fatalf("List (allowed): %v", err)
+	}
+	if !containsWorkspace(allowedList, ws.ID) {
+		t.Fatalf("List (allowed) = %+v, want to include %s", allowedList, ws.ID)
+	}
+
+	excludedList, err := svc.List(context.Background(), excluded)
+	if err != nil {
+		t.Fatalf("List (excluded): %v", err)
+	}
+	if containsWorkspace(excludedList, ws.ID) {
+		t.Fatalf("List (excluded) = %+v, want to exclude %s", excludedList, ws.ID)
+	}
+}
+
+func containsWorkspace(list []domain.Workspace, id string) bool {
+	for _, ws := range list {
+		if ws.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestSetAccess_SwitchingBackToEveryoneClearsAllowlist(t *testing.T) {
+	svc, repo, _, access, _ := newTestServiceWithAccess(t)
+	admin := sessions.Actor{UserID: "admin", IsAdmin: true}
+	ws := domain.Workspace{ID: "shared-toggle", Name: "shared-toggle", Path: "/srv/shared-toggle",
+		Source: domain.WorkspaceSourcePath, DefaultProfileID: "interactive", State: domain.WorkspaceReady,
+		CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	if err := repo.Create(context.Background(), ws); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+
+	if err := svc.SetAccess(context.Background(), admin, ws.ID, domain.WorkspaceAccessListed, []string{"u1"}); err != nil {
+		t.Fatalf("SetAccess listed: %v", err)
+	}
+	if err := svc.SetAccess(context.Background(), admin, ws.ID, domain.WorkspaceAccessEveryone, nil); err != nil {
+		t.Fatalf("SetAccess everyone: %v", err)
+	}
+	list, err := access.List(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(list) != 0 {
+		t.Fatalf("allowlist after reverting to everyone = %+v, want empty", list)
+	}
+
+	mode, users, err := svc.GetAccess(context.Background(), admin, ws.ID)
+	if err != nil {
+		t.Fatalf("GetAccess: %v", err)
+	}
+	if mode != domain.WorkspaceAccessEveryone || len(users) != 0 {
+		t.Fatalf("GetAccess = %q, %+v, want everyone, empty", mode, users)
 	}
 }

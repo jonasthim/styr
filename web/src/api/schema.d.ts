@@ -21,6 +21,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Server and API version
+         * @description Unauthenticated, like /healthz: a client or a monitoring probe can call it before it has any credentials to learn what it is talking to. api_version is docs/openapi.yaml's own info.version (the stable API's version, per the compatibility promise); version is the styr binary's own release version, which may move independently.
+         */
+        get: operations["getVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/providers": {
         parameters: {
             query?: never;
@@ -367,6 +387,30 @@ export interface paths {
          * @description Re-runs the clone for a source "git" workspace currently in state "failed", transitioning it back to "cloning".
          */
         post: operations["retryWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workspaces/{id}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get a shared workspace's access mode and allowlist (admin-only)
+         * @description Only meaningful for a shared (owner-less) workspace: 422 for an owned one. "users" is empty when access is "everyone".
+         */
+        get: operations["getWorkspaceAccess"];
+        /**
+         * Set a shared workspace's access mode and allowlist (admin-only)
+         * @description Only meaningful for a shared (owner-less) workspace: 422 for an owned one. Switching back to "everyone" clears any previously set allowlist.
+         */
+        put: operations["putWorkspaceAccess"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1589,7 +1633,7 @@ export interface components {
             display_name: string;
             avatar_url: string;
             /** @enum {string} */
-            role: "admin" | "member";
+            role: "admin" | "member" | "viewer";
             prefs: Record<string, never>;
         };
         /** @description GET/PATCH /me: the signed-in user's own record - every User field plus their claude_token summary (internal/api/me_handlers.go's meDTO), always present (the token itself never is). */
@@ -1599,7 +1643,7 @@ export interface components {
             display_name: string;
             avatar_url: string;
             /** @enum {string} */
-            role: "admin" | "member";
+            role: "admin" | "member" | "viewer";
             prefs: Record<string, never>;
             claude_token: components["schemas"]["ClaudeToken"];
             codex_key: components["schemas"]["CodexKey"];
@@ -1630,10 +1674,25 @@ export interface components {
             base_branch: string;
             /** @description Whether Styr commits the session's worktree after every turn, so the work can be rewound turn by turn. On by default. */
             auto_checkpoint: boolean;
+            /**
+             * @description Only meaningful for a shared workspace (owner_id null): whether every signed-in user can see and use it ("everyone", the default) or only the users on its allowlist ("listed" - see GET/PUT /workspaces/{id}/access).
+             * @enum {string}
+             */
+            access: "everyone" | "listed";
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        /** @description GET /workspaces/{id}/access's response (admin-only). */
+        WorkspaceAccess: {
+            /** @enum {string} */
+            access: "everyone" | "listed";
+            /** @description The allowlist; empty when access is "everyone". */
+            users: {
+                id: string;
+                display_name: string;
+            }[];
         };
         Profile: {
             id: string;
@@ -2280,6 +2339,33 @@ export interface operations {
             };
         };
     };
+    getVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Version info */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description The styr binary's own release version, e.g. "0.5.0" ("dev" outside a release build). */
+                        version: string;
+                        /** @description The stable API's version, e.g. "1.0.0". */
+                        api_version: string;
+                        /** @description The short git revision the running binary was built from ("unknown" if unavailable). */
+                        commit: string;
+                    };
+                };
+            };
+        };
+    };
     listAuthProviders: {
         parameters: {
             query?: never;
@@ -2658,7 +2744,7 @@ export interface operations {
             content: {
                 "application/json": {
                     /** @enum {string} */
-                    role: "admin" | "member";
+                    role: "admin" | "member" | "viewer";
                 };
             };
         };
@@ -2973,6 +3059,63 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorBody"];
                 };
             };
+        };
+    };
+    getWorkspaceAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The workspace's access mode and, for "listed", its allowlist */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceAccess"];
+                };
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
+        };
+    };
+    putWorkspaceAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @enum {string} */
+                    access: "everyone" | "listed";
+                    /** @description Ignored when access is "everyone". */
+                    user_ids?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Access updated */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            403: components["responses"]["Forbidden"];
+            404: components["responses"]["NotFound"];
+            422: components["responses"]["UnprocessableEntity"];
         };
     };
     listProfiles: {
