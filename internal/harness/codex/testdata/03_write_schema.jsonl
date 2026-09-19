@@ -1,0 +1,14 @@
+{"type":"thread.started","thread_id":"01a0b709-0a31-7e81-90b8-c77cc867c4a0"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /home/thim/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"I’ll create `hello.txt` containing `hi` and verify its contents.\n"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/bash -lc 'cat /home/thim/.codex/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/using-superpowers/SKILL.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"/usr/bin/bash -lc 'cat /home/thim/.codex/plugins/cache/claude-plugins-official/superpowers/6.3.0/skills/using-superpowers/SKILL.md'","aggregated_output":"[redacted when the fixture was committed: the model cat'ed local skill files and personal notes; the field is a plain string either way]","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/bash -lc 'cat /home/thim/Documents/index/wiki/hot.md /home/thim/Documents/index/wiki/index.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"/usr/bin/bash -lc 'cat /home/thim/Documents/index/wiki/hot.md /home/thim/Documents/index/wiki/index.md'","aggregated_output":"[redacted when the fixture was committed: the model cat'ed local skill files and personal notes; the field is a plain string either way]","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"I’m using the using-superpowers skill to check the applicable workflow.\n"}}
+{"type":"item.started","item":{"id":"item_5","type":"command_execution","command":"/usr/bin/bash -lc 'printf hi > hello.txt\n test \"$(cat hello.txt)\" = hi'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_5","type":"command_execution","command":"/usr/bin/bash -lc 'printf hi > hello.txt\n test \"$(cat hello.txt)\" = hi'","aggregated_output":"","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_6","type":"agent_message","text":"{\"severity\":\"info\",\"diagnosis\":\"Created hello.txt and verified it contains hi.\"}"}}
+{"type":"turn.completed","usage":{"input_tokens":65116,"cached_input_tokens":41856,"cache_write_input_tokens":0,"output_tokens":237,"reasoning_output_tokens":10}}
+>>> exit 0

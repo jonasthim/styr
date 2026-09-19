@@ -1,0 +1,8 @@
+{"type":"thread.started","thread_id":"01a0b708-1760-7a81-a1f9-6949eb813cdb"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"clamping SessionEnd hook timeout to 3s in /home/thim/.codex/plugins/cache/openai-codex/codex/1.0.6/hooks/hooks.json"}}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'head -n 1 README.md'","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"/usr/bin/bash -lc 'head -n 1 README.md'","aggregated_output":"styr codex fixture workspace\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"styr codex fixture workspace"}}
+{"type":"turn.completed","usage":{"input_tokens":38451,"cached_input_tokens":31104,"cache_write_input_tokens":0,"output_tokens":42,"reasoning_output_tokens":0}}
+>>> exit 0
