@@ -678,6 +678,11 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 	spec := harness.StartSpec{
 		SessionID: sess.ID,
 		Resume:    resume,
+		// The harness's own id for the conversation, when it has one: a resumed
+		// Codex process continues its recorded thread instead of starting a
+		// fresh one. Only on a resume — a brand new session has nothing to
+		// continue — and empty for a harness that resumes by SessionID.
+		ResumeRef: resumeRef(sess, resume),
 		Title:     sess.Title,
 		Cwd:       sessionCwd(sess, ws),
 		Home:      home,
@@ -714,6 +719,17 @@ func (s *Service) startProcess(ctx context.Context, sess domain.Session, ws doma
 	}
 	s.recordUserTurn(ctx, sess, firstMessage)
 	return p.Send(ctx, harness.UserMessage{Text: firstMessage})
+}
+
+// resumeRef is the harness-native conversation id to hand a process that is
+// reopening sess, and "" for a first start. It is a function rather than an
+// inline conditional so the one rule — never resume a harness-side
+// conversation a fresh session has not had yet — lives in one place.
+func resumeRef(sess domain.Session, resume bool) string {
+	if !resume {
+		return ""
+	}
+	return sess.HarnessRef
 }
 
 // sessionCwd is the working directory a session's process runs in: its own git worktree when

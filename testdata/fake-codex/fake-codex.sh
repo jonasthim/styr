@@ -27,17 +27,16 @@
 #
 # FAKE_CODEX_ARGV_LOG, when set, appends one tab-separated line per invocation (the full argv)
 # to that file, which is how the process tests assert that a second turn really was a second
-# process and really used `resume <thread id>`.
+# process and really used `resume <thread id>`. A "[argvlog:PATH]" marker in the prompt names
+# the same file and is what the e2e suite uses: Styr hands a child process only HOME, the
+# PATH/TERM/LANG passthrough and its harness's own credential (internal/harness/codex/
+# process.go), so an environment variable set on the *server* never reaches the CLI, while
+# anything in the prompt does.
 set -euo pipefail
 
 DIR="${FAKE_CODEX_FIXTURE_DIR:-$(dirname "$0")/../../internal/harness/codex/testdata}"
 FIX="${FAKE_CODEX_FIXTURE:-$DIR/01_simple_text.jsonl}"
 DELAY="${FAKE_CODEX_DELAY:-0.01}"
-
-if [[ -n "${FAKE_CODEX_ARGV_LOG:-}" ]]; then
-  printf '%s\t' "$@" >> "$FAKE_CODEX_ARGV_LOG"
-  printf '\n' >> "$FAKE_CODEX_ARGV_LOG"
-fi
 
 schema=""
 last_message_file=""
@@ -51,6 +50,15 @@ for arg in "$@"; do
   prompt="$arg"
 done
 prompt="${prompt:-}"
+
+argv_log="${FAKE_CODEX_ARGV_LOG:-}"
+if [[ "$prompt" =~ \[argvlog:([^]]+)\] ]]; then
+  argv_log="${BASH_REMATCH[1]}"
+fi
+if [[ -n "$argv_log" ]]; then
+  printf '%s\t' "$@" >> "$argv_log"
+  printf '\n' >> "$argv_log"
+fi
 
 if [[ -n "$schema" && ! -r "$schema" ]]; then
   printf '{"type":"thread.started","thread_id":"00000000-0000-0000-0000-00000000fake"}\n'

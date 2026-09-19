@@ -61,6 +61,15 @@ func (s *Service) pump(sess domain.Session, p harness.Process) {
 				if ev.Init.Harness != "" {
 					_ = s.repos.Sessions.UpdateHarness(ctx, sess.ID, string(ev.Init.Harness))
 				}
+				// A harness with a conversation id of its own (the Codex CLI's
+				// thread id) reports it here; storing it is what lets a later
+				// process resume that conversation rather than starting a new
+				// one (startProcess passes it back as StartSpec.ResumeRef). A
+				// harness that resumes by the Styr session id reports none and
+				// must not blank the column.
+				if ev.Init.HarnessRef != "" {
+					_ = s.repos.Sessions.UpdateHarnessRef(ctx, sess.ID, ev.Init.HarnessRef)
+				}
 				_ = s.repos.Sessions.UpdateSlashCommands(ctx, sess.ID, ev.Init.SlashCommands)
 			}
 		case harness.EventToolUse:

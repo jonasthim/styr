@@ -94,8 +94,15 @@ func DecodeLine(line []byte, now time.Time, model string) []harness.Event {
 
 	switch env.Type {
 	case "thread.started":
+		// The thread id is reported twice on purpose: as SessionID, the
+		// harness-side session identity every codec reports, and as
+		// HarnessRef, the id a *later process* has to be started with to
+		// continue this conversation (`codex exec resume <thread id>`). The
+		// Claude codec fills only the former, because there the two would be
+		// the same value — the Styr session id — and nothing has to be
+		// carried across a restart.
 		return []harness.Event{{Type: harness.EventInit, At: now, Init: &harness.Init{
-			Harness: harness.KindCodex, SessionID: env.ThreadID, Model: model,
+			Harness: harness.KindCodex, SessionID: env.ThreadID, HarnessRef: env.ThreadID, Model: model,
 		}}}
 
 	case "turn.started":

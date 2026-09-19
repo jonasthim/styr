@@ -295,3 +295,76 @@ func TestInterruptAfterATurnFinishedDoesNothing(t *testing.T) {
 	// And the session is still usable: the next turn runs normally.
 	turn(t, p, "[fixture:01] again")
 }
+
+// A Styr resume — reopening a closed session, or restarting one after a model switch — builds
+// a *new* process object for the same session. Handed the thread id the previous process
+// reported (StartSpec.ResumeRef), its very first turn resumes that thread instead of starting
+// a fresh one, which is what keeps the CLI-side conversation alive across the restart.
+func TestResumeRefContinuesTheThreadInANewProcess(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "argv.log")
+	dir := t.TempDir()
+	spec := harness.StartSpec{
+		SessionID: "0a4b2f26-3f5b-4c3a-9f6a-0f1d2c3b4a59",
+		Cwd:       dir,
+		Home:      dir,
+		Profile:   harness.Profile{Mode: "default"},
+		Env:       map[string]string{"FAKE_CODEX_DELAY": "0", "FAKE_CODEX_ARGV_LOG": log},
+	}
+
+	first, err := New(fakeBinary(t)).Start(t.Context(), spec)
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	thread := only(t, turn(t, first, "[fixture:01] say pong"), harness.EventInit).Init.HarnessRef
+	if thread != fixtureThread {
+		t.Fatalf("first process reported harness ref %q, want the thread id %q", thread, fixtureThread)
+	}
+	if err := first.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The second process object stands for the session after a Styr resume: same session id,
+	// nothing in memory from the first, only the stored thread id.
+	resumeSpec := spec
+	resumeSpec.Resume = true
+	resumeSpec.ResumeRef = thread
+	second, err := New(fakeBinary(t)).Start(t.Context(), resumeSpec)
+	if err != nil {
+		t.Fatalf("Start (resume): %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close(t.Context()) })
+	if got := only(t, turn(t, second, "[fixture:04] and again"), harness.EventInit).Init.HarnessRef; got != fixtureThread {
+		t.Errorf("resumed turn reported thread %q, want %q", got, fixtureThread)
+	}
+
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\n"), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("fake was invoked %d times, want 2:\n%s", len(lines), b)
+	}
+	if strings.Contains(lines[0], "resume") {
+		t.Errorf("the first process resumed something: %s", lines[0])
+	}
+	if !strings.Contains(lines[1], "resume\t"+fixtureThread) {
+		t.Errorf("the reopened process did not resume the stored thread: %s", lines[1])
+	}
+}
+
+// Without a ResumeRef a new process object starts a fresh thread, which is the pre-T65
+// behaviour and still what a session that has never run a turn gets.
+func TestNoResumeRefStartsAFreshThread(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "argv.log")
+	p := startFake(t, log, nil)
+	turn(t, p, "[fixture:01] say pong")
+
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatalf("read argv log: %v", err)
+	}
+	if strings.Contains(string(b), "resume") {
+		t.Errorf("a process started without a ResumeRef used resume:\n%s", b)
+	}
+}

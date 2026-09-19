@@ -18,7 +18,7 @@ type Sessions struct{ d *DB }
 // NewSessions constructs a Sessions repository.
 func NewSessions(d *DB) *Sessions { return &Sessions{d: d} }
 
-const sessionColumns = `id, owner_user_id, title, workspace_id, profile_id, harness, state, origin, origin_ref,
+const sessionColumns = `id, owner_user_id, title, workspace_id, profile_id, harness, harness_ref, state, origin, origin_ref,
 	worktree, branch, base_ref, created_at, last_active_at, num_turns, cost_usd, tokens_in, tokens_out, now_line, model, effort,
 	slash_commands, diff_add, diff_del, worktree_shared`
 
@@ -36,8 +36,8 @@ const sessionStateOrder = `CASE state
 func (s *Sessions) Create(ctx context.Context, sess domain.Session) error {
 	_, err := s.d.ExecContext(ctx, `
 		INSERT INTO sessions (`+sessionColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		sess.ID, sess.OwnerID, sess.Title, sess.WorkspaceID, sess.ProfileID, sess.Harness,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sess.ID, sess.OwnerID, sess.Title, sess.WorkspaceID, sess.ProfileID, sess.Harness, sess.HarnessRef,
 		string(sess.State), string(sess.Origin), sess.OriginRef, sess.Worktree, sess.Branch, sess.BaseRef,
 		nowString(sess.CreatedAt), nowString(sess.LastActiveAt), sess.NumTurns, sess.CostUSD,
 		sess.TokensIn, sess.TokensOut, sess.NowLine, sess.Model, sess.Effort,
@@ -60,7 +60,7 @@ func scanSession(row interface{ Scan(dest ...any) error }) (*domain.Session, err
 		slashCommands         string
 		worktreeShared        int
 	)
-	if err := row.Scan(&sess.ID, &ownerID, &sess.Title, &sess.WorkspaceID, &sess.ProfileID, &sess.Harness,
+	if err := row.Scan(&sess.ID, &ownerID, &sess.Title, &sess.WorkspaceID, &sess.ProfileID, &sess.Harness, &sess.HarnessRef,
 		&state, &origin, &sess.OriginRef, &sess.Worktree, &sess.Branch, &sess.BaseRef, &createdAt, &lastActive,
 		&sess.NumTurns, &sess.CostUSD, &sess.TokensIn, &sess.TokensOut, &sess.NowLine, &sess.Model, &sess.Effort,
 		&slashCommands, &sess.DiffAdd, &sess.DiffDel, &worktreeShared); err != nil {
@@ -140,6 +140,16 @@ func (s *Sessions) UpdateNow(ctx context.Context, id string, nowLine string) err
 // init message is what answered.
 func (s *Sessions) UpdateHarness(ctx context.Context, id string, kind string) error {
 	return s.exec1(ctx, `UPDATE sessions SET harness = ? WHERE id = ?`, kind, id)
+}
+
+// UpdateHarnessRef records the harness-native conversation id the session's
+// process reported on its init message (harness.Init.HarnessRef): the Codex
+// CLI's thread id, so a later process can be started with
+// harness.StartSpec.ResumeRef and continue the same CLI-side conversation.
+// A harness with no id of its own to resume by never reports one and leaves
+// the column empty.
+func (s *Sessions) UpdateHarnessRef(ctx context.Context, id string, ref string) error {
+	return s.exec1(ctx, `UPDATE sessions SET harness_ref = ? WHERE id = ?`, ref, id)
 }
 
 // UpdateModel sets the model in use.

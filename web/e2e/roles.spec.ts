@@ -1,6 +1,18 @@
 // T64: viewer role and per-workspace access lists. Role switching
 // (/__mock/set-role) is a mock-only control route, same as workspaces.spec.ts's
 // own setRole helper, so every test here is mock-only.
+//
+// T65 revisited that and kept it, deliberately. Users come from OIDC, so the
+// real lane has exactly one identity (the dev admin) and no way to become a
+// second one: demoting that admin to viewer would leave nobody able to promote
+// it back, and every later real test - they share one account and one serial
+// run - would run as a viewer. What these tests cover is the UI's read-only
+// affordances, which the mock drives faithfully; the server-side half, that a
+// viewer is actually refused, is covered against the real router in
+// internal/api/roles_test.go (403 `read_only` on POST /sessions, POST
+// /workspaces, DELETE /workspaces/{id} and approval decisions, with /me writes
+// still allowed). Between the two there is no gap worth a real-mode identity
+// switch that the product does not support.
 import { test, expect, type Page } from '@playwright/test'
 import { isReal } from './helpers/seed'
 

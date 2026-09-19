@@ -44,6 +44,15 @@ type Profile struct {
 type StartSpec struct {
 	SessionID string // UUID; required
 	Resume    bool   // true: pass --resume SessionID instead of --session-id
+	// ResumeRef is the *harness's own* id of the conversation to continue, as
+	// a previous process reported it on Init.HarnessRef. It exists because
+	// not every CLI resumes by the host's session id: Claude Code does (and
+	// therefore ignores this field entirely, resuming by SessionID), while
+	// the Codex CLI resumes by the thread id it minted itself, so its first
+	// turn in a new process object runs `exec resume <ResumeRef>`. Empty
+	// means "start a fresh harness-side conversation", which is also what a
+	// resume with a ref the CLI no longer knows degrades to.
+	ResumeRef string
 	Title     string
 	Cwd       string
 	Home      string            // HOME for the child process
@@ -140,10 +149,19 @@ type Init struct {
 	// Harness names the CLI that reported this session in. Every codec sets it, so the UI can
 	// show which harness a session is actually running under without consulting the session
 	// row that asked for it.
-	Harness   Kind
-	SessionID string
-	Model     string
-	Tools     []string
+	Harness Kind
+	// HarnessRef is the harness's own id for this conversation, when the CLI
+	// has one that is not the Styr session id: the Codex CLI's thread id,
+	// which `codex exec resume <id>` takes. The sessions runner stores it on
+	// the session row and hands it back as StartSpec.ResumeRef when it
+	// reopens the session, so the CLI-side context survives a Styr resume.
+	// Empty for a harness that resumes by the host's session id (Claude
+	// Code), which is why the field is separate from SessionID rather than
+	// being read off it.
+	HarnessRef string
+	SessionID  string
+	Model      string
+	Tools      []string
 	// SlashCommands is the CLI's own `slash_commands` list from the init message: custom
 	// project/user commands, plugin skills and the CLI's built-ins, all without the leading
 	// slash (see internal/harness/claude/testdata/PROTOCOL.md).

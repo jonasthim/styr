@@ -341,3 +341,41 @@ func TestSessions_CountByWorktree(t *testing.T) {
 		t.Fatalf("CountByWorktree(other path) = %d, want 0", n)
 	}
 }
+
+// A fresh session has no harness-native id; the one its process reports is stored and read
+// back, and updating a session that does not exist is reported rather than silently ignored.
+func TestSessions_HarnessRefRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	d := testOpenDB(t)
+	ws := sessionsTestFixture(t, ctx, d)
+	sessions := NewSessions(d)
+
+	s := newTestSession(ws.ID, createTestUserID(t, ctx, d, "user-ref"), domain.SessionOpen)
+	s.Harness = "codex"
+	if err := sessions.Create(ctx, s); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := sessions.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.HarnessRef != "" {
+		t.Fatalf("a session that has never run a turn has harness ref %q, want empty", got.HarnessRef)
+	}
+
+	const thread = "01a0b707-ce58-7660-b301-4939ce14c766"
+	if err := sessions.UpdateHarnessRef(ctx, s.ID, thread); err != nil {
+		t.Fatalf("UpdateHarnessRef: %v", err)
+	}
+	got, err = sessions.Get(ctx, s.ID)
+	if err != nil {
+		t.Fatalf("Get after UpdateHarnessRef: %v", err)
+	}
+	if got.HarnessRef != thread {
+		t.Fatalf("harness ref = %q, want %q", got.HarnessRef, thread)
+	}
+
+	if err := sessions.UpdateHarnessRef(ctx, uuid.NewString(), thread); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("UpdateHarnessRef on an unknown session = %v, want ErrNotFound", err)
+	}
+}
