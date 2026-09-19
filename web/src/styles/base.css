@@ -172,3 +172,17 @@
     animation: styr-panel-out var(--duration-fast) ease-in;
   }
 }
+
+/* Deliberately unlayered, so it beats the text-[13px] utilities on the
+   controls: iOS Safari zooms the whole page into any focused input, textarea
+   or select whose font is under 16px, and there is no way back that does not
+   also break pinch zoom (maximum-scale=1). On touch devices every text
+   control renders at 16px instead; the mock-phone screenshots are the check
+   that nothing wraps or overflows because of it. */
+@media (pointer: coarse) {
+  input:not([type='checkbox']):not([type='radio']):not([type='range']),
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

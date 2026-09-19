@@ -7,6 +7,13 @@ starting at `1.0.0`.
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-19
+
+### Fixed
+
+- iOS Safari no longer zooms the page when a text field is focused: on touch devices every
+  input, textarea and select renders at 16px, the threshold below which Safari zooms in.
+
 ## [1.0.2] - 2026-09-19
 
 ### Fixed
