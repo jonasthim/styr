@@ -81,7 +81,7 @@ export function StartPipelineDialog({
           </>
         }
       >
-        <Field label="Input" labelAside="optional" hint="A JSON object, available to every step as .input." error={inputError}>
+        <Field label="Input" labelAside="optional" hint="A JSON object, its keys are available to every step's templates at the top level, for example {{ .title }}." error={inputError}>
           {({ id, 'aria-describedby': describedBy, 'aria-invalid': invalid }) => (
             <Textarea
               id={id}
