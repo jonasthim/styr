@@ -121,7 +121,8 @@ palette reaches every object and action. `?` shows shortcuts.
 | v0.3 Review (shipped) | Worktree per session, diff view, inline comments as prompts, commit and PR, checkpoints with rewind, plan approval checklist |
 | v0.4 Schedules and loops (shipped) | Cron, until-done loops, fleet Gantt, cost dashboard |
 | v0.5 Pipelines (shipped) | YAML DAG, fan-out, retries, shared worktrees, live graph, start from triggers and schedules |
-| v1.0 | Second harness (Codex CLI), stable API |
+| v1.0 Boring and durable (shipped) | Codex CLI harness and registry, personal Codex keys, backup and restore, doctor disk/orphan checks, viewer role, per-workspace access lists, stable API v1 with a CI compatibility guard |
+| Beyond 1.0 | Gemini CLI harness, multi-node runners, template and pipeline sharing, Codex device auth |
 
 ## Architecture
 

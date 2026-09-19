@@ -468,3 +468,69 @@ finer-grained control under Claude Code than under Codex, and the honest place t
 harness chip and the profile documentation. `Interrupt` also changes meaning: with no control
 channel, it kills the turn's OS process, so the turn ends with a synthesised `interrupted`
 result rather than with the CLI's own acknowledgement.
+
+## ADR-019: Viewer role and workspace access lists
+
+Date: 2026-09-19. Status: accepted.
+
+Context: v1.0 adds a handful of real, distinct users on the same box rather than just the
+operator. Two gaps followed from that: some people should be able to watch — sessions, runs,
+the cost dashboard, the fleet Gantt — without being able to start a session, decide an
+approval, or edit a template, trigger or pipeline; and some shared (owner-less) workspaces
+should not be usable, or even visible, to every signed-in user, the way `member` visibility
+worked up to v0.5.
+
+Decision: a third role, `viewer`, sees exactly what `member` sees but cannot change anything
+except its own account — profile prefs, personal API tokens, its own Claude/Codex credentials.
+Rather than adding a role check to every handler that mutates state, `internal/auth.RequireWriter`
+is a single generic guard `internal/api/middleware.go`'s `writerGuard` applies to every route
+*except* an explicit three-route allowlist (`PATCH /me` and the caller's own token routes) —
+opt-out of the guard, not opt-in per handler, so a new mutating route can't forget it. Separately,
+a shared workspace gets its own `access` column (`everyone` default, or `listed`) and a
+`workspace_access` join table (migration `00012_workspace_access.sql`); `listed` restricts both
+visibility and session creation to the named users plus every admin, and an unlisted caller gets
+the same `404` a nonexistent workspace would, consistent with the existing "visibility is not
+leaked" rule in `docs/API.md`'s error envelope. Unattended starts (a webhook, schedule or
+pipeline step) always run as the internal service actor and are never blocked by a `listed`
+allowlist — there is no signed-in caller to check it against. The first user to ever sign in is
+still always `admin` and can never be demoted, by themselves or another admin, so a role mistake
+always has someone left able to fix it.
+
+Consequences: a single cross-cutting guard means `viewer` enforcement cannot be forgotten on a
+future mutating endpoint the way a per-handler check could be; the cost is that the three
+exceptions must be kept in sync by hand as the route table grows, rather than being derivable
+from the routes themselves. Access lists are scoped to *shared* workspaces only — a workspace a
+member owns personally has no `access` column and is unaffected — which keeps the migration and
+the UI (an admin-only "Access" control on Workspaces) small at the cost of not yet covering
+per-workspace access for a personally-owned workspace someone wants to share, a gap left for a
+later card if it turns out to matter.
+
+## ADR-020: API v1 compatibility guard in CI
+
+Date: 2026-09-19. Status: accepted.
+
+Context: `docs/openapi.yaml` reached `info.version: 1.0.0` with the v1 freeze (T62), and
+`docs/API.md` promises that, within the `1.x` line, the API only changes additively: no removed
+or retyped response field, no newly required request field, no removed operation. A promise
+like that is only as good as its enforcement — without a check, a later PR could drop a field or
+tighten a request body and nothing would fail until an external client broke against a `1.x`
+release that was supposed to be safe to upgrade to.
+
+Decision: `hack/openapi-compat` is a small Go program (`compare.go`, `main.go`) that loads two
+OpenAPI documents and fails when it finds any of the four breaking shapes the promise rules out:
+a removed path or operation, a removed response schema property, a retyped response schema
+property, or a new required request-body field on an operation that already existed. `make
+api-compat` runs it as `git show <last v* tag>:docs/openapi.yaml` against the working tree's
+copy, skipping with a notice (not a failure) when no `v*` tag is reachable yet — a fresh
+checkout, or a repository before its first release. CI's backend job runs `make api-compat`
+immediately after `make check`, and fetches tags first (`a2e0614`) so the comparison always has
+a previous release to diff against rather than silently comparing against nothing.
+
+Consequences: the compatibility promise is enforced mechanically at every PR, not just at
+review time, and a violation fails with the specific field or operation named rather than a
+generic reminder to check the docs. The guard is deliberately narrow — it only catches the four
+structural shapes above, not every way a field's *meaning* could quietly change while keeping
+its declared type and requiredness — so it complements the review a genuinely new endpoint or
+field still needs rather than replacing it. Running the comparison against the previous release
+*tag* rather than the previous commit on `main` also means the guard is a property of what
+actually shipped, not of in-progress work still on the default branch between releases.

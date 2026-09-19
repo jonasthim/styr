@@ -7,9 +7,10 @@ starting at `1.0.0`.
 
 ## [Unreleased]
 
-Work merged toward v1.0.0, "Boring and durable": a second harness, a stable API, an upgrade
-and backup story, and roles for a handful of users. Completed so far, on this card and its
-neighbours:
+## [1.0.0] - 2026-09-19
+
+"Boring and durable": a second harness, a stable and versioned API, an upgrade and backup
+story, and roles for a handful of users.
 
 ### Added
 
@@ -18,6 +19,13 @@ neighbours:
   session does. Codex approvals are not supported the same way Claude Code's are — Codex
   enforces its sandbox policy up front rather than asking per command — so a Codex session's
   inbox affordances differ from a Claude Code session's.
+- A harness registry: `POST /api/v1/sessions` accepts a `harness`, falling back to the
+  session's profile default and then to Claude Code; `GET /api/v1/status` reports every known
+  harness with whether its binary actually answered at startup, so the new-session dialog can
+  explain an unavailable choice instead of just hiding it.
+- Personal Codex keys (Profile → Codex key, `PUT /api/v1/me/codex-key`): an OpenAI API key
+  sealed at rest the same way a Claude token is, verified before it is stored, plus a separate
+  service-wide Codex key for unattended runs.
 - `styr backup <file>` and `styr restore <file>`: an online SQLite backup (`VACUUM INTO`, no
   downtime) plus a manifest recording the styr and schema version it was taken with. Restore
   refuses to run against a server that is still up, and refuses a backup whose schema is newer
@@ -26,10 +34,26 @@ neighbours:
   crash; `install.sh --version <v>` refuses to downgrade past the version already installed.
 - CI now also greps for Codex's own dangerous bypass flag, alongside the existing Claude Code
   guard.
+- The API is frozen at `docs/openapi.yaml`'s `info.version: 1.0.0`, every operation has a
+  stable `operationId`, and `GET /api/v1/version` reports the running styr version, API
+  version and build commit. `docs/API.md` is the new human-readable overview: authentication,
+  the error envelope, pagination, the SSE event kinds, the inbound webhook, a curl walkthrough,
+  and the compatibility promise below.
+- A CI compatibility guard (`hack/openapi-compat`, `make api-compat`) diffs `docs/openapi.yaml`
+  against the previous release tag's copy and fails the build on a removed operation or
+  response field, a retyped field, or a new required request field.
+- A `viewer` role: the same visibility as `member`, but every state-changing request is
+  refused with `403 read_only` except a caller's own profile, personal API tokens and Claude
+  token. The first user to ever sign in still always becomes admin, and an admin can never
+  demote themselves or the last remaining admin.
+- Per-workspace access lists for shared workspaces: `everyone` (default) or `listed`, admin-set
+  (`PUT /api/v1/workspaces/{id}/access`). A workspace's `listed` allowlist never blocks an
+  unattended start (webhook, schedule or pipeline step), only a by-hand one from the UI or API.
 
-Still to land on the rest of this wave: the harness registry and a per-session/per-workspace
-choice of harness, this API freeze's own `viewer` role and per-workspace access lists, the
-integration pass, and the v1.0.0 release itself.
+Within the `1.x` line the API only changes additively — new operations, new optional fields,
+new enum values — never a removed or retyped response field or a new required request field;
+see [docs/API.md](docs/API.md#compatibility-promise) for the full promise and how CI enforces
+it.
 
 ## [0.5.0] - 2026-09-19
 
