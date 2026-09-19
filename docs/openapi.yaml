@@ -2,9 +2,21 @@ openapi: 3.1.0
 info:
   title: Styr API
   description: >
-    Styr's REST and SSE API: OIDC login, Claude Code sessions, approvals,
-    workspaces, profiles and server administration.
-  version: 0.1.0
+    Styr's REST and SSE API: OIDC login, Claude Code and Codex sessions,
+    approvals, workspaces, profiles, templates, triggers, pipelines,
+    schedules and server administration.
+
+
+    **Compatibility promise (v1):** within the 1.x line the API only
+    changes additively. Fields are never removed or retyped, and a new
+    required request-body field is never added to an existing operation.
+    New optional fields, new operations and new enum values may appear in
+    any 1.x release. Deprecations are announced in CHANGELOG.md with at
+    least one minor release's notice before removal, which — for this
+    document — only happens at 2.0. See docs/API.md for the full
+    compatibility policy and hack/openapi-compat, the CI check that
+    enforces it against the previous release's copy of this document.
+  version: 1.0.0
   license:
     name: MIT
 servers:
@@ -18,6 +30,7 @@ paths:
       summary: Liveness check
       operationId: healthz
       security: []
+      tags: [status]
       responses:
         "200":
           description: OK
@@ -29,6 +42,37 @@ paths:
                   ok:
                     type: boolean
                 required: [ok]
+
+  /api/v1/version:
+    get:
+      summary: Server and API version
+      description: >
+        Unauthenticated, like /healthz: a client or a monitoring probe can
+        call it before it has any credentials to learn what it is talking
+        to. api_version is docs/openapi.yaml's own info.version (the stable
+        API's version, per the compatibility promise); version is the styr
+        binary's own release version, which may move independently.
+      operationId: getVersion
+      security: []
+      tags: [status]
+      responses:
+        "200":
+          description: Version info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    description: The styr binary's own release version, e.g. "0.5.0" ("dev" outside a release build).
+                  api_version:
+                    type: string
+                    description: The stable API's version, e.g. "1.0.0".
+                  commit:
+                    type: string
+                    description: The short git revision the running binary was built from ("unknown" if unavailable).
+                required: [version, api_version, commit]
 
   /api/v1/auth/providers:
     get:
@@ -255,7 +299,7 @@ paths:
     get:
       summary: List users
       operationId: listUsers
-      tags: [admin]
+      tags: [users]
       responses:
         "200":
           description: Every user
@@ -272,7 +316,7 @@ paths:
     patch:
       summary: Change a user's role
       operationId: patchUser
-      tags: [admin]
+      tags: [users]
       parameters:
         - name: id
           in: path
@@ -302,7 +346,7 @@ paths:
     get:
       summary: Get server-wide settings
       operationId: getSettings
-      tags: [admin]
+      tags: [settings]
       responses:
         "200":
           description: Server-wide settings
@@ -327,7 +371,7 @@ paths:
       summary: Set the service-wide Claude token
       description: Same verify-then-store rule as PUT /me/claude-token.
       operationId: putServiceToken
-      tags: [admin]
+      tags: [settings]
       requestBody:
         required: true
         content:
@@ -1832,7 +1876,7 @@ paths:
     get:
       summary: List a trigger's deliveries
       operationId: listTriggerDeliveries
-      tags: [triggers]
+      tags: [triggers, deliveries]
       parameters:
         - name: id
           in: path
@@ -1899,7 +1943,7 @@ paths:
       summary: Replay a delivery
       description: Re-renders the delivery's stored payload and starts a new run, bypassing dedupe.
       operationId: replayDelivery
-      tags: [triggers]
+      tags: [deliveries]
       parameters:
         - name: id
           in: path

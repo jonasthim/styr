@@ -1,9 +1,10 @@
-VERSION := $(shell cat VERSION)
-COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+VERSION  := $(shell cat VERSION)
+COMMIT   := $(shell git rev-parse --short HEAD 2>/dev/null || echo none)
+LDFLAGS  := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
+LAST_TAG := $(shell git describe --tags --abbrev=0 --match 'v*' 2>/dev/null)
 
 .PHONY: build build-go web test check lint fmt vet dev-backend dev-web e2e clean \
-	deploy-sync deploy-sync-check docker
+	deploy-sync deploy-sync-check docker api-compat
 
 build: web build-go
 
@@ -45,6 +46,23 @@ deploy-sync:
 # deploy/install.sh.in or one of the files it embeds.
 deploy-sync-check: deploy-sync
 	git diff --exit-code -- deploy/install.sh || (echo "deploy/install.sh is out of date; run 'make deploy-sync' and commit it" && exit 1)
+
+# CI check: fails when docs/openapi.yaml changed in a non-additive way
+# since the last v* release tag reachable from HEAD (see
+# hack/openapi-compat and docs/API.md's compatibility promise). Skips
+# with a notice, rather than failing, when no such tag exists yet (e.g. a
+# fresh checkout before Styr's first release).
+api-compat:
+	@if [ -z "$(LAST_TAG)" ]; then \
+		echo "api-compat: no v* tag reachable from HEAD; skipping"; \
+	else \
+		echo "api-compat: comparing docs/openapi.yaml against $(LAST_TAG)"; \
+		tmp=$$(mktemp); \
+		git show "$(LAST_TAG):docs/openapi.yaml" > "$$tmp" 2>/dev/null || { echo "api-compat: $(LAST_TAG) has no docs/openapi.yaml; skipping"; rm -f "$$tmp"; exit 0; }; \
+		go run ./hack/openapi-compat "$$tmp" docs/openapi.yaml; status=$$?; \
+		rm -f "$$tmp"; \
+		exit $$status; \
+	fi
 
 docker:
 	docker build -f deploy/Dockerfile \

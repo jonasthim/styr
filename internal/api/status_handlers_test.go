@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"encoding/json"
 	"net/http"
 	"testing"
 )
@@ -20,6 +21,35 @@ func TestStatus_ReturnsDepsStatus(t *testing.T) {
 	}
 	if out.Slots != 4 {
 		t.Errorf("slots = %d, want 4", out.Slots)
+	}
+}
+
+func TestVersion_Unauthenticated(t *testing.T) {
+	e := newEnv(t)
+	var out struct {
+		Version    string `json:"version"`
+		APIVersion string `json:"api_version"`
+		Commit     string `json:"commit"`
+	}
+	resp, err := http.Get(e.ts.URL + "/api/v1/version")
+	if err != nil {
+		t.Fatalf("GET /api/v1/version: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/v1/version = %d, want 200", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Version != "test" {
+		t.Errorf("version = %q, want test", out.Version)
+	}
+	if out.APIVersion != "1.0.0" {
+		t.Errorf("api_version = %q, want 1.0.0", out.APIVersion)
+	}
+	if out.Commit == "" {
+		t.Error("commit = \"\", want a non-empty placeholder or hash")
 	}
 }
 

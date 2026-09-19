@@ -43,6 +43,22 @@ no external database, cache or queue.
 6. A REST write (e.g. approving a prompt) goes the other way: handler → `sessions.Service` →
    harness `Process`, which encodes a reply and writes it to the child's stdin.
 
+## API versioning
+
+`docs/openapi.yaml` is the source of truth for `/api/v1`, not a description generated from it:
+every handler in `internal/api` is written by hand against the document, not the other way
+round. Its `info.version` (`1.0.0` as of card T62's API freeze) is the API's own version,
+independent of `VERSION` (the styr binary's release number) — the two move at different rates,
+which `GET /api/v1/version` reports separately as `api_version` and `version`. Within the `1.x`
+line the API only changes additively (new operations, new optional fields, new enum values; see
+docs/API.md's compatibility promise for the full rule and how deprecations are announced), so a
+client generated against `1.0.0` keeps working, unmodified, against every later `1.x` release —
+the `/api/v1` path prefix itself only bumps at a genuine major version. `hack/openapi-compat`
+(wired into CI as `make api-compat`) enforces this mechanically: it diffs the working tree's
+`docs/openapi.yaml` against the previous release tag's copy and fails the build on a removed
+path, a removed or retyped schema property, or a newly required request-body field — the
+categories of change a hand-written client would actually break on.
+
 ## The permission round trip
 
 Claude Code is started with `--permission-prompt-tool stdio`, which is the same mechanism the

@@ -38,6 +38,15 @@ func NewRouter(d *Deps, spa http.Handler) http.Handler {
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(d.Auth.Authenticate)
 
+		// GET /api/v1/version is unauthenticated, like /healthz: no
+		// RequireUser and no CSRF guard (it's a GET, and csrfGuard is a
+		// no-op for GET anyway), just the request timeout every other
+		// /api/v1 route gets.
+		api.Group(func(g chi.Router) {
+			g.Use(middleware.Timeout(requestTimeout))
+			registerVersionRoutes(g, d)
+		})
+
 		// Auth routes are outside RequireUser (you are not logged in yet
 		// when hitting them) but still get the CSRF guard and the request
 		// timeout, matching every other /api/v1 route.
