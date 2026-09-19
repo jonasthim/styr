@@ -59,6 +59,7 @@ var slugInvalid = regexp.MustCompile(`[^a-z0-9-]+`)
 type Service struct {
 	repo         *db.Workspaces
 	sessionsRepo *db.Sessions
+	access       *db.WorkspaceAccess
 	bus          *events.Bus
 	usersDir     string
 	logger       *slog.Logger
@@ -67,12 +68,16 @@ type Service struct {
 	runGit func(ctx context.Context, dir, home string, args ...string) (string, error)
 }
 
-// New constructs a Service.
-func New(repo *db.Workspaces, sessionsRepo *db.Sessions, bus *events.Bus, usersDir string, logger *slog.Logger) *Service {
+// New constructs a Service. access backs SetAccess/GetAccess and the
+// per-workspace visibility check a "listed" shared workspace adds on top of
+// the plain owner/admin rule (visible, accessAllowed below); it may be nil
+// in tests that never exercise that path — accessAllowed then fails open to
+// "everyone", the pre-T64 behaviour.
+func New(repo *db.Workspaces, sessionsRepo *db.Sessions, access *db.WorkspaceAccess, bus *events.Bus, usersDir string, logger *slog.Logger) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	s := &Service{repo: repo, sessionsRepo: sessionsRepo, bus: bus, usersDir: usersDir, logger: logger}
+	s := &Service{repo: repo, sessionsRepo: sessionsRepo, access: access, bus: bus, usersDir: usersDir, logger: logger}
 	s.runGit = s.execGit
 	return s
 }
@@ -124,8 +129,26 @@ func ownsOrAdmin(actor sessions.Actor, ws domain.Workspace) bool {
 	return actor.IsAdmin || (ws.OwnerID != nil && *ws.OwnerID == actor.UserID)
 }
 
-// getVisible loads a workspace and enforces visibility, returning
-// domain.ErrNotFound for a workspace actor cannot see.
+// accessAllowed reports whether actor may see/use a shared workspace whose
+// access mode is "listed": an admin always may, everyone else needs an
+// entry in workspace_access. It assumes visible(actor, ws) already returned
+// true — access lists only ever narrow a *shared* workspace's visibility
+// further, they never widen an owned workspace's.
+func (s *Service) accessAllowed(ctx context.Context, actor sessions.Actor, ws domain.Workspace) (bool, error) {
+	if ws.OwnerID != nil || ws.Access != domain.WorkspaceAccessListed || actor.IsAdmin {
+		return true, nil
+	}
+	if s.access == nil {
+		return true, nil // access repo not wired: fail open to "everyone"
+	}
+	return s.access.HasAccess(ctx, ws.ID, actor.UserID)
+}
+
+// getVisible loads a workspace and enforces visibility (ownership, then a
+// shared "listed" workspace's own access list), returning
+// domain.ErrNotFound for a workspace actor cannot see — the same status a
+// nonexistent id gets, so a "listed" workspace's existence is not leaked to
+// a user left off its allowlist.
 func (s *Service) getVisible(ctx context.Context, actor sessions.Actor, id string) (domain.Workspace, error) {
 	ws, err := s.repo.Get(ctx, id)
 	if err != nil {
@@ -134,17 +157,103 @@ func (s *Service) getVisible(ctx context.Context, actor sessions.Actor, id strin
 	if !visible(actor, *ws) {
 		return domain.Workspace{}, fmt.Errorf("workspace %s: %w", id, domain.ErrNotFound)
 	}
+	ok, err := s.accessAllowed(ctx, actor, *ws)
+	if err != nil {
+		return domain.Workspace{}, err
+	}
+	if !ok {
+		return domain.Workspace{}, fmt.Errorf("workspace %s: %w", id, domain.ErrNotFound)
+	}
 	return *ws, nil
 }
 
-// List returns every workspace visible to actor, ordered by name.
+// List returns every workspace visible to actor, ordered by name: an admin
+// sees every workspace; anyone else sees their own, every "everyone" shared
+// workspace, and only the "listed" shared workspaces they are named on.
 func (s *Service) List(ctx context.Context, actor sessions.Actor) ([]domain.Workspace, error) {
-	return s.repo.ListVisible(ctx, actor.UserID, actor.IsAdmin)
+	all, err := s.repo.ListVisible(ctx, actor.UserID, actor.IsAdmin)
+	if err != nil {
+		return nil, err
+	}
+	if actor.IsAdmin {
+		return all, nil
+	}
+	out := make([]domain.Workspace, 0, len(all))
+	for _, ws := range all {
+		ok, err := s.accessAllowed(ctx, actor, ws)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			out = append(out, ws)
+		}
+	}
+	return out, nil
 }
 
 // Get returns a workspace, or domain.ErrNotFound when actor cannot see it.
 func (s *Service) Get(ctx context.Context, actor sessions.Actor, id string) (domain.Workspace, error) {
 	return s.getVisible(ctx, actor, id)
+}
+
+// SetAccess replaces a shared workspace's access mode and, for "listed",
+// its explicit user allowlist. Only an admin may call this; the router
+// already gates PUT /workspaces/{id}/access behind auth.RequireAdmin, but
+// it is checked again here since actor is available and a nil actor
+// mistake should not silently write.
+func (s *Service) SetAccess(ctx context.Context, actor sessions.Actor, id string, mode domain.WorkspaceAccessMode, userIDs []string) error {
+	if !actor.IsAdmin {
+		return fmt.Errorf("%w: only an admin may change workspace access", domain.ErrForbidden)
+	}
+	if mode != domain.WorkspaceAccessEveryone && mode != domain.WorkspaceAccessListed {
+		return fmt.Errorf("%w: access must be one of everyone, listed", domain.ErrInvalid)
+	}
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ws.OwnerID != nil {
+		return fmt.Errorf("%w: access lists only apply to shared workspaces", domain.ErrInvalid)
+	}
+	ws.Access = mode
+	ws.UpdatedAt = time.Now()
+	if err := s.repo.Update(ctx, *ws); err != nil {
+		return err
+	}
+	if s.access == nil {
+		return nil
+	}
+	if mode == domain.WorkspaceAccessListed {
+		return s.access.Set(ctx, id, userIDs)
+	}
+	// Switching back to "everyone" clears any stale allowlist, so a later
+	// switch back to "listed" starts from an explicit, intentional list
+	// rather than silently reviving an old one.
+	return s.access.Set(ctx, id, nil)
+}
+
+// GetAccess returns a shared workspace's access mode and, for "listed", the
+// user ids on its allowlist (empty for "everyone"). Only an admin may call
+// this — same reasoning as SetAccess.
+func (s *Service) GetAccess(ctx context.Context, actor sessions.Actor, id string) (domain.WorkspaceAccessMode, []string, error) {
+	if !actor.IsAdmin {
+		return "", nil, fmt.Errorf("%w: only an admin may view workspace access", domain.ErrForbidden)
+	}
+	ws, err := s.repo.Get(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	if ws.OwnerID != nil {
+		return "", nil, fmt.Errorf("%w: access lists only apply to shared workspaces", domain.ErrInvalid)
+	}
+	if s.access == nil {
+		return ws.Access, nil, nil
+	}
+	userIDs, err := s.access.List(ctx, id)
+	if err != nil {
+		return "", nil, err
+	}
+	return ws.Access, userIDs, nil
 }
 
 // Create validates in and creates a workspace: "path" and "empty" are
@@ -194,6 +303,7 @@ func (s *Service) createPath(ctx context.Context, actor sessions.Actor, in Creat
 		Worktrees:        in.Worktrees,
 		BaseBranch:       in.BaseBranch,
 		AutoCheckpoint:   in.autoCheckpoint(),
+		Access:           domain.WorkspaceAccessEveryone,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -227,6 +337,7 @@ func (s *Service) createEmpty(ctx context.Context, actor sessions.Actor, in Crea
 		Worktrees:        in.Worktrees,
 		BaseBranch:       in.BaseBranch,
 		AutoCheckpoint:   in.autoCheckpoint(),
+		Access:           domain.WorkspaceAccessEveryone,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
@@ -294,6 +405,7 @@ func (s *Service) createGit(ctx context.Context, actor sessions.Actor, in Create
 		Worktrees:        in.Worktrees,
 		BaseBranch:       in.BaseBranch,
 		AutoCheckpoint:   in.autoCheckpoint(),
+		Access:           domain.WorkspaceAccessEveryone,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}

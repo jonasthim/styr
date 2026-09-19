@@ -183,3 +183,48 @@ func TestWorkspaces_ListVisible(t *testing.T) {
 		t.Fatalf("ListVisible admin len = %d, want 3", len(adminList))
 	}
 }
+
+// TestWorkspaces_AccessDefaultsToEveryone confirms a workspace created
+// without setting Access (every pre-T64 caller, and most tests) round-trips
+// as "everyone" rather than an empty string the access CHECK would reject.
+func TestWorkspaces_AccessDefaultsToEveryone(t *testing.T) {
+	ctx := context.Background()
+	workspaces := NewWorkspaces(testOpenDB(t))
+
+	w := newTestWorkspace("access-default")
+	if err := workspaces.Create(ctx, w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	got, err := workspaces.Get(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Access != domain.WorkspaceAccessEveryone {
+		t.Fatalf("Access = %q, want %q", got.Access, domain.WorkspaceAccessEveryone)
+	}
+}
+
+// TestWorkspaces_AccessRoundTripsThroughUpdate confirms Update persists a
+// changed Access value (e.g. workspaces.Service.SetAccess switching a
+// shared workspace to "listed").
+func TestWorkspaces_AccessRoundTripsThroughUpdate(t *testing.T) {
+	ctx := context.Background()
+	workspaces := NewWorkspaces(testOpenDB(t))
+
+	w := newTestWorkspace("access-update")
+	if err := workspaces.Create(ctx, w); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	w.Access = domain.WorkspaceAccessListed
+	w.UpdatedAt = time.Now()
+	if err := workspaces.Update(ctx, w); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err := workspaces.Get(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("Get after update: %v", err)
+	}
+	if got.Access != domain.WorkspaceAccessListed {
+		t.Fatalf("Access after update = %q, want %q", got.Access, domain.WorkspaceAccessListed)
+	}
+}

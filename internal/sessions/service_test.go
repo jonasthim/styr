@@ -43,16 +43,17 @@ func newService(t *testing.T, steps ...fake.Step) (*Service, Repos, *fake.Harnes
 
 	users := db.NewUsers(database)
 	repos := Repos{
-		Sessions:       db.NewSessions(database),
-		Events:         db.NewEvents(database),
-		Approvals:      db.NewApprovals(database),
-		Workspaces:     db.NewWorkspaces(database),
-		Profiles:       db.NewProfiles(database),
-		Tokens:         db.NewTokens(database),
-		Audit:          db.NewAudit(database),
-		ReviewComments: db.NewReviewComments(database),
-		Checkpoints:    db.NewCheckpoints(database),
-		Users:          users,
+		Sessions:        db.NewSessions(database),
+		Events:          db.NewEvents(database),
+		Approvals:       db.NewApprovals(database),
+		Workspaces:      db.NewWorkspaces(database),
+		WorkspaceAccess: db.NewWorkspaceAccess(database),
+		Profiles:        db.NewProfiles(database),
+		Tokens:          db.NewTokens(database),
+		Audit:           db.NewAudit(database),
+		ReviewComments:  db.NewReviewComments(database),
+		Checkpoints:     db.NewCheckpoints(database),
+		Users:           users,
 	}
 
 	box, err := crypto.NewBox(testSecret)
@@ -192,6 +193,129 @@ func TestCreate_WorkspaceNotVisible_NotFound(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Create against invisible workspace: err = %v, want ErrNotFound", err)
+	}
+}
+
+// --- workspace access (T64) -------------------------------------------------
+
+// TestCreate_ListedWorkspace_RefusesNonListedMember confirms Create's
+// workspaceAccessAllowed check: a shared workspace whose access mode is
+// "listed" refuses a by-hand (origin ui) Create from a member not on its
+// allowlist, as domain.ErrNotFound — same as a workspace that does not
+// exist or one the actor cannot otherwise see.
+func TestCreate_ListedWorkspace_RefusesNonListedMember(t *testing.T) {
+	svc, repos, h := newService(t)
+	ctx := context.Background()
+
+	listedWS := domain.Workspace{
+		ID: "ws-listed", Name: "listed-ws", Path: t.TempDir(), DefaultProfileID: "interactive",
+		Source: domain.WorkspaceSourcePath, State: domain.WorkspaceReady, Access: domain.WorkspaceAccessListed,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repos.Workspaces.Create(ctx, listedWS); err != nil {
+		t.Fatalf("create listed workspace: %v", err)
+	}
+	// testMemberID is deliberately left off the allowlist.
+	if err := repos.WorkspaceAccess.Set(ctx, listedWS.ID, []string{testAdminID}); err != nil {
+		t.Fatalf("seed access: %v", err)
+	}
+
+	owner := testMemberID
+	_, err := svc.Create(ctx, Actor{UserID: testMemberID}, CreateInput{
+		WorkspaceID: listedWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &owner,
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Create against a listed workspace (not on the list): err = %v, want ErrNotFound", err)
+	}
+	if len(h.Procs) != 0 {
+		t.Fatalf("expected no process started, got %d", len(h.Procs))
+	}
+}
+
+// TestCreate_ListedWorkspace_AllowsListedMemberAndAdmin confirms the
+// opposite side: a user on the allowlist, and an admin regardless of the
+// list, may Create against a "listed" shared workspace.
+func TestCreate_ListedWorkspace_AllowsListedMemberAndAdmin(t *testing.T) {
+	svc, repos, _ := newService(t, createResult(1), createResult(1))
+	ctx := context.Background()
+
+	listedWS := domain.Workspace{
+		ID: "ws-listed-ok", Name: "listed-ws-ok", Path: t.TempDir(), DefaultProfileID: "interactive",
+		Source: domain.WorkspaceSourcePath, State: domain.WorkspaceReady, Access: domain.WorkspaceAccessListed,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repos.Workspaces.Create(ctx, listedWS); err != nil {
+		t.Fatalf("create listed workspace: %v", err)
+	}
+	if err := repos.WorkspaceAccess.Set(ctx, listedWS.ID, []string{testMemberID}); err != nil {
+		t.Fatalf("seed access: %v", err)
+	}
+	box, err := crypto.NewBox(testSecret)
+	if err != nil {
+		t.Fatalf("new box: %v", err)
+	}
+	ciphertext, nonce, err := box.Seal([]byte("sk-ant-member-test"))
+	if err != nil {
+		t.Fatalf("seal member token: %v", err)
+	}
+	if err := repos.Tokens.Set(ctx, testMemberID, ciphertext, nonce, "test"); err != nil {
+		t.Fatalf("set member token: %v", err)
+	}
+
+	memberOwner := testMemberID
+	if _, err := svc.Create(ctx, Actor{UserID: testMemberID}, CreateInput{
+		WorkspaceID: listedWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &memberOwner,
+	}); err != nil {
+		t.Fatalf("Create as listed member: %v", err)
+	}
+
+	adminOwner := testAdminID
+	if _, err := svc.Create(ctx, Actor{UserID: testAdminID, IsAdmin: true}, CreateInput{
+		WorkspaceID: listedWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginUI, Owner: &adminOwner,
+	}); err != nil {
+		t.Fatalf("Create as admin (not on the list): %v", err)
+	}
+}
+
+// TestCreate_UnattendedBypassesListedWorkspaceAccess confirms the product
+// rule that an unattended start (origin webhook/schedule/pipeline) runs as
+// the service and is unaffected by a workspace's access list — every
+// unattended caller uses an IsAdmin actor (internal/runs.serviceActor and
+// friends), which workspaceAccessAllowed already exempts.
+func TestCreate_UnattendedBypassesListedWorkspaceAccess(t *testing.T) {
+	svc, repos, _ := newService(t, createResult(1))
+	ctx := context.Background()
+
+	listedWS := domain.Workspace{
+		ID: "ws-listed-unattended", Name: "listed-ws-unattended", Path: t.TempDir(), DefaultProfileID: "interactive",
+		Source: domain.WorkspaceSourcePath, State: domain.WorkspaceReady, Access: domain.WorkspaceAccessListed,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	if err := repos.Workspaces.Create(ctx, listedWS); err != nil {
+		t.Fatalf("create listed workspace: %v", err)
+	}
+	box, err := crypto.NewBox(testSecret)
+	if err != nil {
+		t.Fatalf("new box: %v", err)
+	}
+	ciphertext, nonce, err := box.Seal([]byte("sk-ant-service"))
+	if err != nil {
+		t.Fatalf("seal service token: %v", err)
+	}
+	if err := repos.Tokens.SetService(ctx, ciphertext, nonce, "svc"); err != nil {
+		t.Fatalf("set service token: %v", err)
+	}
+
+	// Nobody is on the allowlist; the service actor still gets through.
+	serviceActor := Actor{UserID: "", IsAdmin: true}
+	if _, err := svc.Create(ctx, serviceActor, CreateInput{
+		WorkspaceID: listedWS.ID, ProfileID: "interactive", Title: "t", Prompt: "hi",
+		Origin: domain.OriginWebhook, RunID: "run-1",
+	}); err != nil {
+		t.Fatalf("Create as the service actor: %v", err)
 	}
 }
 

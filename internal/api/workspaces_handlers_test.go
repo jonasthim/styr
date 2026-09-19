@@ -429,3 +429,149 @@ func TestSessionsCreate_RefusesCloningWorkspace(t *testing.T) {
 	// goroutine racing the test's temp-dir cleanup).
 	pollWorkspaceState(t, e, owner, ws.ID, "failed")
 }
+
+// --- workspace access (T64) -------------------------------------------------
+
+type workspaceAccessOut struct {
+	Access string `json:"access"`
+	Users  []struct {
+		ID          string `json:"id"`
+		DisplayName string `json:"display_name"`
+	} `json:"users"`
+}
+
+func TestWorkspaceAccess_RequiresAdmin(t *testing.T) {
+	e := newEnv(t)
+	_, member := e.memberClient("access-member@example.com")
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	var shared workspaceOut
+	if status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/workspaces",
+		map[string]any{"name": "access-admin-only-shared", "source": "path", "path": dir}, &shared); status != http.StatusCreated {
+		t.Fatalf("create shared: %d", status)
+	}
+
+	if status := e.doJSON(member, http.MethodGet, "/api/v1/workspaces/"+shared.ID+"/access", nil, nil); status != http.StatusForbidden {
+		t.Fatalf("GET access as member = %d, want 403", status)
+	}
+	if status := e.doJSON(member, http.MethodPut, "/api/v1/workspaces/"+shared.ID+"/access",
+		map[string]any{"access": "listed", "user_ids": []string{}}, nil); status != http.StatusForbidden {
+		t.Fatalf("PUT access as member = %d, want 403", status)
+	}
+}
+
+func TestWorkspaceAccess_RejectsOwnedWorkspace(t *testing.T) {
+	e := newEnv(t)
+	_, owner := e.memberClient("access-owner@example.com")
+
+	var out workspaceOut
+	if status := e.doJSON(owner, http.MethodPost, "/api/v1/workspaces",
+		map[string]any{"name": "owned-access", "source": "empty"}, &out); status != http.StatusCreated {
+		t.Fatalf("create: %d", status)
+	}
+
+	status := e.doJSON(e.adminClient, http.MethodPut, "/api/v1/workspaces/"+out.ID+"/access",
+		map[string]any{"access": "listed", "user_ids": []string{}}, nil)
+	if status != http.StatusUnprocessableEntity {
+		t.Fatalf("PUT access on an owned workspace = %d, want 422", status)
+	}
+}
+
+func TestWorkspaceAccess_ListedRestrictsVisibilityAndSessionCreate(t *testing.T) {
+	e := newEnv(t)
+	allowed, allowedClient := e.memberClient("allowed@example.com")
+	_, excludedClient := e.memberClient("excluded@example.com")
+
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	var ws workspaceOut
+	if status := e.doJSON(e.adminClient, http.MethodPost, "/api/v1/workspaces",
+		map[string]any{"name": "listed-ws", "source": "path", "path": dir}, &ws); status != http.StatusCreated {
+		t.Fatalf("create shared: %d", status)
+	}
+
+	// Defaults to "everyone": both members see it.
+	var everyone []workspaceOut
+	e.doJSON(excludedClient, http.MethodGet, "/api/v1/workspaces", nil, &everyone)
+	found := false
+	for _, w := range everyone {
+		if w.ID == ws.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("workspace not visible before switching to listed access")
+	}
+
+	status := e.doJSON(e.adminClient, http.MethodPut, "/api/v1/workspaces/"+ws.ID+"/access",
+		map[string]any{"access": "listed", "user_ids": []string{allowed.ID}}, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("PUT access = %d, want 204", status)
+	}
+
+	var got workspaceAccessOut
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/workspaces/"+ws.ID+"/access", nil, &got); status != http.StatusOK {
+		t.Fatalf("GET access = %d, want 200", status)
+	}
+	if got.Access != "listed" || len(got.Users) != 1 || got.Users[0].ID != allowed.ID {
+		t.Fatalf("GET access = %+v, want listed with just %s", got, allowed.ID)
+	}
+
+	// The listed user still sees and can use it.
+	var listedView []workspaceOut
+	if status := e.doJSON(allowedClient, http.MethodGet, "/api/v1/workspaces", nil, &listedView); status != http.StatusOK {
+		t.Fatalf("GET /workspaces (allowed) = %d", status)
+	}
+	found = false
+	for _, w := range listedView {
+		if w.ID == ws.ID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("listed user cannot see the workspace they were named on")
+	}
+
+	// The excluded member no longer sees it, in either the list or a direct
+	// Get, and cannot start a session on it by hand.
+	var excludedView []workspaceOut
+	if status := e.doJSON(excludedClient, http.MethodGet, "/api/v1/workspaces", nil, &excludedView); status != http.StatusOK {
+		t.Fatalf("GET /workspaces (excluded) = %d", status)
+	}
+	for _, w := range excludedView {
+		if w.ID == ws.ID {
+			t.Fatalf("excluded member still sees the listed workspace")
+		}
+	}
+	if status := e.doJSON(excludedClient, http.MethodGet, "/api/v1/workspaces/"+ws.ID, nil, nil); status != http.StatusNotFound {
+		t.Fatalf("GET workspace directly (excluded) = %d, want 404", status)
+	}
+
+	var sessBody errorOut
+	status = e.doJSON(excludedClient, http.MethodPost, "/api/v1/sessions",
+		map[string]any{"workspace_id": ws.ID, "profile_id": "interactive", "prompt": "hi"}, &sessBody)
+	if status != http.StatusNotFound {
+		t.Fatalf("POST /sessions against a listed workspace (excluded member) = %d, want 404", status)
+	}
+
+	// An admin can always see and use it regardless of the list.
+	if status := e.doJSON(e.adminClient, http.MethodGet, "/api/v1/workspaces/"+ws.ID, nil, nil); status != http.StatusOK {
+		t.Fatalf("GET workspace directly (admin) = %d, want 200", status)
+	}
+
+	// Switching back to "everyone" restores visibility for the excluded
+	// member.
+	status = e.doJSON(e.adminClient, http.MethodPut, "/api/v1/workspaces/"+ws.ID+"/access",
+		map[string]any{"access": "everyone", "user_ids": []string{}}, nil)
+	if status != http.StatusNoContent {
+		t.Fatalf("PUT access back to everyone = %d, want 204", status)
+	}
+	if status := e.doJSON(excludedClient, http.MethodGet, "/api/v1/workspaces/"+ws.ID, nil, nil); status != http.StatusOK {
+		t.Fatalf("GET workspace directly after reverting to everyone = %d, want 200", status)
+	}
+}

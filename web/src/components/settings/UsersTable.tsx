@@ -7,6 +7,7 @@ import type { Role, User } from '../../api/types'
 import { Select, TableFrame, Td, Th, Tr } from '../ui'
 
 const ROLE_OPTIONS = [
+  { value: 'viewer', label: 'Viewer' },
   { value: 'member', label: 'Member' },
   { value: 'admin', label: 'Admin' },
 ]

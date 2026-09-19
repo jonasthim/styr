@@ -8,6 +8,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Play } from 'lucide-react'
 import { api, ApiError } from '../../api/client'
 import type { Schedule, ScheduleInput, ScheduleRunResult } from '../../api/types'
+import { useCanWrite } from '../../hooks/useCanWrite'
 import { useToast } from '../../hooks/useToast'
 import { relativeTime } from '../inbox/format'
 import { OutcomeGlyph } from '../runs/OutcomeGlyph'
@@ -32,6 +33,7 @@ export function ScheduleRow({
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const { toast } = useToast()
+  const canWrite = useCanWrite()
   const [pending, setPending] = useState(false)
   const [running, setRunning] = useState(false)
   const lastOutcome = lastOutcomeGlyph(schedule.last_outcome)
@@ -133,7 +135,7 @@ export function ScheduleRow({
       <Td>
         <Switch
           checked={schedule.enabled}
-          disabled={pending}
+          disabled={pending || !canWrite}
           onCheckedChange={(checked) => void handleToggle(checked)}
           aria-label={`Enabled for ${schedule.name}`}
         />
@@ -145,6 +147,7 @@ export function ScheduleRow({
             variant="ghost"
             icon={<Play size={12} aria-hidden />}
             loading={running}
+            disabled={!canWrite}
             onClick={() => void handleRunNow()}
           >
             Run now

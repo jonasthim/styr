@@ -8,15 +8,17 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { FolderKanban, Plus, Trash2 } from 'lucide-react'
 import { api } from '../api/client'
 import { q } from '../api/queries'
+import { useCanWrite } from '../hooks/useCanWrite'
 import { useMe } from '../hooks/useMe'
 import type { Profile, Workspace } from '../api/types'
 import { AddWorkspaceForm } from '../components/workspaces/AddWorkspaceForm'
 import { DeleteWorkspaceDialog } from '../components/workspaces/DeleteWorkspaceDialog'
+import { WorkspaceAccessDialog } from '../components/workspaces/WorkspaceAccessDialog'
 import { WorkspaceSourceChip, WorkspaceStateBadge } from '../components/workspaces/workspaceDisplay'
 import { Button, Dialog, DialogContent, EmptyState, PageHeader, Select, Switch, TableFrame, Td, Th, Tr } from '../components/ui'
 import { useCloningPoll } from '../hooks/useCloningPoll'
 
-function WorktreesSwitch({ workspace }: { workspace: Workspace }) {
+function WorktreesSwitch({ workspace, canWrite }: { workspace: Workspace; canWrite: boolean }) {
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
 
@@ -35,14 +37,14 @@ function WorktreesSwitch({ workspace }: { workspace: Workspace }) {
   return (
     <Switch
       checked={workspace.worktrees}
-      disabled={pending}
+      disabled={pending || !canWrite}
       onCheckedChange={(checked) => void handleChange(checked)}
       aria-label={`Worktrees for ${workspace.name}`}
     />
   )
 }
 
-function DefaultProfileSelect({ workspace, profiles }: { workspace: Workspace; profiles: Profile[] }) {
+function DefaultProfileSelect({ workspace, profiles, canWrite }: { workspace: Workspace; profiles: Profile[]; canWrite: boolean }) {
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
 
@@ -62,7 +64,7 @@ function DefaultProfileSelect({ workspace, profiles }: { workspace: Workspace; p
     <Select
       aria-label={`Default profile for ${workspace.name}`}
       value={workspace.default_profile_id}
-      disabled={pending}
+      disabled={pending || !canWrite}
       onValueChange={(value) => void handleChange(value)}
       options={profiles.map((p) => ({ value: p.id, label: p.name }))}
       className="max-w-[170px]"
@@ -70,7 +72,7 @@ function DefaultProfileSelect({ workspace, profiles }: { workspace: Workspace; p
   )
 }
 
-function RetryButton({ workspaceId }: { workspaceId: string }) {
+function RetryButton({ workspaceId, canWrite }: { workspaceId: string; canWrite: boolean }) {
   const queryClient = useQueryClient()
   const [pending, setPending] = useState(false)
 
@@ -87,14 +89,32 @@ function RetryButton({ workspaceId }: { workspaceId: string }) {
   }
 
   return (
-    <Button variant="secondary" size="sm" onClick={() => void handleRetry()} loading={pending}>
+    <Button variant="secondary" size="sm" onClick={() => void handleRetry()} loading={pending} disabled={!canWrite}>
       Retry
     </Button>
   )
 }
 
+// AccessControl is the admin-only "Access" cell: a button showing the
+// current mode that opens WorkspaceAccessDialog. Only meaningful for a
+// shared workspace (owner_id null) - an owned one shows a plain dash.
+function AccessControl({ workspace, isAdmin }: { workspace: Workspace; isAdmin: boolean }) {
+  const [open, setOpen] = useState(false)
+  if (workspace.owner_id !== null) return <span className="text-fg-muted">—</span>
+  if (!isAdmin) return <span className="text-fg-secondary">{workspace.access === 'listed' ? 'Listed' : 'Everyone'}</span>
+  return (
+    <>
+      <Button variant="secondary" size="sm" onClick={() => setOpen(true)} data-testid={`workspace-access-${workspace.id}`}>
+        {workspace.access === 'listed' ? 'Listed' : 'Everyone'}
+      </Button>
+      <WorkspaceAccessDialog workspace={workspace} open={open} onOpenChange={setOpen} />
+    </>
+  )
+}
+
 export function Workspaces() {
   const { data: me } = useMe()
+  const canWrite = useCanWrite()
   const workspaces = useQuery(q.workspaces())
   useCloningPoll(workspaces.data)
   const profiles = useQuery(q.profiles())
@@ -103,11 +123,11 @@ export function Workspaces() {
   const isAdmin = me?.role === 'admin'
   const isEmpty = workspaces.isSuccess && workspaces.data.length === 0
 
-  const addButton = (
+  const addButton = canWrite ? (
     <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setAddOpen(true)}>
       Add workspace
     </Button>
-  )
+  ) : undefined
 
   return (
     <div className="mx-auto flex w-full max-w-[960px] flex-1 flex-col px-4 py-6 sm:px-6">
@@ -135,6 +155,7 @@ export function Workspaces() {
               <Th>State</Th>
               <Th>Default profile</Th>
               <Th className="text-right">Worktrees</Th>
+              {isAdmin && <Th>Access</Th>}
               <Th className="w-10">
                 <span className="sr-only">Actions</span>
               </Th>
@@ -150,23 +171,32 @@ export function Workspaces() {
                 <Td>
                   <div className="flex items-center gap-2">
                     <WorkspaceStateBadge workspace={workspace} />
-                    {workspace.state === 'failed' && <RetryButton workspaceId={workspace.id} />}
+                    {workspace.state === 'failed' && <RetryButton workspaceId={workspace.id} canWrite={canWrite} />}
                   </div>
                 </Td>
-                <Td>{profiles.data && <DefaultProfileSelect workspace={workspace} profiles={profiles.data} />}</Td>
+                <Td>
+                  {profiles.data && <DefaultProfileSelect workspace={workspace} profiles={profiles.data} canWrite={canWrite} />}
+                </Td>
                 <Td className="text-right">
                   <div className="flex justify-end">
-                    <WorktreesSwitch workspace={workspace} />
+                    <WorktreesSwitch workspace={workspace} canWrite={canWrite} />
                   </div>
                 </Td>
+                {isAdmin && (
+                  <Td>
+                    <AccessControl workspace={workspace} isAdmin={isAdmin} />
+                  </Td>
+                )}
                 <Td className="text-right">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    aria-label={`Delete ${workspace.name}`}
-                    onClick={() => setDeleteTarget(workspace)}
-                    icon={<Trash2 size={14} aria-hidden />}
-                  />
+                  {canWrite && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={`Delete ${workspace.name}`}
+                      onClick={() => setDeleteTarget(workspace)}
+                      icon={<Trash2 size={14} aria-hidden />}
+                    />
+                  )}
                 </Td>
               </Tr>
             ))}

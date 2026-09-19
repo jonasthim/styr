@@ -17,17 +17,29 @@ type Workspaces struct{ d *DB }
 func NewWorkspaces(d *DB) *Workspaces { return &Workspaces{d: d} }
 
 const workspaceColumns = `id, owner_user_id, name, path, default_profile_id, worktrees, base_branch, auto_checkpoint,
-	source, repo_url, branch, managed, state, error, created_at, updated_at`
+	source, repo_url, branch, managed, state, error, access, created_at, updated_at`
+
+// accessArg defaults an empty (zero-value) access mode to "everyone" — the
+// column's own DEFAULT and CHECK constraint (migration 00012) — so a caller
+// that builds a domain.Workspace without setting Access (every workspace
+// before T64, and most tests) still inserts/updates a legal value rather
+// than an empty string the CHECK rejects.
+func accessArg(access domain.WorkspaceAccessMode) string {
+	if access == "" {
+		return string(domain.WorkspaceAccessEveryone)
+	}
+	return string(access)
+}
 
 // Create inserts a new workspace row. w.ID must already be set.
 func (w *Workspaces) Create(ctx context.Context, ws domain.Workspace) error {
 	_, err := w.d.ExecContext(ctx, `
 		INSERT INTO workspaces (`+workspaceColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		ws.ID, ownerArg(ws.OwnerID), ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees),
 		ws.BaseBranch, boolToInt(ws.AutoCheckpoint),
 		string(ws.Source), ws.RepoURL, ws.Branch, boolToInt(ws.Managed), string(ws.State), ws.Error,
-		nowString(ws.CreatedAt), nowString(ws.UpdatedAt))
+		accessArg(ws.Access), nowString(ws.CreatedAt), nowString(ws.UpdatedAt))
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("create workspace: %w", domain.ErrConflict)
@@ -52,11 +64,12 @@ func scanWorkspace(row interface{ Scan(dest ...any) error }) (*domain.Workspace,
 		worktrees, managed   int
 		autoCheckpoint       int
 		source, state        string
+		access               string
 		createdAt, updatedAt string
 	)
 	if err := row.Scan(
 		&ws.ID, &ownerID, &ws.Name, &ws.Path, &ws.DefaultProfileID, &worktrees, &ws.BaseBranch, &autoCheckpoint,
-		&source, &ws.RepoURL, &ws.Branch, &managed, &state, &ws.Error, &createdAt, &updatedAt,
+		&source, &ws.RepoURL, &ws.Branch, &managed, &state, &ws.Error, &access, &createdAt, &updatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -66,6 +79,7 @@ func scanWorkspace(row interface{ Scan(dest ...any) error }) (*domain.Workspace,
 	ws.Managed = managed != 0
 	ws.Source = domain.WorkspaceSource(source)
 	ws.State = domain.WorkspaceState(state)
+	ws.Access = domain.WorkspaceAccessMode(access)
 	ws.CreatedAt = parseTime(createdAt)
 	ws.UpdatedAt = parseTime(updatedAt)
 	return &ws, nil
@@ -120,12 +134,12 @@ func (w *Workspaces) Update(ctx context.Context, ws domain.Workspace) error {
 	res, err := w.d.ExecContext(ctx, `
 		UPDATE workspaces SET owner_user_id = ?, name = ?, path = ?, default_profile_id = ?, worktrees = ?,
 			base_branch = ?, auto_checkpoint = ?,
-			source = ?, repo_url = ?, branch = ?, managed = ?, state = ?, error = ?, updated_at = ?
+			source = ?, repo_url = ?, branch = ?, managed = ?, state = ?, error = ?, access = ?, updated_at = ?
 		WHERE id = ?`,
 		ownerArg(ws.OwnerID), ws.Name, ws.Path, ws.DefaultProfileID, boolToInt(ws.Worktrees),
 		ws.BaseBranch, boolToInt(ws.AutoCheckpoint),
 		string(ws.Source), ws.RepoURL, ws.Branch, boolToInt(ws.Managed), string(ws.State), ws.Error,
-		nowString(ws.UpdatedAt), ws.ID)
+		accessArg(ws.Access), nowString(ws.UpdatedAt), ws.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
 			return fmt.Errorf("update workspace: %w", domain.ErrConflict)

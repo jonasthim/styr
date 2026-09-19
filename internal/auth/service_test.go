@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -418,6 +419,61 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Errorf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestRequireWriter_RejectsWithoutPrincipal(t *testing.T) {
+	handler := RequireWriter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not run")
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestRequireWriter_RejectsViewerWithReadOnlyCode(t *testing.T) {
+	viewer := domain.User{ID: "u1", Role: domain.RoleViewer}
+	handler := RequireWriter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not run")
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req = req.WithContext(withPrincipal(req.Context(), &Principal{User: viewer}))
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	var body struct {
+		Error struct {
+			Code string `json:"code"`
+		} `json:"error"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body.Error.Code != "read_only" {
+		t.Errorf("error code = %q, want %q", body.Error.Code, "read_only")
+	}
+}
+
+func TestRequireWriter_AllowsMemberAndAdmin(t *testing.T) {
+	for _, role := range []domain.Role{domain.RoleMember, domain.RoleAdmin} {
+		var ran bool
+		handler := RequireWriter(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ran = true
+		}))
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req = req.WithContext(withPrincipal(req.Context(), &Principal{User: domain.User{ID: "u1", Role: role}}))
+		handler.ServeHTTP(rec, req)
+		if !ran {
+			t.Errorf("role %q: expected the next handler to run", role)
+		}
+		if rec.Code != http.StatusOK {
+			t.Errorf("role %q: status = %d, want %d", role, rec.Code, http.StatusOK)
+		}
 	}
 }
 

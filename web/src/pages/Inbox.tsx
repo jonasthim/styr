@@ -13,6 +13,7 @@ import { q } from '../api/queries'
 import { api, ApiError } from '../api/client'
 import type { Approval, Session } from '../api/types'
 import { useUiStore } from '../store/ui'
+import { useCanWrite } from '../hooks/useCanWrite'
 import { useMe } from '../hooks/useMe'
 import { ApprovalCard } from '../components/inbox/ApprovalCard'
 import { EmptyInbox } from '../components/inbox/EmptyInbox'
@@ -59,6 +60,7 @@ export function Inbox() {
   const queryClient = useQueryClient()
   const paletteOpen = useUiStore((s) => s.paletteOpen)
   const { data: me } = useMe()
+  const canWrite = useCanWrite()
 
   // First-run onboarding redirect (Task 22's card, out of this file's own
   // scope, only owns what happens once a browser is already on /welcome —
@@ -199,16 +201,16 @@ export function Inbox() {
           setFocusIndex((i) => Math.max(0, i - 1))
           return
         case 'a':
-          if (current) allow(current)
+          if (current && canWrite) allow(current)
           return
         case 'd':
-          if (current) deny(current)
+          if (current && canWrite) deny(current)
           return
         case 'e':
-          if (current) setEditingId(current.id)
+          if (current && canWrite) setEditingId(current.id)
           return
         case 's':
-          if (current) setSnoozeMenuId(current.id)
+          if (current && canWrite) setSnoozeMenuId(current.id)
           return
         case 'o':
           if (current) openSession(current)
@@ -218,7 +220,7 @@ export function Inbox() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortedApprovals, focusIndex, paletteOpen])
+  }, [sortedApprovals, focusIndex, paletteOpen, canWrite])
 
   useEffect(() => {
     const id = sortedApprovals[focusIndex]?.id

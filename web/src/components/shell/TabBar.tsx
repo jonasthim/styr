@@ -1,10 +1,13 @@
 // Below 900px the rail becomes a bottom tab bar with Inbox, Sessions and
-// Profile (Shell renders exactly one of Rail/TabBar, never both).
+// Profile (Shell renders exactly one of Rail/TabBar, never both). A viewer
+// gets a small dot on the Profile tab (T64), the phone-width equivalent of
+// Rail.tsx's "Read-only" chip - there is no room here for the text label.
 import { Link, useRouterState } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { Activity, Clock, Inbox as InboxIcon, MessagesSquare, User, Workflow, Zap } from 'lucide-react'
 import clsx from 'clsx'
 import { q } from '../../api/queries'
+import { useCanWrite } from '../../hooks/useCanWrite'
 
 const ITEMS = [
   { to: '/inbox', label: 'Inbox', icon: InboxIcon },
@@ -18,6 +21,7 @@ const ITEMS = [
 
 export function TabBar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const canWrite = useCanWrite()
   const approvals = useQuery(q.approvals())
   const pendingCount = approvals.data?.length ?? 0
 
@@ -50,6 +54,13 @@ export function TabBar() {
                 >
                   {pendingCount}
                 </span>
+              )}
+              {to === '/profile' && !canWrite && (
+                <span
+                  data-testid="tabbar-readonly-chip"
+                  aria-label="Read-only account"
+                  className="absolute -right-1 -top-1 h-2 w-2 rounded-full border border-surface-1 bg-fg-muted"
+                />
               )}
             </span>
             <span className="max-w-full truncate">{label}</span>

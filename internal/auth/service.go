@@ -366,6 +366,27 @@ func RequireAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// RequireWriter answers 401 (no principal) or 403 code "read_only" when the
+// principal is a viewer (domain.RoleViewer). It must run after RequireUser
+// on any route it guards. internal/api/middleware.go's writerGuard is what
+// actually decides which routes it applies to — every state-changing
+// request except a caller's own /me routes (PATCH /me, its API tokens, its
+// Claude token), which every signed-in role may write.
+func RequireWriter(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p, ok := PrincipalFrom(r.Context())
+		if !ok {
+			writeAuthError(w, http.StatusUnauthorized, "unauthorized", "authentication required")
+			return
+		}
+		if p.User.Role == domain.RoleViewer {
+			writeAuthError(w, http.StatusForbidden, "read_only", "viewers cannot make changes")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 func writeAuthError(w http.ResponseWriter, status int, code, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)

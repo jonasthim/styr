@@ -8,6 +8,7 @@ import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
 import { MessagesSquare, Plus } from 'lucide-react'
 import { q } from '../api/queries'
+import { useCanWrite } from '../hooks/useCanWrite'
 import type { Session, SessionState } from '../api/types'
 import { SessionRow } from '../components/sessions/SessionRow'
 import { NewSessionDialog } from '../components/sessions/NewSessionDialog'
@@ -72,6 +73,7 @@ function SkeletonRow() {
 
 export function Sessions() {
   const navigate = useNavigate()
+  const canWrite = useCanWrite()
   const search = useSearch({ from: '/_app/sessions' })
   const sessions = useQuery(q.sessions())
   const workspaces = useQuery(q.workspaces())
@@ -83,7 +85,8 @@ export function Sessions() {
   // (api/queries.ts) so the lanes keep up with the fleet.
   const gantt = useQuery({ ...q.gantt(hours), enabled: view === 'gantt' })
 
-  const dialogOpen = search.new === 1
+  // A viewer never gets the dialog, even via a bookmarked ?new=1 link.
+  const dialogOpen = canWrite && search.new === 1
 
   function setView(next: 'list' | 'gantt') {
     void navigate({
@@ -123,9 +126,11 @@ export function Sessions() {
         title="Sessions"
         description={description()}
         actions={
-          <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
-            New session
-          </Button>
+          canWrite ? (
+            <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+              New session
+            </Button>
+          ) : undefined
         }
       />
 
@@ -159,9 +164,11 @@ export function Sessions() {
               title="Nothing ran in this window"
               description="Widen the window, or start a session — the fleet view fills in as sessions work."
               action={
-                <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
-                  New session
-                </Button>
+                canWrite ? (
+                  <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+                    New session
+                  </Button>
+                ) : undefined
               }
             />
           )}
@@ -184,9 +191,11 @@ export function Sessions() {
           title="No sessions yet"
           description="Start one and Styr streams every tool call, cost and permission prompt here as it happens."
           action={
-            <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
-              New session
-            </Button>
+            canWrite ? (
+              <Button variant="primary" icon={<Plus size={14} aria-hidden />} onClick={() => setDialogOpen(true)}>
+                New session
+              </Button>
+            ) : undefined
           }
         />
       )}
